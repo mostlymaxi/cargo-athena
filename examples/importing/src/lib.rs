@@ -44,6 +44,7 @@ pub mod local {
 pub fn importing_pipeline() {
     let n = consumer_step("hello".to_string());
     pipeline(); // cross-CRATE workflow -> workflow (the wormhole)
+    cargo_athena_example_smoke::pipeline();
     local::module_pipeline(); // cross-MODULE workflow -> workflow
     finalize(n); // depends on consumer_step's output
 }

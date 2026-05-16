@@ -143,6 +143,11 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-pipeline
           template: cargo-athena-example-smoke-pipeline
+      - name: pipeline-2
+        arguments: {}
+        templateRef:
+          name: cargo-athena-example-smoke-pipeline
+          template: cargo-athena-example-smoke-pipeline
       - name: module-pipeline
         arguments: {}
         templateRef:
@@ -484,6 +489,11 @@ spec:
     inputs:
       parameters:
       - name: source
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          parameter: '{{tasks.clean.outputs.parameters.return}}'
     dag:
       tasks:
       - name: raw
