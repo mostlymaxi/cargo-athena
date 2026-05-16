@@ -385,6 +385,7 @@ pub fn container_delivery(
          mkdir -p {ATHENA_BIN_DIR}\n\
          tar -xzf {ARTIFACT_PATH} -C {ATHENA_BIN_DIR}\n\
          chmod +x {ATHENA_BIN_DIR}/app-$__t\n\
+         export CARGO_ATHENA_OUTPUT=/athena/result\n\
          exec {ATHENA_BIN_DIR}/app-$__t --cargo-athena-template {argo_name}\n"
     );
 
@@ -718,10 +719,23 @@ pub fn entrypoint<E: Template>() {
             .runners
             .get(&t)
             .unwrap_or_else(|| panic!("no runnable container template named {t:?}"));
-        let input: serde_json::Value = std::env::var("CARGO_ATHENA_INPUT")
+        // Base inputs: `cargo athena run --input` (local), then overlay
+        // Argo-supplied params delivered as `ATHENA_PARAM_<name>` env vars
+        // (set on the container template from `{{inputs.parameters.*}}`).
+        let mut input = std::env::var("CARGO_ATHENA_INPUT")
             .ok()
             .map(|s| serde_json::from_str(&s).expect("CARGO_ATHENA_INPUT must be JSON"))
             .unwrap_or(serde_json::Value::Object(Default::default()));
+        if let serde_json::Value::Object(map) = &mut input {
+            for (k, v) in std::env::vars() {
+                if let Some(name) = k.strip_prefix("ATHENA_PARAM_") {
+                    // A param is JSON if it parses, else a bare string.
+                    let val = serde_json::from_str(&v)
+                        .unwrap_or(serde_json::Value::String(v.clone()));
+                    map.insert(name.to_string(), val);
+                }
+            }
+        }
         let output = run(input);
         if let Ok(path) = std::env::var("CARGO_ATHENA_OUTPUT") {
             std::fs::write(path, output.to_string()).expect("write CARGO_ATHENA_OUTPUT");

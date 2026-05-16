@@ -1,0 +1,15 @@
+# Merge-patched into the workflow-controller-configmap so Argo stores
+# output artifacts (e.g. save_artifact!) in our in-cluster MinIO.
+data:
+  artifactRepository: |
+    s3:
+      endpoint: minio.argo.svc.cluster.local:9000
+      bucket: athena-artifacts
+      insecure: true
+      keyFormat: "outputs/{{workflow.name}}/{{pod.name}}"
+      accessKeySecret:
+        name: athena-s3
+        key: accessKey
+      secretKeySecret:
+        name: athena-s3
+        key: secretKey

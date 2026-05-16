@@ -1,0 +1,17 @@
+# 3-node kind cluster: 1 control-plane (Argo controller + MinIO live here),
+# 2 workers (workflow pods run here). The control-plane keeps its default
+# NoSchedule taint, so untolerated workflow pods land on the workers; the
+# Argo controller and MinIO are explicitly pinned + tolerated onto control.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: athena-e2e
+nodes:
+  - role: control-plane
+    labels:
+      athena.dev/role: control
+  - role: worker
+    labels:
+      athena.dev/role: worker
+  - role: worker
+    labels:
+      athena.dev/role: worker

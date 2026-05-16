@@ -46,7 +46,11 @@ spec:
         mkdir -p /athena/bin
         tar -xzf /athena/dist.tar.gz -C /athena/bin
         chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
         exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-branchy
+      env:
+      - name: ATHENA_PARAM_mode
+        value: '{{inputs.parameters.mode}}'
       volumeMounts:
       - name: athena-work
         mountPath: /athena
@@ -133,7 +137,13 @@ spec:
         mkdir -p /athena/bin
         tar -xzf /athena/dist.tar.gz -C /athena/bin
         chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
         exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-combine
+      env:
+      - name: ATHENA_PARAM_x
+        value: '{{inputs.parameters.x}}'
+      - name: ATHENA_PARAM_y
+        value: '{{inputs.parameters.y}}'
       volumeMounts:
       - name: athena-work
         mountPath: /athena
@@ -189,7 +199,11 @@ spec:
         mkdir -p /athena/bin
         tar -xzf /athena/dist.tar.gz -C /athena/bin
         chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
         exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-fetch
+      env:
+      - name: ATHENA_PARAM_url
+        value: '{{inputs.parameters.url}}'
       volumeMounts:
       - name: athena-work
         mountPath: /athena
@@ -349,7 +363,11 @@ spec:
         mkdir -p /athena/bin
         tar -xzf /athena/dist.tar.gz -C /athena/bin
         chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
         exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-publish
+      env:
+      - name: ATHENA_PARAM_report
+        value: '{{inputs.parameters.report}}'
       volumeMounts:
       - name: athena-work
         mountPath: /athena
@@ -406,7 +424,13 @@ spec:
         mkdir -p /athena/bin
         tar -xzf /athena/dist.tar.gz -C /athena/bin
         chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
         exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-transform
+      env:
+      - name: ATHENA_PARAM_data
+        value: '{{inputs.parameters.data}}'
+      - name: ATHENA_PARAM_factor
+        value: '{{inputs.parameters.factor}}'
       volumeMounts:
       - name: athena-work
         mountPath: /athena

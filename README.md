@@ -156,7 +156,28 @@ cargo run -q -p cargo-athena-example-e2e-consumer --bin e2e-consumer
 cargo test --workspace
 ```
 
-## E2E tests
+## Kind cluster e2e (real Argo + MinIO)
+
+`scripts/` stands up a 3-node [kind](https://kind.sigs.k8s.io) cluster — 1
+control-plane (Argo controller + MinIO, pinned + tolerated) and 2 workers
+(workflow pods, kept off control by its taint) — and runs the
+`examples/integration` fixture against real Argo:
+
+```sh
+nix develop -c scripts/deploy.sh     # cluster + Argo + MinIO + bucket + secret
+nix develop -c scripts/e2e-test.sh   # build->upload->emit->submit->assert
+nix develop -c scripts/teardown.sh   # kind delete + cleanup
+```
+
+`e2e-test.sh` cross-compiles the static-musl binary, uploads the tarball to
+MinIO, emits + applies the `WorkflowTemplate`s, `argo submit`s the
+`Workflow`, then asserts it **Succeeded**, ran on the **worker** nodes, and
+that the `save_artifact!` object landed in MinIO. Needs a host Docker or
+Podman daemon. Covers: param data-deps, run-mode (de)serialize, the
+`uname` bootstrap + binary-artifact delivery, `host!`/`#[fragment]`
+mounts, nested-workflow `templateRef`, and output artifacts.
+
+## E2E tests (golden, in-process)
 
 `examples/e2e` is a stable, broad-coverage fixture (workflows, nested
 workflows, containers, fragments, `host!` unioned across `if`/`match`,

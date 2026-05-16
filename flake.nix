@@ -59,6 +59,13 @@
             # static-musl cross-compilation for `cargo athena build`.
             pkgs.cargo-zigbuild
             pkgs.zig
+            # kind e2e: cluster + Argo + MinIO. Needs a host Docker or
+            # Podman daemon (not a nix package — provided by the host).
+            pkgs.kind
+            pkgs.kubectl
+            pkgs.argo-workflows
+            pkgs.minio-client
+            pkgs.jq
           ];
 
           # Lets rust-analyzer find the standard library sources.

@@ -1,0 +1,23 @@
+[package]
+name = "cargo-athena-example-integration"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+# The crate the kind e2e actually runs. Scoped to features that are wired
+# end-to-end TODAY: workflow / nested-workflow(sequencing) / container /
+# fragment / host! / save_artifact! / container->container param data-deps
+# / default+override image / multi-arch bootstrap. (No load_artifact!:
+# input-artifact source wiring is still pending; no workflow->workflow
+# data-deps: workflow templates have no outputs.result.)
+[lib]
+name = "cargo_athena_example_integration"
+path = "src/lib.rs"
+
+[[bin]]
+name = "integration"
+path = "src/main.rs"
+
+[dependencies]
+cargo-athena = { workspace = true }

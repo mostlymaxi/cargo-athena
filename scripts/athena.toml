@@ -1,0 +1,17 @@
+# athena.toml used by the kind e2e (scripts/e2e-test.sh sets ATHENA_CONFIG
+# to this). Points at the in-cluster MinIO; the `athena-s3` secret is
+# created by scripts/deploy.sh in the `argo` namespace.
+
+[artifact_repository.s3]
+endpoint = "minio.argo.svc.cluster.local:9000"
+bucket = "athena-artifacts"
+region = "us-east-1"
+insecure = true                                    # MinIO over plain HTTP
+access_key_secret = { name = "athena-s3", key = "accessKey" }
+secret_key_secret = { name = "athena-s3", key = "secretKey" }
+
+[artifact]
+key = "athena/bin/integration/0.1.0/integration.tar.gz"
+
+[bootstrap]
+targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]

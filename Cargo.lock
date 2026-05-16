@@ -89,6 +89,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "cargo-athena-example-integration"
+version = "0.1.0"
+dependencies = [
+ "cargo-athena",
+]
+
+[[package]]
 name = "cargo-athena-macros"
 version = "0.1.0"
 dependencies = [

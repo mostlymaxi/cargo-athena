@@ -283,6 +283,13 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let arg_types: Vec<_> = args.iter().map(|(_, t)| t.clone()).collect();
     let arg_names: Vec<String> = arg_idents.iter().map(|i| i.to_string()).collect();
 
+    // Argo delivers params via container env so the binary can read them.
+    let param_env_names: Vec<String> =
+        arg_names.iter().map(|n| format!("ATHENA_PARAM_{n}")).collect();
+    let param_env_vals: Vec<String> = arg_names
+        .iter()
+        .map(|n| format!("{{{{inputs.parameters.{n}}}}}"))
+        .collect();
     let inputs_slice = str_slice(&arg_names);
     let host_slice = str_slice(&scan.host_paths);
     let in_art_slice = str_slice(&scan.in_artifacts);
@@ -378,6 +385,12 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                         image: __d.image,
                         command: __d.command,
                         args: __d.args,
+                        env: ::std::vec![
+                            #( ::cargo_athena::api::EnvVar {
+                                name: #param_env_names.to_string(),
+                                value: #param_env_vals.to_string(),
+                            } ),*
+                        ],
                         volume_mounts: __mounts,
                         ..::core::default::Default::default()
                     }),
