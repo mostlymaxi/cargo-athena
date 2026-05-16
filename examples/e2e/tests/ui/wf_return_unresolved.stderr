@@ -1,0 +1,5 @@
+error: this #[workflow] declares a return type but its returned value isn't produced by a template call. End with a tail template call `name(args)` (no `;`) or return a `let` binding from one.
+  --> tests/ui/wf_return_unresolved.rs:10:9
+   |
+10 | fn wf() -> String {
+   |         ^^^^^^^^^

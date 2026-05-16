@@ -1,0 +1,5 @@
+error: unsupported statement in a #[workflow]: only `let x = template(args);` and `template(args);` are lowered. if/match, for/while/loop, macros, method calls and other expressions aren't supported yet — they'll be lowered differently later.
+ --> tests/ui/wf_loop.rs:5:5
+  |
+5 |     for _ in 0..3 {}
+  |     ^^^^^^^^^^^^^^^^

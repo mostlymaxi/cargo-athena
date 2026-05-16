@@ -1,0 +1,298 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-fetch
+spec:
+  entrypoint: cargo-athena-example-e2e-fetch
+  templates:
+  - name: cargo-athena-example-e2e-fetch
+    inputs:
+      parameters:
+      - name: url
+      artifacts:
+      - name: athena-dist
+        path: /athena/dist.tar.gz
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: athena/bin/example/0.1.0/app.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+        archive:
+          none: {}
+    outputs:
+      parameters:
+      - name: result
+        valueFrom:
+          path: /athena/result
+    container:
+      image: ghcr.io/acme/fetch:1.2.3
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        mkdir -p /athena/bin
+        tar -xzf /athena/dist.tar.gz -C /athena/bin
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-fetch
+      env:
+      - name: ATHENA_PARAM_url
+        value: '{{inputs.parameters.url}}'
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+      - name: host-secrets-token
+        mountPath: /secrets/token
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    - name: host-secrets-token
+      hostPath:
+        path: /secrets/token
+    serviceAccountName: default
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-pipeline-returns
+spec:
+  entrypoint: cargo-athena-example-e2e-pipeline-returns
+  templates:
+  - name: cargo-athena-example-e2e-pipeline-returns
+    dag:
+      tasks:
+      - name: r
+        arguments:
+          parameters:
+          - name: seed
+            value: seed
+        templateRef:
+          name: cargo-athena-example-e2e-sub-pipeline
+          template: cargo-athena-example-e2e-sub-pipeline
+      - name: publish
+        dependencies:
+        - r
+        arguments:
+          parameters:
+          - name: report
+            value: '{{tasks.r.outputs.result}}'
+        templateRef:
+          name: cargo-athena-example-e2e-publish
+          template: cargo-athena-example-e2e-publish
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-publish
+spec:
+  entrypoint: cargo-athena-example-e2e-publish
+  templates:
+  - name: cargo-athena-example-e2e-publish
+    inputs:
+      parameters:
+      - name: report
+      artifacts:
+      - name: athena-dist
+        path: /athena/dist.tar.gz
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: athena/bin/example/0.1.0/app.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+        archive:
+          none: {}
+      - name: notes
+        path: /athena/artifacts/in/notes
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: notes
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+        archive:
+          none: {}
+    outputs:
+      parameters:
+      - name: result
+        valueFrom:
+          path: /athena/result
+      artifacts:
+      - name: receipt
+        path: /athena/artifacts/out/receipt
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: receipt
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+        archive:
+          none: {}
+    container:
+      image: busybox:1.36-musl
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        mkdir -p /athena/bin
+        tar -xzf /athena/dist.tar.gz -C /athena/bin
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-publish
+      env:
+      - name: ATHENA_PARAM_report
+        value: '{{inputs.parameters.report}}'
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-sub-pipeline
+spec:
+  entrypoint: cargo-athena-example-e2e-sub-pipeline
+  templates:
+  - name: cargo-athena-example-e2e-sub-pipeline
+    inputs:
+      parameters:
+      - name: seed
+    outputs:
+      parameters:
+      - name: result
+        valueFrom:
+          parameter: '{{tasks.transform.outputs.result}}'
+    dag:
+      tasks:
+      - name: fetched
+        arguments:
+          parameters:
+          - name: url
+            value: '{{inputs.parameters.seed}}'
+        templateRef:
+          name: cargo-athena-example-e2e-fetch
+          template: cargo-athena-example-e2e-fetch
+      - name: transform
+        dependencies:
+        - fetched
+        arguments:
+          parameters:
+          - name: data
+            value: '{{tasks.fetched.outputs.result}}'
+          - name: factor
+            value: '7'
+        templateRef:
+          name: cargo-athena-example-e2e-transform
+          template: cargo-athena-example-e2e-transform
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-transform
+spec:
+  entrypoint: cargo-athena-example-e2e-transform
+  templates:
+  - name: cargo-athena-example-e2e-transform
+    inputs:
+      parameters:
+      - name: data
+      - name: factor
+      artifacts:
+      - name: athena-dist
+        path: /athena/dist.tar.gz
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: athena/bin/example/0.1.0/app.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+        archive:
+          none: {}
+    outputs:
+      parameters:
+      - name: result
+        valueFrom:
+          path: /athena/result
+    container:
+      image: busybox:1.36-musl
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        mkdir -p /athena/bin
+        tar -xzf /athena/dist.tar.gz -C /athena/bin
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-transform
+      env:
+      - name: ATHENA_PARAM_data
+        value: '{{inputs.parameters.data}}'
+      - name: ATHENA_PARAM_factor
+        value: '{{inputs.parameters.factor}}'
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: cargo-athena-example-e2e-pipeline-returns-
+spec:
+  workflowTemplateRef:
+    name: cargo-athena-example-e2e-pipeline-returns
+  serviceAccountName: default

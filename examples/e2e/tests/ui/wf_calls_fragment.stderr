@@ -1,0 +1,5 @@
+error[E0573]: expected type, found function `frag`
+  --> tests/ui/wf_calls_fragment.rs:10:5
+   |
+10 |     frag();
+   |     ^^^^ not a type

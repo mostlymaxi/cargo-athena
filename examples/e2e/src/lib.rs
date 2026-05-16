@@ -122,3 +122,22 @@ pub mod another {
         sink(s); // depends on local_step's output
     }
 }
+
+// --- workflow return values ------------------------------------------------
+
+/// A nested `#[workflow]` that *returns* a value: the tail template call's
+/// `result` is bubbled up as this workflow-template's own `outputs.result`.
+#[workflow]
+pub fn sub_pipeline(seed: String) -> String {
+    let fetched = fetch(seed); // container -> String; `seed` is an input
+    transform(fetched, 7) // tail call (no `;`) == this workflow's result
+}
+
+/// Consumes a sub-*workflow*'s return value. Proves workflow→X data deps:
+/// `{{tasks.r.outputs.result}}` resolves only because `sub_pipeline` now
+/// declares that output (it didn't before — workflows had no outputs).
+#[workflow]
+pub fn pipeline_returns() {
+    let r = sub_pipeline("seed".to_string());
+    publish(r);
+}

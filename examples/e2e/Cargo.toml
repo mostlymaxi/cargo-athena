@@ -19,6 +19,10 @@ path = "src/main.rs"
 name = "e2e-another"
 path = "src/bin/another_main.rs"
 
+[[bin]]
+name = "e2e-returns"
+path = "src/bin/returns_main.rs"
+
 [dependencies]
 cargo-athena = { workspace = true }
 

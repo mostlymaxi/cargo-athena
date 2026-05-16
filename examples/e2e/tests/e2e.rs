@@ -8,6 +8,7 @@ use std::process::Command;
 
 const BIN_PIPELINE: &str = env!("CARGO_BIN_EXE_e2e");
 const BIN_ANOTHER: &str = env!("CARGO_BIN_EXE_e2e-another");
+const BIN_RETURNS: &str = env!("CARGO_BIN_EXE_e2e-returns");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -64,6 +65,14 @@ fn emit_pipeline() {
 #[test]
 fn emit_pipeline_another() {
     assert_golden("pipeline_another.yaml", &run_bin(BIN_ANOTHER, &[]));
+}
+
+/// `#[workflow]` return values: `sub_pipeline` (returns its tail call's
+/// result) is consumed by `pipeline_returns`. Pins the emitted
+/// `outputs.parameters.result` block + `{{tasks.r.outputs.result}}` wiring.
+#[test]
+fn emit_pipeline_returns() {
+    assert_golden("pipeline_returns.yaml", &run_bin(BIN_RETURNS, &[]));
 }
 
 /// Run mode: a container that returns a value (JSON to stdout).

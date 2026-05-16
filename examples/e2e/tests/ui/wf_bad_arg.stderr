@@ -1,0 +1,5 @@
+error: `some_global` is not a #[workflow] input or a binding from a prior `let = template(...)`. unsupported argument in a #[workflow] call. Allowed: a literal, a workflow input parameter, a binding from a prior `let x = template(...);`, or `.to_string()`/`.to_owned()`/`.into()` on one of those. Computed values, regular variables/consts, method calls, and other expressions aren't lowered yet.
+  --> tests/ui/wf_bad_arg.rs:10:10
+   |
+10 |     step(some_global);
+   |          ^^^^^^^^^^^
