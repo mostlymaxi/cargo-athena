@@ -76,16 +76,47 @@ README is intentionally lean (user-facing); the *why* lives here.
   `compile_error!`); the `fan_out` source must be a prior binding or
   workflow input.
 - **`#[workflow]` body contract (strict, fail-loud).** Only
-  `let x = template(args);` and `template(args);` are lowered. Every other
-  statement (if/match, for/while/loop, macros, method calls, `let`
-  with non-ident/tuple patterns, `let…else`) is a hard `compile_error!`
-  with a spanned message — never a silently dropped task. Args must be a
-  literal, a `#[workflow]` input, a prior `let` binding, or
+  `let x = template(args);`, `template(args);`, and `if`/`else`/`else if`
+  (see next bullet) are lowered. Every other statement (`match`,
+  for/while/loop, macros, method calls, `let` with non-ident/tuple
+  patterns, `let…else`) is a hard `compile_error!` with a spanned message
+  — never a silently dropped task. Args must be a literal, a
+  `#[workflow]` input, a prior `let` binding, or
   `.to_string()/.to_owned()/.into()` on one of those (no lossy
   stringify). `#[fragment]`s/regular fns aren't `Template`s, so calling
   one from a `#[workflow]` fails via the type system (`<x as Template>`
-  → "expected type, found function"). Loops/branches will be lowered
-  differently later — until then they must error, not mislower.
+  → "expected type, found function"). Remaining loops/`match` will be
+  lowered differently later — until then they must error, not mislower.
+- **`if`/`else`/`else if` → synthesized `when`-gated wrapper workflows.**
+  A whole `if` chain lowers to ONE synthetic `#[workflow]`
+  `<crate>-<fn>-if<k>` whose DAG has one `when`-gated task per arm
+  (callee = a per-arm synthetic sub-`#[workflow]` `…-if<k>-arm<j>`),
+  gates mutually exclusive **by construction**
+  (`(!c₀ && … && !cᵢ₋₁ && cᵢ)`, else = all-negated). Captured free vars
+  (idents bound outside the chain ∩ parent scope; whole binding/input
+  only) become the wrapper+arm INPUTS (validated by the YAML guard);
+  parent passes the matching refs and consumes the wrapper exactly like
+  a returning sub-workflow. **Value-`if`** (`let x = if c {…} else {…};`
+  / tail `if`): the wrapper declares `outputs.parameters.return` via
+  **`valueFrom.expression`** = a right-folded status-ternary
+  (`tasks['arm0'].status == 'Succeeded' ? tasks['arm0']…return : …`) —
+  Argo short-circuits over the Skipped arm (**proven kind v4.0.5**); Rust
+  itself forces an `else` + same arm type (the ghost inherits this free,
+  since `GhostRewrite` is a generic `VisitMut` that already keeps the
+  `if` inline with calls→`__athena_sig` — **zero ghost changes**).
+  Condition → closed `WhenExpr` (`== != < <= > >=`, `&& || !`; operands:
+  binding/input/`a.field`/literal — kind-preserving so a string compares
+  as JSON-quoted `"v"`, numbers/bools bare, `.field` via the same
+  `{{=toJSON(fromJSON(..))}}`; all proven on v4.0.5); single
+  parenthesized `render` is the only `when` producer (valid-by-
+  construction — no expr engine). Out-of-grammar conditions / value-`if`
+  without `else` = targeted `compile_error!`. Synthetic structs have no
+  ghost/sig-shim/`run` (never called from Rust, never run in-pod);
+  force-linked via the parent's `collect`. v1 does NOT lower a nested
+  *call* in an arg/condition (`foo(bar())`, `if foo() > 3`) — that's a
+  clean follow-on (anon task + ref + dep); today it's the usual
+  not-a-template-call error. Smoke `pipeline_if` SUBMIT-OK on real Argo
+  v4.0.5 (13-template synthetic chain).
 - **Per-task builder chain.** A task call may be suffixed, in any order,
   with:
   - `.continue_on(failed|error|failed, error)` (≤1) → `DAGTask.continueOn`;

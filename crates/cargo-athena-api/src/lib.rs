@@ -182,6 +182,11 @@ argo! {
     pub struct ValueFrom {
         pub path: String,
         pub parameter: String,
+        /// An Argo expr (`expr-lang`) evaluated after the DAG/steps
+        /// finish. Used by a synthesized `if` wrapper to select the
+        /// taken branch's `return` (skip-serialized so unaffected
+        /// templates stay byte-identical).
+        pub expression: String,
     }
 
     pub struct Artifact {
@@ -245,6 +250,11 @@ argo! {
         /// Fan-out: a JSON-array string; the task runs once per element
         /// with `{{item}}` bound. Empty == no fan-out (skip-serialized).
         pub with_param: String,
+        /// Conditional execution: an Argo expr (`expr-lang`). The task
+        /// runs only when it evaluates truthy; else it is Skipped. Empty
+        /// == unconditional (skip-serialized so existing goldens are
+        /// byte-identical).
+        pub when: String,
     }
 
     /// Proceed to dependents even if this task fails/errors.
