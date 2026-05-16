@@ -10,6 +10,12 @@ concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
 
+# Default GITHUB_TOKEN is read-only on private repos; cache-nix-action's
+# purge step lists/deletes Actions caches and needs actions:write.
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   # Cross-compile + package the athena binary tarball ONCE; the Argo
   # matrix below reuses it (no per-version rebuild).
