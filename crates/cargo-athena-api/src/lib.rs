@@ -1,16 +1,18 @@
-//! Argo Workflows API types.
+//! Argo Workflows API types — a hand-owned, curated subset.
 //!
-//! Generated from `proto/cargo_athena/api/v1/argo.proto` by `build.rs`
-//! (prost) with serde derives layered on for YAML emission. Downstream
-//! crates only ever touch the re-exported types here, so swapping the
-//! vendored proto subset for the full upstream Argo schema is a
-//! single-crate change.
+//! We only emit a narrow, stable slice of Argo (WorkflowTemplate/Workflow;
+//! templates with container/dag/steps; artifacts/volumes/params/
+//! nodeSelector/SA). These are plain `serde` structs (no protobuf/prost):
+//! the IDL bought us nothing here, and conformance is guarded empirically
+//! by the kind e2e (`scripts/e2e-test.sh`) running against a real Argo.
+//!
+//! Serialization rules (so the emitted YAML is Argo-correct):
+//! every struct is `rename_all = "camelCase"`, every field is
+//! `skip_serializing_if = "ser::skip"` (omit empties) + `default` (for
+//! round-trip deserialization).
 
-/// serde `skip_serializing_if` support.
-///
-/// `prost-build` applies one blanket field attribute to *every* generated
-/// field, so we need a single generic predicate that works for every field
-/// type prost can emit (scalars, `Option`, `Vec`, `HashMap`, messages).
+/// `skip_serializing_if` support: one generic "is this empty?" predicate
+/// so every field can share `#[serde(skip_serializing_if = "ser::skip")]`.
 pub mod ser {
     use std::collections::{BTreeMap, HashMap};
 
@@ -30,21 +32,6 @@ pub mod ser {
         }
     }
     impl Skip for i32 {
-        fn skip(&self) -> bool {
-            *self == 0
-        }
-    }
-    impl Skip for i64 {
-        fn skip(&self) -> bool {
-            *self == 0
-        }
-    }
-    impl Skip for u32 {
-        fn skip(&self) -> bool {
-            *self == 0
-        }
-    }
-    impl Skip for u64 {
         fn skip(&self) -> bool {
             *self == 0
         }
@@ -70,37 +57,222 @@ pub mod ser {
         }
     }
 
-    /// The function named in the generated `skip_serializing_if`.
+    /// The function named in every field's `skip_serializing_if`.
     pub fn skip<T: Skip>(value: &T) -> bool {
         value.skip()
     }
+}
 
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
-    /// `Vec<ParallelSteps>` -> Argo's bare `[[DagTask]]` (list of lists).
-    pub fn ser_steps<S: Serializer>(
-        v: &[crate::ParallelSteps],
-        s: S,
-    ) -> Result<S::Ok, S::Error> {
-        let outer: Vec<&Vec<crate::DagTask>> = v.iter().map(|p| &p.steps).collect();
-        outer.serialize(s)
+/// `#[derive]` + `serde` boilerplate shared by every message, and a
+/// `skip`/`default` field attribute on each field.
+macro_rules! argo {
+    ($(
+        $(#[$m:meta])*
+        pub struct $name:ident { $(
+            $(#[$fm:meta])*
+            pub $fld:ident : $ty:ty
+        ),* $(,)? }
+    )*) => {$(
+        $(#[$m])*
+        #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        pub struct $name {
+            $(
+                $(#[$fm])*
+                #[serde(default, skip_serializing_if = "crate::ser::skip")]
+                pub $fld : $ty,
+            )*
+        }
+    )*};
+}
+
+argo! {
+    pub struct Workflow {
+        pub api_version: String,
+        pub kind: String,
+        pub metadata: Option<ObjectMeta>,
+        pub spec: Option<WorkflowSpec>,
     }
 
-    /// Argo `[[DagTask]]` -> `Vec<ParallelSteps>`.
-    pub fn de_steps<'de, D: Deserializer<'de>>(
-        d: D,
-    ) -> Result<Vec<crate::ParallelSteps>, D::Error> {
-        let outer: Vec<Vec<crate::DagTask>> = Vec::deserialize(d)?;
-        Ok(outer
-            .into_iter()
-            .map(|steps| crate::ParallelSteps { steps })
-            .collect())
+    /// A reusable, independently-addressable template resource. Every
+    /// `#[workflow]`/`#[container]` emits one; cross-template calls
+    /// reference it by name via `TemplateRef`.
+    pub struct WorkflowTemplate {
+        pub api_version: String,
+        pub kind: String,
+        pub metadata: Option<ObjectMeta>,
+        pub spec: Option<WorkflowSpec>,
+    }
+
+    pub struct ObjectMeta {
+        pub name: String,
+        pub generate_name: String,
+        pub namespace: String,
+        pub labels: BTreeMap<String, String>,
+        pub annotations: BTreeMap<String, String>,
+    }
+
+    pub struct WorkflowSpec {
+        pub entrypoint: String,
+        pub templates: Vec<Template>,
+        pub arguments: Option<Arguments>,
+        /// Set on a runnable Workflow that just invokes a WorkflowTemplate.
+        pub workflow_template_ref: Option<WorkflowTemplateRef>,
+        pub service_account_name: String,
+    }
+
+    /// Points a runnable Workflow at a WorkflowTemplate resource.
+    pub struct WorkflowTemplateRef {
+        pub name: String,
+        pub cluster_scope: bool,
+    }
+
+    /// A DAG task's reference to a template in another WorkflowTemplate.
+    pub struct TemplateRef {
+        pub name: String,
+        pub template: String,
+        pub cluster_scope: bool,
+    }
+
+    pub struct Template {
+        pub name: String,
+        pub inputs: Option<Inputs>,
+        pub outputs: Option<Outputs>,
+        // Exactly one of the following describes the template body.
+        pub container: Option<Container>,
+        pub dag: Option<DagTemplate>,
+        pub script: Option<ScriptTemplate>,
+        pub volumes: Vec<Volume>,
+        /// Per-template SA override (Argo runs the pod as this).
+        pub service_account_name: String,
+        /// Template-level pod scheduling (container templates).
+        pub node_selector: BTreeMap<String, String>,
+        /// `#[workflow(steps)]` body: Argo `steps` is a list of lists —
+        /// inner runs in parallel, outer sequentially. Plain serde nests
+        /// `Vec<Vec<_>>` natively (no proto wrapper needed).
+        pub steps: Vec<Vec<DagTask>>,
+    }
+
+    pub struct Inputs {
+        pub parameters: Vec<Parameter>,
+        pub artifacts: Vec<Artifact>,
+    }
+
+    pub struct Outputs {
+        pub parameters: Vec<Parameter>,
+        pub artifacts: Vec<Artifact>,
+    }
+
+    pub struct Parameter {
+        pub name: String,
+        pub value: Option<String>,
+        pub default: Option<String>,
+        pub value_from: Option<ValueFrom>,
+    }
+
+    pub struct ValueFrom {
+        pub path: String,
+        pub parameter: String,
+    }
+
+    pub struct Artifact {
+        pub name: String,
+        pub path: String,
+        /// Where the artifact lives (binary tarball / load-save ports).
+        pub s3: Option<S3Artifact>,
+        /// `none` => deliver the raw object; bootstrap untars itself.
+        pub archive: Option<ArchiveStrategy>,
+        /// Octal file mode applied to the downloaded file.
+        pub mode: Option<i32>,
+    }
+
+    /// Mirrors a k8s SecretKeySelector — a key in a Secret.
+    pub struct SecretKeySelector {
+        pub name: String,
+        pub key: String,
+    }
+
+    /// Mirrors Argo's S3Artifact.
+    pub struct S3Artifact {
+        pub endpoint: String,
+        pub bucket: String,
+        pub region: String,
+        pub insecure: bool,
+        pub key: String,
+        pub access_key_secret: Option<SecretKeySelector>,
+        pub secret_key_secret: Option<SecretKeySelector>,
+    }
+
+    pub struct ArchiveStrategy {
+        /// Present (and empty) means "do not archive/extract".
+        pub none: Option<NoneStrategy>,
+    }
+
+    pub struct NoneStrategy {}
+
+    pub struct Arguments {
+        pub parameters: Vec<Parameter>,
+        pub artifacts: Vec<Artifact>,
+    }
+
+    pub struct DagTemplate {
+        pub tasks: Vec<DagTask>,
+    }
+
+    pub struct DagTask {
+        pub name: String,
+        /// Empty when `template_ref` is set.
+        pub template: String,
+        pub dependencies: Vec<String>,
+        pub arguments: Option<Arguments>,
+        pub template_ref: Option<TemplateRef>,
+    }
+
+    pub struct Container {
+        pub image: String,
+        pub command: Vec<String>,
+        pub args: Vec<String>,
+        pub env: Vec<EnvVar>,
+        pub volume_mounts: Vec<VolumeMount>,
+        pub working_dir: String,
+    }
+
+    pub struct ScriptTemplate {
+        pub image: String,
+        pub command: Vec<String>,
+        pub source: String,
+    }
+
+    pub struct EnvVar {
+        pub name: String,
+        pub value: String,
+    }
+
+    pub struct Volume {
+        pub name: String,
+        pub host_path: Option<HostPathVolumeSource>,
+        pub empty_dir: Option<EmptyDirVolumeSource>,
+    }
+
+    pub struct HostPathVolumeSource {
+        pub path: String,
+        pub r#type: String,
+    }
+
+    /// Present (and empty) => a pod-scoped scratch dir (`emptyDir: {}`).
+    pub struct EmptyDirVolumeSource {}
+
+    pub struct VolumeMount {
+        pub name: String,
+        pub mount_path: String,
+        pub read_only: bool,
     }
 }
 
-include!(concat!(env!("OUT_DIR"), "/cargo_athena.api.v1.rs"));
-
-/// Argo's `apiVersion` for `Workflow` resources.
+/// Argo's `apiVersion` for `Workflow`/`WorkflowTemplate` resources.
 pub const API_VERSION: &str = "argoproj.io/v1alpha1";
 /// Argo's `kind` for `Workflow` resources.
 pub const KIND_WORKFLOW: &str = "Workflow";

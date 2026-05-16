@@ -616,9 +616,8 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
 
     let push = if steps {
         quote! {
-            __steps.push(::cargo_athena::api::ParallelSteps {
-                steps: ::std::vec![__step],
-            });
+            // one sequential step group containing this single step
+            __steps.push(::std::vec![__step]);
         }
     } else {
         quote! { __tasks.push(__step); }
@@ -726,9 +725,9 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
     // `steps:` (one sequential group per statement).
     let build_body = if steps_mode {
         quote! {
-            let mut __steps:
-                ::std::vec::Vec<::cargo_athena::api::ParallelSteps> =
-                ::std::vec::Vec::new();
+            let mut __steps: ::std::vec::Vec<
+                ::std::vec::Vec<::cargo_athena::api::DagTask>,
+            > = ::std::vec::Vec::new();
             #( #node_blocks )*
             ::cargo_athena::api::Template {
                 name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),

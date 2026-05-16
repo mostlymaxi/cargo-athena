@@ -10,7 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLUSTER=athena-e2e
-ARGO_VERSION=v3.6.10
+ARGO_VERSION="${ARGO_VERSION:-v4.0.5}"  # CI overrides per matrix entry
 # ATHENA_E2E_SINGLE=1 → 1-node cluster (hosts without kind cross-node
 # networking, e.g. NixOS default-drop FORWARD). Default is the 3-node split.
 KIND_CFG="$SCRIPT_DIR/kind-cluster.yaml"
@@ -45,7 +45,8 @@ kubectl wait --for=condition=Ready nodes --all --timeout=120s
 
 say "Argo Workflows $ARGO_VERSION"
 kubectl create namespace argo --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -n argo -f \
+# v4 CRDs exceed kubectl's last-applied annotation limit -> server-side.
+kubectl apply --server-side --force-conflicts -n argo -f \
   "https://github.com/argoproj/argo-workflows/releases/download/${ARGO_VERSION}/namespace-install.yaml"
 
 # Pin the controller + server onto the control node.

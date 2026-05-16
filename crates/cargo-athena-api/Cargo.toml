@@ -4,11 +4,7 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Argo Workflows API types, generated from protobuf (prost) and serde-able for YAML"
+description = "Argo Workflows API types — a hand-owned, curated serde subset"
 
 [dependencies]
-prost = { workspace = true }
 serde = { workspace = true }
-
-[build-dependencies]
-prost-build = { workspace = true }
