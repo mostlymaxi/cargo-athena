@@ -109,6 +109,194 @@ pub trait Template {
     fn collect(out: &mut Collector);
 }
 
+// ---- athena.toml ---------------------------------------------------------
+
+/// `athena.toml` — required by `cargo athena` at emit time. Mirrors the
+/// parts of Argo's S3 `ArtifactRepository` we inject, plus bootstrap config.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct AthenaConfig {
+    pub artifact_repository: ArtifactRepository,
+    pub artifact: ArtifactSpec,
+    #[serde(default)]
+    pub bootstrap: Bootstrap,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ArtifactRepository {
+    pub s3: S3Repo,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct S3Repo {
+    pub endpoint: String,
+    pub bucket: String,
+    #[serde(default)]
+    pub region: String,
+    #[serde(default)]
+    pub insecure: bool,
+    pub access_key_secret: SecretRef,
+    pub secret_key_secret: SecretRef,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SecretRef {
+    pub name: String,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ArtifactSpec {
+    /// Object key of the per-binary tarball (holds `app-<triple>` for every
+    /// `bootstrap.targets`). `cargo athena build` fills any
+    /// `{crate}`/`{version}`/`{bin}` placeholders before publish.
+    pub key: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct Bootstrap {
+    /// Fallback image when a `#[container]` doesn't set its own. Per-
+    /// container `image` always wins (arbitrary by design); this is just
+    /// the small default for containers that don't care.
+    #[serde(default = "default_image")]
+    pub default_image: String,
+    /// Cross-compile / `uname` target matrix.
+    #[serde(default = "default_targets")]
+    pub targets: Vec<String>,
+}
+
+impl Default for Bootstrap {
+    fn default() -> Self {
+        Self {
+            default_image: default_image(),
+            targets: default_targets(),
+        }
+    }
+}
+
+fn default_image() -> String {
+    "busybox:1.36-musl".to_string()
+}
+
+fn default_targets() -> Vec<String> {
+    vec![
+        "x86_64-unknown-linux-musl".to_string(),
+        "aarch64-unknown-linux-musl".to_string(),
+    ]
+}
+
+impl AthenaConfig {
+    /// `ATHENA_CONFIG` override, else the nearest `athena.toml` walking up
+    /// from the cwd. Only ever called during emit — the in-pod binary
+    /// (run-mode) never needs `athena.toml`.
+    pub fn load() -> Self {
+        let path = std::env::var_os("ATHENA_CONFIG")
+            .map(std::path::PathBuf::from)
+            .or_else(Self::find_upwards)
+            .expect(
+                "athena.toml not found: set ATHENA_CONFIG or add athena.toml \
+                 to the workspace (required by `cargo athena`)",
+            );
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        toml::from_str(&text).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()))
+    }
+
+    fn find_upwards() -> Option<std::path::PathBuf> {
+        let mut d = std::env::current_dir().ok()?;
+        loop {
+            let p = d.join("athena.toml");
+            if p.is_file() {
+                return Some(p);
+            }
+            if !d.pop() {
+                return None;
+            }
+        }
+    }
+}
+
+/// Where the binary tarball is mounted inside the pod.
+pub const ARTIFACT_PATH: &str = "/athena/dist.tar.gz";
+
+/// What [`container_delivery`] produces for one `#[container]` template.
+pub struct ContainerDelivery {
+    /// Resolved image: the `#[container(image=...)]` override, else
+    /// `[bootstrap].default_image`.
+    pub image: String,
+    pub command: Vec<String>,
+    pub args: Vec<String>,
+    pub artifact: api::Artifact,
+}
+
+/// The arch-resolving bootstrap + the S3 binary artifact for one container
+/// template. Called from macro-generated `Template::build` (emit only).
+///
+/// Runs inside the container's *arbitrary, user-chosen* image (it only
+/// needs a POSIX `sh`/`tar`/`uname`). The image is multi-arch (kubelet
+/// picks the node arch); the bootstrap `uname`s and `exec`s the matching
+/// `app-<triple>` from the Argo-delivered tarball, replacing the shell so
+/// the Rust binary is the container's main process.
+pub fn container_delivery(
+    ctx: &BuildCtx,
+    argo_name: &str,
+    image_override: Option<&str>,
+) -> ContainerDelivery {
+    let cfg = ctx.config();
+    let s3 = &cfg.artifact_repository.s3;
+    let image = image_override
+        .map(str::to_string)
+        .unwrap_or_else(|| cfg.bootstrap.default_image.clone());
+
+    let mut arms = String::new();
+    for triple in &cfg.bootstrap.targets {
+        let arch = triple.split('-').next().unwrap_or(triple);
+        let pat = if arch == "aarch64" { "aarch64|arm64" } else { arch };
+        arms.push_str(&format!("  {pat}) __t={triple} ;;\n"));
+    }
+
+    let script = format!(
+        "set -e\n\
+         case \"$(uname -m)\" in\n\
+         {arms}  *) echo \"athena: unsupported arch $(uname -m)\" >&2; exit 1 ;;\n\
+         esac\n\
+         __d=$(mktemp -d)\n\
+         tar -xzf {ARTIFACT_PATH} -C \"$__d\"\n\
+         chmod +x \"$__d/app-$__t\"\n\
+         exec \"$__d/app-$__t\" --cargo-athena-template {argo_name}\n"
+    );
+
+    let artifact = api::Artifact {
+        name: "athena-dist".to_string(),
+        path: ARTIFACT_PATH.to_string(),
+        s3: Some(api::S3Artifact {
+            endpoint: s3.endpoint.clone(),
+            bucket: s3.bucket.clone(),
+            region: s3.region.clone(),
+            insecure: s3.insecure,
+            key: cfg.artifact.key.clone(),
+            access_key_secret: Some(api::SecretKeySelector {
+                name: s3.access_key_secret.name.clone(),
+                key: s3.access_key_secret.key.clone(),
+            }),
+            secret_key_secret: Some(api::SecretKeySelector {
+                name: s3.secret_key_secret.name.clone(),
+                key: s3.secret_key_secret.key.clone(),
+            }),
+        }),
+        archive: Some(api::ArchiveStrategy {
+            none: Some(api::NoneStrategy {}),
+        }),
+        mode: None,
+    };
+
+    ContainerDelivery {
+        image,
+        command: vec!["/bin/sh".to_string(), "-c".to_string()],
+        args: vec![script],
+        artifact,
+    }
+}
+
 /// A `#[fragment]`: a plain helper carrying `host!` decls. Still
 /// `inventory`-based — a container's real body actually *calls* its
 /// fragments, so the symbol reference exists and DCE is not a concern.
@@ -122,15 +310,25 @@ inventory::collect!(FragmentReg);
 /// Fragment registry snapshot, passed to container `build`s.
 pub struct BuildCtx {
     fragments: HashMap<&'static str, &'static FragmentReg>,
+    config: AthenaConfig,
 }
 
 impl BuildCtx {
+    /// Emit-only: gathers fragments AND loads `athena.toml`. Never called
+    /// in run-mode, so the in-pod binary needs no `athena.toml`.
     pub fn collect() -> Self {
         let mut fragments = HashMap::new();
         for f in inventory::iter::<FragmentReg> {
             fragments.insert(f.rust_name, f);
         }
-        Self { fragments }
+        Self {
+            fragments,
+            config: AthenaConfig::load(),
+        }
+    }
+
+    pub fn config(&self) -> &AthenaConfig {
+        &self.config
     }
 
     /// A container's own literal `host!` paths ∪ the transitive
@@ -166,9 +364,9 @@ impl BuildCtx {
 /// Accumulates the reachable templates (as `WorkflowTemplate`s) and the
 /// run-mode dispatch table while `Template::collect` walks the closure.
 pub struct Collector {
-    ctx: BuildCtx,
     seen: HashSet<String>,
-    templates: Vec<api::WorkflowTemplate>,
+    /// Deferred so `athena.toml` is read only at emit, never run-mode.
+    builders: Vec<fn(&BuildCtx) -> api::Template>,
     runners: HashMap<String, fn(serde_json::Value) -> serde_json::Value>,
 }
 
@@ -181,9 +379,8 @@ impl Default for Collector {
 impl Collector {
     pub fn new() -> Self {
         Self {
-            ctx: BuildCtx::collect(),
             seen: HashSet::new(),
-            templates: Vec::new(),
+            builders: Vec::new(),
             runners: HashMap::new(),
         }
     }
@@ -194,16 +391,9 @@ impl Collector {
         self.seen.insert(argo_name.to_string())
     }
 
-    /// Fragment registry, for container `build`s.
-    pub fn ctx(&self) -> &BuildCtx {
-        &self.ctx
-    }
-
-    /// Wrap an inner Argo template as its own `WorkflowTemplate` resource.
-    pub fn add_template(&mut self, inner: api::Template) {
-        let name = inner.name.clone();
-        self.templates
-            .push(wrap_workflow_template(name, inner));
+    /// Register a template's `build` fn (invoked lazily at emit).
+    pub fn add_builder(&mut self, build: fn(&BuildCtx) -> api::Template) {
+        self.builders.push(build);
     }
 
     pub fn add_runner(
@@ -215,9 +405,18 @@ impl Collector {
     }
 
     /// Emit the multi-document stream: one `WorkflowTemplate` per template
-    /// plus a runnable `Workflow` for the entrypoint `E`.
+    /// plus a runnable `Workflow` for the entrypoint `E`. Builds the
+    /// `BuildCtx` (and reads `athena.toml`) here — emit only.
     pub fn emit<E: Template>(&self) -> String {
-        let mut tpls = self.templates.clone();
+        let ctx = BuildCtx::collect();
+        let mut tpls: Vec<api::WorkflowTemplate> = self
+            .builders
+            .iter()
+            .map(|b| {
+                let inner = b(&ctx);
+                wrap_workflow_template(inner.name.clone(), inner)
+            })
+            .collect();
         tpls.sort_by_key(name_of);
 
         let mut docs: Vec<String> = tpls

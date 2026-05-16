@@ -6,3 +6,8 @@ components = [
   "rust-analyzer",
   "rust-src",
 ]
+# Static-musl cross targets for `cargo athena build` (delivered as artifacts).
+targets = [
+  "x86_64-unknown-linux-musl",
+  "aarch64-unknown-linux-musl",
+]

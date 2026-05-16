@@ -1,0 +1,25 @@
+# Required by `cargo athena` (emit/build). Mirrors the parts of Argo's
+# S3 ArtifactRepository we inject into every container template, plus the
+# cross-compile / bootstrap target matrix.
+#
+# This repo-root file is the fixture used by the examples; real users put
+# their own at their workspace root (discovered by walking up, or via the
+# ATHENA_CONFIG env var).
+
+[artifact_repository.s3]
+endpoint = "s3.amazonaws.com"
+bucket = "athena-artifacts"
+region = "us-east-1"
+insecure = false
+access_key_secret = { name = "athena-s3", key = "accessKey" }
+secret_key_secret = { name = "athena-s3", key = "secretKey" }
+
+[artifact]
+# The per-binary tarball object key. `cargo athena build` substitutes
+# {crate}/{version}/{bin}; a literal here keeps example goldens stable.
+key = "athena/bin/example/0.1.0/app.tar.gz"
+
+[bootstrap]
+# `default_image` omitted -> busybox:1.36-musl (multi-arch, has sh/tar/uname).
+# Per-#[container(image = "...")] always overrides this.
+targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]

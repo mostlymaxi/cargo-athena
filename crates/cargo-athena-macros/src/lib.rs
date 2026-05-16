@@ -166,15 +166,15 @@ fn with_host_rewritten(func: &ItemFn) -> ItemFn {
 // ---------------------------------------------------------------------------
 
 struct ContainerArgs {
-    image: String,
-    bin: String,
+    /// Arbitrary, user-chosen runtime image (the point of `#[container]`).
+    /// `None` => fall back to `[bootstrap].default_image` from athena.toml.
+    image: Option<String>,
     name: Option<String>,
 }
 
 fn parse_container_args(attr: TokenStream) -> ContainerArgs {
     let mut args = ContainerArgs {
-        image: "REPLACE_ME".to_string(),
-        bin: "app".to_string(),
+        image: None,
         name: None,
     };
     if attr.is_empty() {
@@ -191,9 +191,12 @@ fn parse_container_args(attr: TokenStream) -> ContainerArgs {
         }) = m.value
         {
             match key.as_str() {
-                "image" => args.image = s.value(),
-                "bin" => args.bin = s.value(),
+                "image" => args.image = Some(s.value()),
                 "name" => args.name = Some(s.value()),
+                "bin" => panic!(
+                    "#[container] no longer takes `bin`: the athena binary is \
+                     delivered as an Argo artifact and exec'd by the bootstrap"
+                ),
                 other => panic!("unknown #[container] argument `{other}`"),
             }
         }
@@ -225,8 +228,10 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let inputs_slice = str_slice(&arg_names);
     let host_slice = str_slice(&scan.host_paths);
     let callee_slice = str_slice(&scan.callees);
-    let image = &cfg.image;
-    let bin = &cfg.bin;
+    let image_opt = match &cfg.image {
+        Some(img) => quote! { ::core::option::Option::Some(#img) },
+        None => quote! { ::core::option::Option::None },
+    };
     let vis = &func.vis;
 
     let expanded = quote! {
@@ -267,6 +272,13 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                     #host_slice, #callee_slice);
                 let (__vols, __mounts) =
                     ::cargo_athena::host_path_volumes(&__paths);
+                // Arbitrary user image + the arch-resolving bootstrap that
+                // pulls & exec's the athena binary delivered as an artifact.
+                let __d = ::cargo_athena::container_delivery(
+                    __ctx,
+                    <Self as ::cargo_athena::Template>::ARGO_NAME,
+                    #image_opt,
+                );
                 ::cargo_athena::api::Template {
                     name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
                     inputs: ::core::option::Option::Some(::cargo_athena::api::Inputs {
@@ -276,7 +288,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                                 ..::core::default::Default::default()
                             } ),*
                         ],
-                        ..::core::default::Default::default()
+                        artifacts: ::std::vec![ __d.artifact ],
                     }),
                     outputs: ::core::option::Option::Some(::cargo_athena::api::Outputs {
                         parameters: ::std::vec![ ::cargo_athena::api::Parameter {
@@ -292,12 +304,9 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                         ..::core::default::Default::default()
                     }),
                     container: ::core::option::Option::Some(::cargo_athena::api::Container {
-                        image: #image.to_string(),
-                        command: ::std::vec![ #bin.to_string() ],
-                        args: ::std::vec![
-                            "--cargo-athena-template".to_string(),
-                            <Self as ::cargo_athena::Template>::ARGO_NAME.to_string()
-                        ],
+                        image: __d.image,
+                        command: __d.command,
+                        args: __d.args,
                         volume_mounts: __mounts,
                         ..::core::default::Default::default()
                     }),
@@ -310,8 +319,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                 if !__out.enter(<Self as ::cargo_athena::Template>::ARGO_NAME) {
                     return;
                 }
-                let __t = <Self as ::cargo_athena::Template>::build(__out.ctx());
-                __out.add_template(__t);
+                __out.add_builder(<Self as ::cargo_athena::Template>::build);
                 __out.add_runner(
                     <Self as ::cargo_athena::Template>::ARGO_NAME,
                     <Self as ::cargo_athena::Template>::run,
@@ -646,8 +654,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
                 if !__out.enter(<Self as ::cargo_athena::Template>::ARGO_NAME) {
                     return;
                 }
-                let __t = <Self as ::cargo_athena::Template>::build(__out.ctx());
-                __out.add_template(__t);
+                __out.add_builder(<Self as ::cargo_athena::Template>::build);
                 #(
                     <#callee_paths as ::cargo_athena::Template>::collect(__out);
                 )*

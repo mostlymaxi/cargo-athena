@@ -38,7 +38,7 @@ pub fn ingest(source: String) {
 
 // --- containers ------------------------------------------------------------
 
-#[container(image = "ghcr.io/acme/fetch:1.2.3", bin = "/usr/local/bin/fetch")]
+#[container(image = "ghcr.io/acme/fetch:1.2.3")]
 pub fn fetch(url: String) -> String {
     let _token = cargo_athena::host!("/secrets/token");
     format!("data-from:{url}")

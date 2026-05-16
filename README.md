@@ -10,8 +10,31 @@ referencing the type force-links its defining crate. Two worlds, one binary:
 - **Emit** — `main` calls `entrypoint::<Root>()`; we walk the closure from
   `Root` and print **one `WorkflowTemplate` document per template**
   (cross-refs via `templateRef`) plus a runnable `Workflow` for `Root`.
-- **Run** — Argo invokes the binary with `--cargo-athena-template <name>`; it
-  deserializes inputs, runs the real container body, serializes outputs.
+  Every container template carries an input artifact (the binary tarball,
+  from the `athena.toml` S3 repo) and an arch-resolving bootstrap.
+- **Run** — the bootstrap `uname`s, `exec`s the matching static-musl
+  `app-<triple>` from the artifact tarball with `--cargo-athena-template
+  <name>`; it deserializes inputs, runs the real container body, serializes
+  outputs.
+
+### Binary delivery
+
+The single composed binary is cross-compiled (`cargo athena build`, static
+musl) for the `athena.toml` target matrix into one `.tar.gz`, stored in an
+S3-compatible `ArtifactRepository`. `cargo athena emit` injects that
+artifact + a `sh` bootstrap into every container template:
+
+```
+inputs.artifacts: [ athena-dist @ /athena/dist.tar.gz, s3{…}, archive:none ]
+container: image = #[container(image=…)] or [bootstrap].default_image
+           (multi-arch, e.g. busybox:1.36-musl — kubelet picks node arch);
+           command/args = sh bootstrap: uname → app-<triple> → exec
+```
+
+`#[container(image = "…")]` is arbitrary and per-container by design (run
+any image/runtime); it just needs a POSIX `sh`/`tar`/`uname`. Architecture
+is resolved at pod start (`uname`), so one template runs on any node arch.
+`athena.toml` is required by `cargo athena` (never read in-pod).
 
 ```rust
 use cargo_athena::{workflow, container, fragment};   // `host!` used path-qualified
@@ -84,11 +107,18 @@ whole upstream closure is force-linked and emitted automatically (see
 ## Getting started
 
 ```sh
-nix develop                    # Rust 1.95 + protoc + buf + cargo tooling
+nix develop                    # Rust 1.95 + musl targets + zig + protoc + buf
 
-# Emit the multi-doc WorkflowTemplate stream
+# athena.toml (S3 ArtifactRepository + target matrix) is required by
+# `cargo athena`; this repo ships one at the root used by the examples.
+
+# Emit the multi-doc WorkflowTemplate stream (artifact + bootstrap injected)
 cargo run -q -p cargo-athena-example-basic
-cargo run -q -p cargo-athena-cli -- athena build --package cargo-athena-example-basic
+cargo run -q -p cargo-athena-cli -- athena emit --package cargo-athena-example-basic
+
+# Cross-compile the static-musl binaries + show the upload key (no compile)
+cargo run -q -p cargo-athena-cli -- athena build \
+  --package cargo-athena-example-basic --print
 
 # Run one container's real body in-process (templates keyed by <crate>-<fn>)
 cargo run -q -p cargo-athena-cli -- athena run \

@@ -9,3 +9,6 @@ description = "The `cargo athena` subcommand"
 [[bin]]
 name = "cargo-athena"
 path = "src/main.rs"
+
+[dependencies]
+cargo-athena-core = { workspace = true }

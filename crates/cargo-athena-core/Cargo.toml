@@ -11,4 +11,5 @@ cargo-athena-api = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
+toml = { workspace = true }
 inventory = { workspace = true }

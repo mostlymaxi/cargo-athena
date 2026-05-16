@@ -92,7 +92,38 @@ message ValueFrom {
 message Artifact {
   string name = 1;
   string path = 2;
+  // Where the artifact lives. For cargo-athena this is the binary tarball.
+  S3Artifact s3 = 3;
+  // How the object is (un)packed. cargo-athena sets `none` and untars in
+  // the bootstrap itself.
+  ArchiveStrategy archive = 4;
+  // Octal file mode applied to the downloaded file (e.g. 0o755).
+  optional int32 mode = 5;
 }
+
+// Mirrors a k8s SecretKeySelector — points at a key in a Secret.
+message SecretKeySelector {
+  string name = 1;
+  string key = 2;
+}
+
+// Mirrors Argo's S3Artifact.
+message S3Artifact {
+  string endpoint = 1;
+  string bucket = 2;
+  string region = 3;
+  bool insecure = 4;
+  string key = 5;
+  SecretKeySelector access_key_secret = 6;
+  SecretKeySelector secret_key_secret = 7;
+}
+
+message ArchiveStrategy {
+  // Present (and empty) means "do not archive/extract".
+  NoneStrategy none = 1;
+}
+
+message NoneStrategy {}
 
 message Arguments {
   repeated Parameter parameters = 1;

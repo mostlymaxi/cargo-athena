@@ -56,6 +56,9 @@
             # protobuf toolchain for cargo-athena-api codegen.
             pkgs.protobuf
             pkgs.buf
+            # static-musl cross-compilation for `cargo athena build`.
+            pkgs.cargo-zigbuild
+            pkgs.zig
           ];
 
           # Lets rust-analyzer find the standard library sources.
