@@ -35,10 +35,12 @@ jobs:
       # and GitHub's 10 GB LRU.
       - uses: nix-community/cache-nix-action@v6
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'rust-toolchain.toml') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
+          # `v2` salt: busts caches poisoned by the earlier GC'd runs
+          # (dangling rust-docs symlinks); bump again if ever re-poisoned.
+          primary-key: nix-v2-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-v2-${{ runner.os }}-
           purge: true
-          purge-prefixes: nix-${{ runner.os }}-
+          purge-prefixes: nix-v2-${{ runner.os }}-
           purge-created: 0
           purge-primary-key: never
       - uses: actions/cache@v4
@@ -92,8 +94,10 @@ jobs:
       # Restore the Nix store cache the build job populated (same key).
       - uses: nix-community/cache-nix-action@v6
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'rust-toolchain.toml') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
+          # `v2` salt: busts caches poisoned by the earlier GC'd runs
+          # (dangling rust-docs symlinks); bump again if ever re-poisoned.
+          primary-key: nix-v2-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-v2-${{ runner.os }}-
           purge: false
       - uses: actions/download-artifact@v4
         with:
