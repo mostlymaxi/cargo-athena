@@ -1,9 +1,11 @@
 //! Cross-module + cross-CRATE importing. `importing_pipeline` composes:
-//!   * `cargo_athena_example_smoke::pipeline` — a workflow from *another
-//!     crate*, used exactly like a local one (the wormhole force-links the
-//!     whole upstream closure across the crate boundary), and
-//!   * `local::module_pipeline` — a workflow in *another module* of this
-//!     crate, composed the same way.
+//!
+//! * `cargo_athena_example_smoke::pipeline` — a workflow from *another
+//!   crate*, used exactly like a local one (the wormhole force-links the
+//!   whole upstream closure across the crate boundary), and
+//! * `local::module_pipeline` — a workflow in *another module* of this
+//!   crate, composed the same way.
+//!
 //! If the type-wormhole leaked at either boundary, the emitted stream
 //! would be missing templates and the golden would fail.
 

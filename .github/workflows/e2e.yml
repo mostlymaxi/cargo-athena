@@ -1,7 +1,10 @@
 name: e2e
 
-# Only on main (resource-heavy: real kind clusters per Argo version).
+# Resource-heavy (real kind clusters per Argo version): PRs to main +
+# main itself. main will be branch-protected on this.
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
