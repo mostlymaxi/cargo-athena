@@ -223,3 +223,50 @@ pub fn pipeline_fanout() {
     let b = a.fan_out(|x| caps(x, "!".to_string()));
     summarize(b);
 }
+
+// --- conditionals (`if`/`else`/`else if` -> Argo `when` wrappers) -----------
+
+#[container]
+pub fn decide(seed: String) -> i64 {
+    seed.len() as i64
+}
+
+#[container]
+pub fn left(x: i64) -> String {
+    format!("L{x}")
+}
+
+#[container]
+pub fn right(x: i64) -> String {
+    format!("R{x}")
+}
+
+#[container]
+pub fn note(msg: String) {
+    println!("{msg}");
+}
+
+/// Real Rust `if` lowered to synthesized `when`-gated wrapper workflows:
+///
+/// * **value-`if`** — `let chosen = if n > 3 { left(n) } else { right(n) };`
+///   becomes one wrapper whose `outputs.parameters.return` selects the
+///   arm that ran (status-ternary); `chosen` is consumed downstream as a
+///   normal returning-workflow ref.
+/// * **statement `if`/`else if`/`else`** with mixed conditions: numeric
+///   equality (`n == 0`), `.field` access (`m.id == "abc"`), and `&&`.
+///
+/// The ghost type-checks the conditions + both arms (and that the
+/// value-`if` arms agree on `String`) as ordinary Rust.
+#[workflow]
+pub fn pipeline_if() {
+    let cnt = decide("hello".to_string());
+    let m = make_meta();
+    let chosen = if cnt > 3 { left(cnt) } else { right(cnt) };
+    if cnt == 0 {
+        note("zero".to_string());
+    } else if m.id == "abc" && cnt > 1 {
+        note(chosen);
+    } else {
+        note("other".to_string());
+    }
+}

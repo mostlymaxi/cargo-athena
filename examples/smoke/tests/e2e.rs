@@ -12,6 +12,7 @@ const BIN_HOOKS: &str = env!("CARGO_BIN_EXE_smoke-hooks");
 const BIN_ONEXIT: &str = env!("CARGO_BIN_EXE_smoke-onexit");
 const BIN_FIELDS: &str = env!("CARGO_BIN_EXE_smoke-fields");
 const BIN_FANOUT: &str = env!("CARGO_BIN_EXE_smoke-fanout");
+const BIN_IF: &str = env!("CARGO_BIN_EXE_smoke-if");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -97,6 +98,14 @@ fn emit_pipeline_fields() {
 #[test]
 fn emit_pipeline_fanout() {
     assert_golden("pipeline_fanout.yaml", &run_bin(BIN_FANOUT, &[]));
+}
+
+/// `if`/`else`/`else if` lowering: synthesized `when`-gated wrapper
+/// workflows + a value-`if` whose `outputs.parameters.return` selects the
+/// taken branch via a status-ternary `valueFrom.expression`.
+#[test]
+fn emit_pipeline_if() {
+    assert_golden("pipeline_if.yaml", &run_bin(BIN_IF, &[]));
 }
 
 /// Run mode: a container that returns a value (JSON to stdout).

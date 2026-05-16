@@ -1,0 +1,5 @@
+error: unsupported `if` condition. Allowed: comparisons (== != < <= > >=) and `&&`/`||`/`!` over a #[workflow] input, a prior `let = template(...)` binding, an `a.field` of one, or a literal. Method calls, arithmetic, function calls and casts aren't lowered.
+  --> tests/ui/wf_if_cond_unsupported.rs:15:8
+   |
+15 |     if s.len() > 0 {
+   |        ^^^^^^^

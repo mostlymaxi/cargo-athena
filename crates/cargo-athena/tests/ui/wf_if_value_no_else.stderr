@@ -1,0 +1,5 @@
+error: an `if` used as a value needs an `else` (both branches must produce the value) — Rust requires this too.
+  --> tests/ui/wf_if_value_no_else.rs:14:14
+   |
+14 |     let _b = if f { act() };
+   |              ^^^^^^^^^^^^^^
