@@ -110,4 +110,7 @@ jobs:
           filename: athena-argo-${{ matrix.argo }}.json
           label: argo ${{ matrix.argo }}
           message: ${{ job.status == 'success' && 'passing' || 'failing' }}
-          color: ${{ job.status == 'success' && 'brightgreen' || 'red' }}
+          # Match GitHub's native Actions badge palette (not shields'
+          # neon brightgreen #4c1), so these sit consistently next to the
+          # clippy/test/e2e workflow badges.
+          color: ${{ job.status == 'success' && '2da44e' || 'cf222e' }}
