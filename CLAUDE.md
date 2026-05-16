@@ -142,7 +142,21 @@ adding a field.
 
 - **Commit identity MUST be `Maxi Saparov <max.saparov@gmail.com>`** (not
   `maxi.saparov@`).
-- `examples/e2e/src/lib.rs` is a frozen golden fixture — edits require
-  intentional `UPDATE_EXPECT=1` regen. `examples/e2e-consumer` is the
-  empirical proof the type-wormhole force-links across crates.
+- **Example/test layout** (post-cleanup):
+  - `examples/basic` — minimal pure example (no tests).
+  - `examples/smoke` — broad "all features" fixture; `src/lib.rs` is a
+    frozen golden fixture (edits require intentional `UPDATE_EXPECT=1`).
+    Bins `smoke`/`smoke-returns`; `tests/e2e.rs` golden+run.
+  - `examples/importing` — cross-MODULE + cross-CRATE importing (depends
+    on `../smoke`, imports its `pipeline`); empirical proof the
+    type-wormhole force-links across both boundaries. `tests/e2e.rs`.
+  - `examples/e2e` — the **ONLY** crate the GHA kind e2e builds+submits
+    (`cargo-athena-example-e2e`, bin `e2e`; `scripts/e2e-test.sh`,
+    `.github/workflows/e2e.yml`). No in-process tests.
+  - `crates/cargo-athena/tests/` — `smoke.rs` (in-process
+    Collector/Template module assertions) + `ui.rs`/`ui/*` (trybuild
+    compile-fail contracts). trybuild builds `ui/*` as crates depending
+    on `cargo-athena`.
+- Renaming an example crate changes the `<crate>-<fn>` Argo names ⇒ regen
+  all goldens with `UPDATE_EXPECT=1`.
 - Never `git checkout -- <file>` to clean a probe (nukes uncommitted work).

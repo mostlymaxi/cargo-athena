@@ -5,7 +5,7 @@ Compile regular Rust into [Argo Workflow](https://argoproj.github.io/workflows/)
 [![e2e](https://github.com/mostlymaxi/cargo-athena/actions/workflows/e2e.yml/badge.svg?branch=main)](https://github.com/mostlymaxi/cargo-athena/actions/workflows/e2e.yml)
 
 **Supported Argo Workflows** — every push to `main` submits the
-`examples/integration` workflow to a real Argo + MinIO per version and
+`examples/e2e` workflow to a real Argo + MinIO per version and
 asserts it `Succeeded`; these badges are that live result:
 
 | Argo | Support | e2e |
@@ -70,9 +70,9 @@ data-dependency `dag:`; and inside `#[container]`/`#[fragment]`,
 | `cargo-athena-api` | Hand-owned `serde` subset of the Argo API (no protobuf); conformance guarded by the kind e2e. |
 | `cargo-athena-core` | Runtime: `Template` trait, closure walk, multi-doc emit, `BuildCtx`, `host!`. |
 | `cargo-athena-macros` | `#[workflow]`/`#[container]`/`#[fragment]` proc macros. |
-| `cargo-athena` | Facade users depend on. |
+| `cargo-athena` | Facade users depend on; `tests/` = in-process module/smoke + trybuild compile-fail contracts. |
 | `cargo-athena-cli` | The `cargo athena` subcommand. |
-| `examples/` | `basic` (regression), `e2e` (golden fixture), `e2e-consumer` (cross-crate proof), `integration` (kind e2e). |
+| `examples/` | `basic` (minimal), `smoke` (all-features golden fixture), `importing` (cross-module + cross-crate), `e2e` (the kind-e2e crate GHA submits). |
 
 ## Getting started
 
