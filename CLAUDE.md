@@ -18,6 +18,27 @@ README is intentionally lean (user-facing); the *why* lives here.
   `#[workflow(name=…)]`).
 - **Hybrid DAG**: `#[workflow]` bodies are *statically analyzed, not
   executed* — the seam for a future functional promise-graph.
+- **Ghost type-check (data-flow IS compiler-enforced).** Every
+  `#[container]`/`#[workflow]` also emits `impl Ident { #[doc(hidden)]
+  pub fn __athena_sig(<real args>) -> <real ret> { unimplemented!() } }`
+  (never run; `pub`+hidden ⇒ resolves cross-crate/module like the
+  wormhole type). `#[workflow]` additionally emits a hidden never-called
+  `fn __athena_tc_<ident>(<wf inputs>) -> <wf ret> { <body> }` where the
+  body is the *faithful* workflow body with builder chains stripped and
+  every `C(args)` → `C::__athena_sig(args)`. So rustc fully type-checks
+  arg/arity/field/return flow on the analyzed body (a bad `a.field`,
+  wrong type, or consuming a non-returning `#[workflow]` is now a
+  **compile error** — this caught two latent fixture bugs). The body is
+  *faithful* (real move semantics): fan-out needs an explicit `.clone()`
+  — which is *correct*, Argo copies the output param into each consumer.
+  Borrows can't cross the wormhole (serde `DeserializeOwned`/`Serialize`
+  on container I/O already forbids `&T`); `&a`/`&mut a` ⇒ ghost type
+  mismatch — nothing special needed. In args, `.clone()`/`.to_owned()`
+  are type-preserving (allowed on binding/input; emit = receiver);
+  `.to_string()`/`.into()` are **literal-only** (on a binding they'd
+  change the Rust type while the emit still passes the raw serialized
+  param → silent ghost↔Argo mismatch). `__athena_sig`/the ghost are also
+  what make calling a `#[fragment]`/regular fn from `#[workflow]` fail.
 - **`#[workflow]` body contract (strict, fail-loud).** Only
   `let x = template(args);` and `template(args);` are lowered. Every other
   statement (if/match, for/while/loop, macros, method calls, `let`

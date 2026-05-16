@@ -24,6 +24,25 @@ fn kebab(s: &str) -> String {
     s.replace('_', "-").to_ascii_lowercase()
 }
 
+/// A never-run signature shim with the fn's *real* arg + return types,
+/// as an inherent fn on the identity struct. Lets the `#[workflow]` ghost
+/// type-check data flow (`Callee::__athena_sig(args)`) while the public
+/// identity stays a unit struct (the wormhole). `pub` + `#[doc(hidden)]`
+/// so it resolves cross-crate/module exactly like the type path.
+fn sig_shim(ident: &syn::Ident, func: &ItemFn) -> TokenStream2 {
+    let inputs = &func.sig.inputs;
+    let output = &func.sig.output;
+    quote! {
+        impl #ident {
+            #[doc(hidden)]
+            #[allow(dead_code, unused_variables, clippy::all)]
+            pub fn __athena_sig(#inputs) #output {
+                ::core::unimplemented!("athena ghost: never executed")
+            }
+        }
+    }
+}
+
 /// `(ident, type)` for each non-receiver fn argument.
 fn fn_args(func: &ItemFn) -> Vec<(syn::Ident, Box<Type>)> {
     func.sig
@@ -229,6 +248,64 @@ fn with_host_rewritten(func: &ItemFn) -> ItemFn {
     out
 }
 
+/// The builder methods peeled off task calls (kept in sync with
+/// `peel_builders`). Stripped from the `#[workflow]` ghost since they
+/// aren't real methods on the values.
+fn is_builder_method(m: &syn::Ident) -> bool {
+    matches!(
+        m.to_string().as_str(),
+        "continue_on"
+            | "on_exit"
+            | "on_success"
+            | "on_failure"
+            | "on_error"
+            | "hook_if"
+    )
+}
+
+/// Rewrites a clone of a `#[workflow]` body into the never-run ghost:
+/// strip builder chains (→ their receiver) and rewrite every template
+/// call `C(args)` → `C::__athena_sig(args)`. The result is faithful Rust
+/// (move semantics intact — fan-out needs an explicit `.clone()`, which
+/// mirrors Argo copying the output param into each consumer), so rustc
+/// enforces arg/field/return types on the analyzed body.
+struct GhostRewrite;
+
+impl VisitMut for GhostRewrite {
+    fn visit_expr_mut(&mut self, e: &mut Expr) {
+        while let Expr::MethodCall(mc) = e {
+            if is_builder_method(&mc.method) {
+                let recv = (*mc.receiver).clone();
+                *e = recv;
+            } else {
+                break;
+            }
+        }
+        if let Expr::Call(c) = e
+            && let Expr::Path(p) = &mut *c.func
+        {
+            p.path
+                .segments
+                .push(syn::PathSegment::from(format_ident!("__athena_sig")));
+        }
+        syn::visit_mut::visit_expr_mut(self, e);
+    }
+}
+
+/// Build the hidden, never-called type-check ghost for a `#[workflow]`.
+fn ghost_fn(func: &ItemFn) -> TokenStream2 {
+    let mut block = func.block.clone();
+    GhostRewrite.visit_block_mut(&mut block);
+    let name = format_ident!("__athena_tc_{}", func.sig.ident);
+    let inputs = &func.sig.inputs;
+    let output = &func.sig.output;
+    quote! {
+        #[doc(hidden)]
+        #[allow(dead_code, unused, clippy::all)]
+        fn #name(#inputs) #output #block
+    }
+}
+
 // ---------------------------------------------------------------------------
 // #[container]
 // ---------------------------------------------------------------------------
@@ -280,6 +357,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let ns_keys: Vec<&String> = cfg.node_selector.keys().collect();
     let ns_vals: Vec<&String> = cfg.node_selector.values().collect();
     let vis = &func.vis;
+    let sig_block = sig_shim(&ident, &func);
 
     // `#[container(on_exit = t)]`: Template::ON_EXIT (root-only effect) +
     // force-link/emit the handler template.
@@ -303,6 +381,10 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
         // The importable identity: a type, not a fn.
         #[allow(non_camel_case_types)]
         #vis struct #ident;
+
+        // Never-run typed signature shim (lets the #[workflow] ghost
+        // type-check data flow through this template).
+        #sig_block
 
         impl ::cargo_athena::Template for #ident {
             const ARGO_NAME: &'static str = #argo_name;
@@ -498,9 +580,10 @@ fn unwrap_expr(e: &Expr) -> &Expr {
 
 const UNSUPPORTED_ARG: &str = "unsupported argument in a #[workflow] call. \
 Allowed: a literal, a workflow input parameter, a binding from a prior \
-`let x = template(...);`, or `.to_string()`/`.to_owned()`/`.into()` on one \
-of those. Computed values, regular variables/consts, method calls, and \
-other expressions aren't lowered yet.";
+`let x = template(...);`, `.clone()`/`.to_owned()` on a binding/input, or \
+`.to_string()`/`.into()` on a string literal. Computed values, regular \
+variables/consts, other method calls, and other expressions aren't \
+lowered yet.";
 
 /// Strict: a literal, a previous-task reference, or a workflow-input
 /// reference. Anything else is a hard `compile_error!` (no silent
@@ -518,15 +601,45 @@ fn expr_to_arg(
             syn::Lit::Bool(b) => Arg::Lit(b.value.to_string()),
             other => Arg::Lit(quote!(#other).to_string()),
         }),
-        // `<x>.to_string()/.to_owned()/.into()` — only if the receiver is
-        // itself a supported arg (literal / input / prior binding).
-        Expr::MethodCall(mc)
-            if matches!(
-                mc.method.to_string().as_str(),
-                "to_string" | "to_owned" | "into"
-            ) && mc.args.is_empty() =>
-        {
-            expr_to_arg(&mc.receiver, bindings, inputs)
+        // Owned-value conversions, emitted identically to the receiver:
+        //  * `.clone()`/`.to_owned()` are type-preserving → allowed on
+        //    any supported receiver. `.clone()` is the explicit fan-out
+        //    marker (Argo copies the output param into each consumer); it
+        //    vanishes in the emit.
+        //  * `.to_string()`/`.into()` can CHANGE the type, but the emit
+        //    only ever passes the receiver's raw serialized param — so on
+        //    a binding/input that would mismatch the ghost's type and
+        //    break the (de)serialize contract. Restrict them to a string
+        //    literal (where they're an identity for the emit).
+        Expr::MethodCall(mc) if mc.args.is_empty() => {
+            match mc.method.to_string().as_str() {
+                "clone" | "to_owned" => {
+                    expr_to_arg(&mc.receiver, bindings, inputs)
+                }
+                "to_string" | "into" => {
+                    if matches!(
+                        unwrap_expr(&mc.receiver),
+                        Expr::Lit(syn::ExprLit {
+                            lit: syn::Lit::Str(_),
+                            ..
+                        })
+                    ) {
+                        expr_to_arg(&mc.receiver, bindings, inputs)
+                    } else {
+                        Err(syn::Error::new_spanned(
+                            mc,
+                            "`.to_string()`/`.into()` in a #[workflow] arg \
+                             is only allowed on a string literal. On a \
+                             binding/input the value already has the right \
+                             serialized type; converting it would mismatch \
+                             the emitted Argo parameter (the raw serialized \
+                             value) and break the (de)serialize contract — \
+                             pass it directly, or `.clone()` to fan out.",
+                        ))
+                    }
+                }
+                _ => Err(syn::Error::new_spanned(mc, UNSUPPORTED_ARG)),
+            }
         }
         Expr::Path(p) if p.path.segments.len() == 1 => {
             let name = p.path.segments[0].ident.to_string();
@@ -1339,10 +1452,19 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         None => quote! {},
     };
 
+    let sig_block = sig_shim(&ident, &func);
+    let ghost = ghost_fn(&func);
+
     let expanded = quote! {
         // The body is compiled to Argo; the public identity is a type.
         #[allow(non_camel_case_types)]
         #vis struct #ident;
+
+        // Typed signature shim + never-run ghost: rustc type-checks the
+        // analyzed body's data flow (arg/field/return types) even though
+        // the body itself isn't compiled.
+        #sig_block
+        #ghost
 
         impl ::cargo_athena::Template for #ident {
             const ARGO_NAME: &'static str = #argo_name;

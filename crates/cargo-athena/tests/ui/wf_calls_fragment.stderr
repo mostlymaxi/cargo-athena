@@ -3,3 +3,9 @@ error[E0573]: expected type, found function `frag`
    |
 10 |     frag();
    |     ^^^^ not a type
+
+error[E0433]: cannot find module or crate `frag` in this scope
+  --> tests/ui/wf_calls_fragment.rs:10:5
+   |
+10 |     frag();
+   |     ^^^^ function `frag` is not a crate or module
