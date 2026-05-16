@@ -66,7 +66,11 @@ pub fn branchy(mode: String) {
     println!("branchy mode={mode}");
 }
 
-#[container(image = "ghcr.io/acme/combine:latest", service_account = "athena-runner")]
+#[container(
+    image = "ghcr.io/acme/combine:latest",
+    service_account = "athena-runner",
+    node_selector = { "kubernetes.io/arch" = "amd64", "disktype" = "ssd" }
+)]
 pub fn combine(x: String, y: String) -> String {
     format!("{x}+{y}")
 }

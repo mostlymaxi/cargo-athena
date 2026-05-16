@@ -14,7 +14,6 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::parse::Parser;
 use syn::{Expr, ItemFn, Path, Stmt, Type, visit::Visit, visit_mut::VisitMut};
 
 // ---------------------------------------------------------------------------
@@ -169,27 +168,34 @@ fn make_argo_name(name_override: &Option<String>, rust_name: &str) -> String {
     }
 }
 
-/// Parse an optional `name = "..."` from an attribute arg list.
-fn parse_name_override(attr: &TokenStream2) -> Option<String> {
+// Attribute args, parsed with `deluxe` (all fields optional/defaulted).
+
+/// `#[container(image = "...", name = "...", service_account = "...",
+///   node_selector = { "k" = "v", ... })]`
+#[derive(deluxe::ParseMetaItem, Default)]
+#[deluxe(default)]
+struct ContainerArgs {
+    image: Option<String>,
+    name: Option<String>,
+    service_account: Option<String>,
+    node_selector: std::collections::BTreeMap<String, String>,
+}
+
+/// `#[workflow(name = "...", steps)]` — bare `steps` opts into Argo
+/// `steps:` (sequential) instead of the default `dag:`.
+#[derive(deluxe::ParseMetaItem, Default)]
+#[deluxe(default)]
+struct WorkflowArgs {
+    name: Option<String>,
+    steps: deluxe::Flag,
+}
+
+/// Parse attribute args into `T`, or return a `compile_error!`.
+fn parse_attr<T: deluxe::ParseMetaItem + Default>(attr: TokenStream) -> Result<T, TokenStream> {
     if attr.is_empty() {
-        return None;
+        return Ok(T::default());
     }
-    let parser =
-        syn::punctuated::Punctuated::<syn::MetaNameValue, syn::Token![,]>::parse_terminated;
-    let metas = parser
-        .parse2(attr.clone())
-        .expect("expected `key = \"value\"` arguments");
-    for m in metas {
-        if m.path.is_ident("name")
-            && let Expr::Lit(syn::ExprLit {
-                lit: syn::Lit::Str(s),
-                ..
-            }) = m.value
-        {
-            return Some(s.value());
-        }
-    }
-    None
+    deluxe::parse2::<T>(attr.into()).map_err(|e| e.into_compile_error().into())
 }
 
 /// Rewrites every decl macro (`host!`, `load_artifact*!`,
@@ -223,53 +229,13 @@ fn with_host_rewritten(func: &ItemFn) -> ItemFn {
 // #[container]
 // ---------------------------------------------------------------------------
 
-struct ContainerArgs {
-    /// Arbitrary, user-chosen runtime image (the point of `#[container]`).
-    /// `None` => fall back to `[bootstrap].default_image` from athena.toml.
-    image: Option<String>,
-    name: Option<String>,
-    /// `None` => fall back to `[defaults].service_account`.
-    service_account: Option<String>,
-}
-
-fn parse_container_args(attr: TokenStream) -> ContainerArgs {
-    let mut args = ContainerArgs {
-        image: None,
-        name: None,
-        service_account: None,
-    };
-    if attr.is_empty() {
-        return args;
-    }
-    let parser =
-        syn::punctuated::Punctuated::<syn::MetaNameValue, syn::Token![,]>::parse_terminated;
-    let metas = parser.parse(attr).expect("expected `key = \"value\"` arguments");
-    for m in metas {
-        let key = m.path.get_ident().map(|i| i.to_string()).unwrap_or_default();
-        if let Expr::Lit(syn::ExprLit {
-            lit: syn::Lit::Str(s),
-            ..
-        }) = m.value
-        {
-            match key.as_str() {
-                "image" => args.image = Some(s.value()),
-                "name" => args.name = Some(s.value()),
-                "service_account" => args.service_account = Some(s.value()),
-                "bin" => panic!(
-                    "#[container] no longer takes `bin`: the athena binary is \
-                     delivered as an Argo artifact and exec'd by the bootstrap"
-                ),
-                other => panic!("unknown #[container] argument `{other}`"),
-            }
-        }
-    }
-    args
-}
-
 #[proc_macro_attribute]
 pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = syn::parse_macro_input!(item as ItemFn);
-    let cfg = parse_container_args(attr);
+    let cfg: ContainerArgs = match parse_attr(attr) {
+        Ok(c) => c,
+        Err(e) => return e,
+    };
 
     let ident = func.sig.ident.clone();
     let rust_name = ident.to_string();
@@ -307,6 +273,8 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(sa) => quote! { ::core::option::Option::Some(#sa) },
         None => quote! { ::core::option::Option::None },
     };
+    let ns_keys: Vec<&String> = cfg.node_selector.keys().collect();
+    let ns_vals: Vec<&String> = cfg.node_selector.values().collect();
     let vis = &func.vis;
 
     let expanded = quote! {
@@ -405,6 +373,12 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                     volumes: __vols,
                     service_account_name:
                         ::cargo_athena::service_account(__ctx, #sa_opt),
+                    node_selector: {
+                        let mut __ns = ::std::collections::BTreeMap::new();
+                        #( __ns.insert(
+                            #ns_keys.to_string(), #ns_vals.to_string()); )*
+                        __ns
+                    },
                     ..::core::default::Default::default()
                 }
             }
@@ -586,9 +560,12 @@ fn analyze_workflow(func: &ItemFn) -> Vec<Node> {
     nodes
 }
 
-fn node_tokens(node: &Node) -> TokenStream2 {
+/// `steps`: emit an Argo `steps` group (sequential, refs via
+/// `{{steps.X…}}`, no `dependencies`) instead of a `dag` task.
+fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
     let task = &node.task;
     let callee = &node.callee;
+    let ref_scope = if steps { "{{steps." } else { "{{tasks." };
 
     let arg_stmts = node.args.iter().enumerate().map(|(i, a)| match a {
         Arg::Lit(v) => quote! {
@@ -601,20 +578,27 @@ fn node_tokens(node: &Node) -> TokenStream2 {
                 });
             }
         },
-        Arg::Ref(dep) => quote! {
-            {
-                let __name = __inputs.get(#i).copied().unwrap_or_default().to_string();
-                __deps.push(#dep.to_string());
-                let mut __v = ::std::string::String::from("{{tasks.");
-                __v.push_str(#dep);
-                __v.push_str(".outputs.result}}");
-                __params.push(::cargo_athena::api::Parameter {
-                    name: __name,
-                    value: ::core::option::Option::Some(__v),
-                    ..::core::default::Default::default()
-                });
+        Arg::Ref(dep) => {
+            let dep_push = if steps {
+                quote! {}
+            } else {
+                quote! { __deps.push(#dep.to_string()); }
+            };
+            quote! {
+                {
+                    let __name = __inputs.get(#i).copied().unwrap_or_default().to_string();
+                    #dep_push
+                    let mut __v = ::std::string::String::from(#ref_scope);
+                    __v.push_str(#dep);
+                    __v.push_str(".outputs.result}}");
+                    __params.push(::cargo_athena::api::Parameter {
+                        name: __name,
+                        value: ::core::option::Option::Some(__v),
+                        ..::core::default::Default::default()
+                    });
+                }
             }
-        },
+        }
         Arg::Input(name) => quote! {
             {
                 let __name = __inputs.get(#i).copied().unwrap_or_default().to_string();
@@ -630,6 +614,16 @@ fn node_tokens(node: &Node) -> TokenStream2 {
         },
     });
 
+    let push = if steps {
+        quote! {
+            __steps.push(::cargo_athena::api::ParallelSteps {
+                steps: ::std::vec![__step],
+            });
+        }
+    } else {
+        quote! { __tasks.push(__step); }
+    };
+
     quote! {
         {
             // Resolved by the type system across modules/crates:
@@ -644,7 +638,7 @@ fn node_tokens(node: &Node) -> TokenStream2 {
             #( #arg_stmts )*
             __deps.sort();
             __deps.dedup();
-            __tasks.push(::cargo_athena::api::DagTask {
+            let __step = ::cargo_athena::api::DagTask {
                 name: #task.to_string(),
                 template: ::std::string::String::new(),
                 dependencies: __deps,
@@ -659,7 +653,8 @@ fn node_tokens(node: &Node) -> TokenStream2 {
                         cluster_scope: false,
                     }
                 ),
-            });
+            };
+            #push
         }
     }
 }
@@ -667,12 +662,16 @@ fn node_tokens(node: &Node) -> TokenStream2 {
 #[proc_macro_attribute]
 pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = syn::parse_macro_input!(item as ItemFn);
-    let name_override = parse_name_override(&attr.into());
+    let cfg: WorkflowArgs = match parse_attr(attr) {
+        Ok(c) => c,
+        Err(e) => return e,
+    };
+    let steps_mode = cfg.steps.is_set();
 
     let vis = &func.vis;
     let ident = func.sig.ident.clone();
     let rust_name = ident.to_string();
-    let argo_name = make_argo_name(&name_override, &rust_name);
+    let argo_name = make_argo_name(&cfg.name, &rust_name);
 
     let scan = scan_body(&func);
     if !scan.host_paths.is_empty()
@@ -689,7 +688,10 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into();
     }
     let nodes = analyze_workflow(&func);
-    let node_blocks: Vec<_> = nodes.iter().map(node_tokens).collect();
+    let node_blocks: Vec<_> = nodes
+        .iter()
+        .map(|n| node_tokens(n, steps_mode))
+        .collect();
 
     // Distinct callee paths -> recurse their `collect` (force-links them).
     let mut seen_callees = std::collections::HashSet::new();
@@ -720,6 +722,36 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
+    // Default = `dag:` (parallel by data-deps). `#[workflow(steps)]` =
+    // `steps:` (one sequential group per statement).
+    let build_body = if steps_mode {
+        quote! {
+            let mut __steps:
+                ::std::vec::Vec<::cargo_athena::api::ParallelSteps> =
+                ::std::vec::Vec::new();
+            #( #node_blocks )*
+            ::cargo_athena::api::Template {
+                name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
+                inputs: #inputs_tokens,
+                steps: __steps,
+                ..::core::default::Default::default()
+            }
+        }
+    } else {
+        quote! {
+            let mut __tasks: ::std::vec::Vec<::cargo_athena::api::DagTask> =
+                ::std::vec::Vec::new();
+            #( #node_blocks )*
+            ::cargo_athena::api::Template {
+                name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
+                inputs: #inputs_tokens,
+                dag: ::core::option::Option::Some(
+                    ::cargo_athena::api::DagTemplate { tasks: __tasks }),
+                ..::core::default::Default::default()
+            }
+        }
+    };
+
     let expanded = quote! {
         // The body is compiled to Argo; the public identity is a type.
         #[allow(non_camel_case_types)]
@@ -734,17 +766,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
             fn build(_ctx: &::cargo_athena::BuildCtx)
                 -> ::cargo_athena::api::Template
             {
-                let mut __tasks: ::std::vec::Vec<::cargo_athena::api::DagTask> =
-                    ::std::vec::Vec::new();
-                #( #node_blocks )*
-                ::cargo_athena::api::Template {
-                    name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
-                    inputs: #inputs_tokens,
-                    dag: ::core::option::Option::Some(::cargo_athena::api::DagTemplate {
-                        tasks: __tasks,
-                    }),
-                    ..::core::default::Default::default()
-                }
+                #build_body
             }
 
             fn collect(__out: &mut ::cargo_athena::Collector) {

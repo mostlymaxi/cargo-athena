@@ -68,6 +68,18 @@ message Template {
   repeated Volume volumes = 7;
   // Per-template SA override (Argo runs the pod as this).
   string service_account_name = 8;
+  // Template-level pod scheduling (container templates).
+  map<string, string> node_selector = 9;
+  // `#[workflow(steps)]` body: sequential step groups (Argo `steps`).
+  repeated ParallelSteps steps = 10;
+}
+
+// Argo `steps` is a list of lists; the inner list runs in parallel, the
+// outer runs sequentially. serde(transparent) so this serializes as the
+// bare inner array. Reuses DagTask (its empty `dependencies` is omitted —
+// steps order is implicit).
+message ParallelSteps {
+  repeated DagTask steps = 1;
 }
 
 message Inputs {

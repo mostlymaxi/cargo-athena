@@ -22,6 +22,13 @@ fn some_other_workflow(b: String) {
     finalize(p);
 }
 
+// Opt into Argo `steps:` — each statement is a sequential step group.
+#[workflow(steps)]
+fn seq_foo() {
+    let p = prepare("seed".to_string());
+    finalize(p);
+}
+
 #[container(image = "ghcr.io/acme/app:latest")]
 fn run_a_container(a: String) {
     let cfg = cargo_athena::host!("/etc/myapp");
@@ -73,5 +80,22 @@ mod tests {
         assert!(yaml.contains("templateRef:"));
         assert!(yaml.contains("kind: Workflow\n"));
         assert!(yaml.contains("workflowTemplateRef:"));
+    }
+
+    #[test]
+    fn workflow_steps_mode() {
+        let mut c = Collector::new();
+        <crate::seq_foo as Template>::collect(&mut c);
+        let yaml = c.emit::<crate::seq_foo>();
+
+        // `#[workflow(steps)]` emits Argo `steps:` (sequential groups),
+        // not `dag:`; cross-step refs use `{{steps.…}}`.
+        let wt = yaml
+            .split("---")
+            .find(|d| d.contains("name: cargo-athena-example-basic-seq-foo"))
+            .expect("seq-foo WorkflowTemplate");
+        assert!(wt.contains("steps:"), "expected steps body:\n{wt}");
+        assert!(!wt.contains("dag:"));
+        assert!(yaml.contains("{{steps.p.outputs.result}}"));
     }
 }

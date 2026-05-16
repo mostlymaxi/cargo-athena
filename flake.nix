@@ -31,6 +31,21 @@
           cargo = rustToolchain;
           rustc = rustToolchain;
         };
+
+        # kopium isn't in our pinned nixpkgs; build it from git. Only used
+        # to (re)generate the official Argo types — committed afterwards.
+        kopium = pkgs.rustPlatform.buildRustPackage {
+          pname = "kopium";
+          version = "0.23.0";
+          src = pkgs.fetchFromGitHub {
+            owner = "kube-rs";
+            repo = "kopium";
+            rev = "0.23.0";
+            hash = "sha256-QEdUALde9BVRioUlu6Y/zz7tZ0/lLxcteWQD92x4kvI=";
+          };
+          cargoHash = "sha256-5mI3xen7k1WRo0F2r31wHf0er5rz9nDuEjVeh/j+TbQ=";
+          doCheck = false;
+        };
       in
       {
         packages.default = rustPlatform.buildRustPackage {
@@ -66,6 +81,8 @@
             pkgs.argo-workflows
             pkgs.minio-client
             pkgs.jq
+            pkgs.yq-go
+            kopium
           ];
 
           # Lets rust-analyzer find the standard library sources.

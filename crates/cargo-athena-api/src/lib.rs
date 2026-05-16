@@ -12,7 +12,7 @@
 /// field, so we need a single generic predicate that works for every field
 /// type prost can emit (scalars, `Option`, `Vec`, `HashMap`, messages).
 pub mod ser {
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
 
     /// True when a value is "empty" and should be omitted from output.
     pub trait Skip {
@@ -64,10 +64,37 @@ pub mod ser {
             self.is_empty()
         }
     }
+    impl<K, V> Skip for BTreeMap<K, V> {
+        fn skip(&self) -> bool {
+            self.is_empty()
+        }
+    }
 
     /// The function named in the generated `skip_serializing_if`.
     pub fn skip<T: Skip>(value: &T) -> bool {
         value.skip()
+    }
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    /// `Vec<ParallelSteps>` -> Argo's bare `[[DagTask]]` (list of lists).
+    pub fn ser_steps<S: Serializer>(
+        v: &[crate::ParallelSteps],
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        let outer: Vec<&Vec<crate::DagTask>> = v.iter().map(|p| &p.steps).collect();
+        outer.serialize(s)
+    }
+
+    /// Argo `[[DagTask]]` -> `Vec<ParallelSteps>`.
+    pub fn de_steps<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Vec<crate::ParallelSteps>, D::Error> {
+        let outer: Vec<Vec<crate::DagTask>> = Vec::deserialize(d)?;
+        Ok(outer
+            .into_iter()
+            .map(|steps| crate::ParallelSteps { steps })
+            .collect())
     }
 }
 

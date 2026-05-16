@@ -152,6 +152,9 @@ spec:
     - name: athena-work
       emptyDir: {}
     serviceAccountName: athena-runner
+    nodeSelector:
+      disktype: ssd
+      kubernetes.io/arch: amd64
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
