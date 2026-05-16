@@ -36,6 +36,31 @@ any image/runtime); it just needs a POSIX `sh`/`tar`/`uname`. Architecture
 is resolved at pod start (`uname`), so one template runs on any node arch.
 `athena.toml` is required by `cargo athena` (never read in-pod).
 
+Every container template also gets a pod-scoped `emptyDir` volume mounted
+at `/athena` (named `athena-work`). All athena paths live under it — the
+binary tarball, the `/athena/bin` extraction dir, artifact in/out ports,
+and the `result` output — so they're writable on *any* image (distroless /
+read-only rootfs) with no `mktemp`/`/tmp` dependency, and the dir is shared
+with Argo's init/wait containers for artifact load/collect. `host!`
+hostPaths are appended after it.
+
+### Artifact ports (native Argo, no S3)
+
+Inside `#[container]`/`#[fragment]` bodies:
+
+- `load_artifact!("name")` / `load_artifact_str!("name")` — declare an Argo
+  **input** artifact port `{name, /athena/artifacts/in/name}` (no source —
+  wired by you / another step; no S3 from us) and read it at runtime
+  (`Vec<u8>` / `String`).
+- `save_artifact!("name", data)` / `save_artifact_str!("name", data)` —
+  declare an Argo **output** artifact port `{name,
+  /athena/artifacts/out/name}` and write `data` there at runtime.
+
+Same model as `host!`: literal-key only, collected by static AST union
+across all branches, gated (public form is a `compile_error!` outside
+`#[container]`/`#[fragment]`; a `#[workflow]` using one is a hard error),
+and propagated through the `#[fragment]` closure.
+
 ```rust
 use cargo_athena::{workflow, container, fragment};   // `host!` used path-qualified
 

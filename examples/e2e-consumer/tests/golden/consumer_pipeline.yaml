@@ -29,7 +29,7 @@ spec:
       parameters:
       - name: result
         valueFrom:
-          path: /tmp/cargo-athena/result
+          path: /athena/result
     container:
       image: ghcr.io/acme/tools:latest
       command:
@@ -43,11 +43,13 @@ spec:
           aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
           *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
         esac
-        __d=$(mktemp -d)
-        tar -xzf /athena/dist.tar.gz -C "$__d"
-        chmod +x "$__d/app-$__t"
-        exec "$__d/app-$__t" --cargo-athena-template cargo-athena-example-e2e-branchy
+        mkdir -p /athena/bin
+        tar -xzf /athena/dist.tar.gz -C /athena/bin
+        chmod +x /athena/bin/app-$__t
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-branchy
       volumeMounts:
+      - name: athena-work
+        mountPath: /athena
       - name: host-cache-fast
         mountPath: /cache/fast
       - name: host-cache-slow
@@ -61,6 +63,8 @@ spec:
       - name: host-var-lib-b
         mountPath: /var/lib/b
     volumes:
+    - name: athena-work
+      emptyDir: {}
     - name: host-cache-fast
       hostPath:
         path: /cache/fast
@@ -112,7 +116,7 @@ spec:
       parameters:
       - name: result
         valueFrom:
-          path: /tmp/cargo-athena/result
+          path: /athena/result
     container:
       image: ghcr.io/acme/combine:latest
       command:
@@ -126,10 +130,16 @@ spec:
           aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
           *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
         esac
-        __d=$(mktemp -d)
-        tar -xzf /athena/dist.tar.gz -C "$__d"
-        chmod +x "$__d/app-$__t"
-        exec "$__d/app-$__t" --cargo-athena-template cargo-athena-example-e2e-combine
+        mkdir -p /athena/bin
+        tar -xzf /athena/dist.tar.gz -C /athena/bin
+        chmod +x /athena/bin/app-$__t
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-combine
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -196,7 +206,7 @@ spec:
       parameters:
       - name: result
         valueFrom:
-          path: /tmp/cargo-athena/result
+          path: /athena/result
     container:
       image: busybox:1.36-musl
       command:
@@ -210,10 +220,16 @@ spec:
           aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
           *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
         esac
-        __d=$(mktemp -d)
-        tar -xzf /athena/dist.tar.gz -C "$__d"
-        chmod +x "$__d/app-$__t"
-        exec "$__d/app-$__t" --cargo-athena-template cargo-athena-example-e2e-consumer-consumer-step
+        mkdir -p /athena/bin
+        tar -xzf /athena/dist.tar.gz -C /athena/bin
+        chmod +x /athena/bin/app-$__t
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-consumer-consumer-step
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -246,7 +262,7 @@ spec:
       parameters:
       - name: result
         valueFrom:
-          path: /tmp/cargo-athena/result
+          path: /athena/result
     container:
       image: busybox:1.36-musl
       command:
@@ -260,10 +276,16 @@ spec:
           aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
           *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
         esac
-        __d=$(mktemp -d)
-        tar -xzf /athena/dist.tar.gz -C "$__d"
-        chmod +x "$__d/app-$__t"
-        exec "$__d/app-$__t" --cargo-athena-template cargo-athena-example-e2e-consumer-finalize
+        mkdir -p /athena/bin
+        tar -xzf /athena/dist.tar.gz -C /athena/bin
+        chmod +x /athena/bin/app-$__t
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-consumer-finalize
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -296,7 +318,7 @@ spec:
       parameters:
       - name: result
         valueFrom:
-          path: /tmp/cargo-athena/result
+          path: /athena/result
     container:
       image: ghcr.io/acme/fetch:1.2.3
       command:
@@ -310,14 +332,18 @@ spec:
           aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
           *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
         esac
-        __d=$(mktemp -d)
-        tar -xzf /athena/dist.tar.gz -C "$__d"
-        chmod +x "$__d/app-$__t"
-        exec "$__d/app-$__t" --cargo-athena-template cargo-athena-example-e2e-fetch
+        mkdir -p /athena/bin
+        tar -xzf /athena/dist.tar.gz -C /athena/bin
+        chmod +x /athena/bin/app-$__t
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-fetch
       volumeMounts:
+      - name: athena-work
+        mountPath: /athena
       - name: host-secrets-token
         mountPath: /secrets/token
     volumes:
+    - name: athena-work
+      emptyDir: {}
     - name: host-secrets-token
       hostPath:
         path: /secrets/token
@@ -443,11 +469,16 @@ spec:
             key: secretKey
         archive:
           none: {}
+      - name: notes
+        path: /athena/artifacts/in/notes
     outputs:
       parameters:
       - name: result
         valueFrom:
-          path: /tmp/cargo-athena/result
+          path: /athena/result
+      artifacts:
+      - name: receipt
+        path: /athena/artifacts/out/receipt
     container:
       image: busybox:1.36-musl
       command:
@@ -461,10 +492,16 @@ spec:
           aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
           *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
         esac
-        __d=$(mktemp -d)
-        tar -xzf /athena/dist.tar.gz -C "$__d"
-        chmod +x "$__d/app-$__t"
-        exec "$__d/app-$__t" --cargo-athena-template cargo-athena-example-e2e-publish
+        mkdir -p /athena/bin
+        tar -xzf /athena/dist.tar.gz -C /athena/bin
+        chmod +x /athena/bin/app-$__t
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-publish
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -498,7 +535,7 @@ spec:
       parameters:
       - name: result
         valueFrom:
-          path: /tmp/cargo-athena/result
+          path: /athena/result
     container:
       image: busybox:1.36-musl
       command:
@@ -512,10 +549,16 @@ spec:
           aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
           *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
         esac
-        __d=$(mktemp -d)
-        tar -xzf /athena/dist.tar.gz -C "$__d"
-        chmod +x "$__d/app-$__t"
-        exec "$__d/app-$__t" --cargo-athena-template cargo-athena-example-e2e-transform
+        mkdir -p /athena/bin
+        tar -xzf /athena/dist.tar.gz -C /athena/bin
+        chmod +x /athena/bin/app-$__t
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-transform
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow

@@ -33,8 +33,13 @@ pub use cargo_athena_core::*;
 // is the private real macro the attribute macros rewrite visible `host!`s
 // into — it must be reachable at `::cargo_athena::__cargo_athena_host`.
 #[doc(hidden)]
-pub use cargo_athena_core::__cargo_athena_host;
-pub use cargo_athena_core::host;
+pub use cargo_athena_core::{
+    __cargo_athena_host, __cargo_athena_load_artifact, __cargo_athena_load_artifact_str,
+    __cargo_athena_save_artifact, __cargo_athena_save_artifact_str,
+};
+pub use cargo_athena_core::{
+    host, load_artifact, load_artifact_str, save_artifact, save_artifact_str,
+};
 
 // Attribute macros.
 pub use cargo_athena_macros::{container, fragment, workflow};

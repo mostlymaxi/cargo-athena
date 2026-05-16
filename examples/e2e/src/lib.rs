@@ -73,7 +73,12 @@ pub fn combine(x: String, y: String) -> String {
 
 #[container]
 pub fn publish(report: String) {
-    println!("publishing {report}");
+    // Native Argo artifact ports (no S3): an input port read at runtime
+    // and an output port written at runtime — both declared on this
+    // container's WorkflowTemplate by static collection.
+    let notes = cargo_athena::load_artifact_str!("notes");
+    println!("publishing {report} (notes: {notes})");
+    cargo_athena::save_artifact!("receipt", format!("ok:{report}"));
 }
 
 // --- fragments (cross-item resource carriers) ------------------------------

@@ -166,12 +166,16 @@ message EnvVar {
 message Volume {
   string name = 1;
   HostPathVolumeSource host_path = 2;
+  EmptyDirVolumeSource empty_dir = 3;
 }
 
 message HostPathVolumeSource {
   string path = 1;
   string type = 2;
 }
+
+// Present (and empty) => a pod-scoped scratch dir (k8s emptyDir: {}).
+message EmptyDirVolumeSource {}
 
 message VolumeMount {
   string name = 1;

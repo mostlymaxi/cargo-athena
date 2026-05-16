@@ -63,11 +63,123 @@ macro_rules! __cargo_athena_host {
     };
 }
 
-/// Runtime shims referenced by the declaration macros.
+// --- artifact declaration macros (native Argo artifacts, no S3) ------------
+//
+// Each is a public (gated `compile_error!`) + private (real) pair, exactly
+// like `host!`: only valid inside `#[container]`/`#[fragment]`, where the
+// attribute macro rewrites the public form to the private one.
+
+/// Declare an Argo *input* artifact port and read it (bytes) at runtime.
+#[macro_export]
+macro_rules! load_artifact {
+    ($($t:tt)*) => {
+        ::core::compile_error!(
+            "`load_artifact!` may only be used directly inside a \
+             `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn"
+        )
+    };
+}
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __cargo_athena_load_artifact {
+    ($name:literal) => { $crate::rt::load_artifact($name) };
+    ($($t:tt)*) => { ::core::compile_error!("load_artifact!(\"name\")") };
+}
+
+/// Declare an Argo *input* artifact port and read it (UTF-8) at runtime.
+#[macro_export]
+macro_rules! load_artifact_str {
+    ($($t:tt)*) => {
+        ::core::compile_error!(
+            "`load_artifact_str!` may only be used directly inside a \
+             `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn"
+        )
+    };
+}
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __cargo_athena_load_artifact_str {
+    ($name:literal) => { $crate::rt::load_artifact_str($name) };
+    ($($t:tt)*) => { ::core::compile_error!("load_artifact_str!(\"name\")") };
+}
+
+/// Declare an Argo *output* artifact port and write bytes to it at runtime.
+#[macro_export]
+macro_rules! save_artifact {
+    ($($t:tt)*) => {
+        ::core::compile_error!(
+            "`save_artifact!` may only be used directly inside a \
+             `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn"
+        )
+    };
+}
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __cargo_athena_save_artifact {
+    ($name:literal, $data:expr) => { $crate::rt::save_artifact($name, $data) };
+    ($($t:tt)*) => { ::core::compile_error!("save_artifact!(\"name\", data)") };
+}
+
+/// Declare an Argo *output* artifact port and write a string at runtime.
+#[macro_export]
+macro_rules! save_artifact_str {
+    ($($t:tt)*) => {
+        ::core::compile_error!(
+            "`save_artifact_str!` may only be used directly inside a \
+             `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn"
+        )
+    };
+}
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __cargo_athena_save_artifact_str {
+    ($name:literal, $data:expr) => { $crate::rt::save_artifact_str($name, $data) };
+    ($($t:tt)*) => { ::core::compile_error!("save_artifact_str!(\"name\", data)") };
+}
+
+/// Runtime shims referenced by the declaration macros. Artifact ports are
+/// plain files at fixed paths; Argo moves them (no S3 from us).
 pub mod rt {
+    use std::path::PathBuf;
+
     /// Identity: the volume is already mounted when the container runs.
     pub const fn host_path(path: &'static str) -> &'static str {
         path
+    }
+
+    /// Where Argo drops/collects declared artifact ports inside the pod.
+    pub const IN_DIR: &str = "/athena/artifacts/in";
+    pub const OUT_DIR: &str = "/athena/artifacts/out";
+
+    fn in_path(name: &str) -> PathBuf {
+        PathBuf::from(IN_DIR).join(name)
+    }
+    fn out_path(name: &str) -> PathBuf {
+        PathBuf::from(OUT_DIR).join(name)
+    }
+
+    pub fn load_artifact(name: &str) -> Vec<u8> {
+        let p = in_path(name);
+        std::fs::read(&p).unwrap_or_else(|e| panic!("load_artifact({name:?}) {}: {e}", p.display()))
+    }
+
+    pub fn load_artifact_str(name: &str) -> String {
+        let p = in_path(name);
+        std::fs::read_to_string(&p)
+            .unwrap_or_else(|e| panic!("load_artifact_str({name:?}) {}: {e}", p.display()))
+    }
+
+    pub fn save_artifact(name: &str, data: impl AsRef<[u8]>) {
+        let p = out_path(name);
+        if let Some(d) = p.parent() {
+            std::fs::create_dir_all(d).expect("create artifact out dir");
+        }
+        std::fs::write(&p, data.as_ref())
+            .unwrap_or_else(|e| panic!("save_artifact({name:?}) {}: {e}", p.display()));
+    }
+
+    pub fn save_artifact_str(name: &str, data: impl AsRef<str>) {
+        save_artifact(name, data.as_ref().as_bytes());
     }
 }
 
@@ -215,8 +327,17 @@ impl AthenaConfig {
     }
 }
 
-/// Where the binary tarball is mounted inside the pod.
+/// Pod-scoped scratch root, backed by an `emptyDir` on every container
+/// template so all athena paths are writable regardless of the image
+/// (distroless / read-only rootfs) and shared with Argo's init/wait
+/// containers for artifact load/collect.
+pub const ATHENA_DIR: &str = "/athena";
+/// Where the bootstrap extracts the per-arch binary.
+pub const ATHENA_BIN_DIR: &str = "/athena/bin";
+/// Where the binary tarball is delivered (under [`ATHENA_DIR`]).
 pub const ARTIFACT_PATH: &str = "/athena/dist.tar.gz";
+/// Name of the scratch `emptyDir` volume.
+pub const SCRATCH_VOLUME: &str = "athena-work";
 
 /// What [`container_delivery`] produces for one `#[container]` template.
 pub struct ContainerDelivery {
@@ -254,15 +375,17 @@ pub fn container_delivery(
         arms.push_str(&format!("  {pat}) __t={triple} ;;\n"));
     }
 
+    // Extract into the `/athena` emptyDir (always writable, even on a
+    // distroless / read-only-rootfs image) — no `mktemp`/`/tmp` dependency.
     let script = format!(
         "set -e\n\
          case \"$(uname -m)\" in\n\
          {arms}  *) echo \"athena: unsupported arch $(uname -m)\" >&2; exit 1 ;;\n\
          esac\n\
-         __d=$(mktemp -d)\n\
-         tar -xzf {ARTIFACT_PATH} -C \"$__d\"\n\
-         chmod +x \"$__d/app-$__t\"\n\
-         exec \"$__d/app-$__t\" --cargo-athena-template {argo_name}\n"
+         mkdir -p {ATHENA_BIN_DIR}\n\
+         tar -xzf {ARTIFACT_PATH} -C {ATHENA_BIN_DIR}\n\
+         chmod +x {ATHENA_BIN_DIR}/app-$__t\n\
+         exec {ATHENA_BIN_DIR}/app-$__t --cargo-athena-template {argo_name}\n"
     );
 
     let artifact = api::Artifact {
@@ -303,6 +426,8 @@ pub fn container_delivery(
 pub struct FragmentReg {
     pub rust_name: &'static str,
     pub host_paths: &'static [&'static str],
+    pub in_artifacts: &'static [&'static str],
+    pub out_artifacts: &'static [&'static str],
     pub callees: &'static [&'static str],
 }
 inventory::collect!(FragmentReg);
@@ -331,18 +456,24 @@ impl BuildCtx {
         &self.config
     }
 
-    /// A container's own literal `host!` paths ∪ the transitive
-    /// `#[fragment]` closure (deduped, stable order).
-    pub fn resolved_host_paths(&self, own_host: &[&str], own_callees: &[&str]) -> Vec<String> {
+    /// Own literal decls ∪ the transitive `#[fragment]` closure for one
+    /// kind of declaration (deduped, stable order). `select` picks which
+    /// `FragmentReg` slice to pull from a reached fragment.
+    fn resolved(
+        &self,
+        own: &[&str],
+        own_callees: &[&str],
+        select: impl Fn(&FragmentReg) -> &'static [&'static str],
+    ) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
-        let push = |p: &str, out: &mut Vec<String>, seen: &mut HashSet<String>| {
+        let mut push = |p: &str, out: &mut Vec<String>| {
             if seen.insert(p.to_string()) {
                 out.push(p.to_string());
             }
         };
-        for p in own_host {
-            push(p, &mut out, &mut seen);
+        for p in own {
+            push(p, &mut out);
         }
         let mut queue: Vec<&str> = own_callees.to_vec();
         let mut visited: HashSet<&str> = HashSet::new();
@@ -351,14 +482,54 @@ impl BuildCtx {
                 continue;
             }
             if let Some(f) = self.fragments.get(c) {
-                for p in f.host_paths {
-                    push(p, &mut out, &mut seen);
+                for p in select(f) {
+                    push(p, &mut out);
                 }
                 queue.extend(f.callees.iter().copied());
             }
         }
         out
     }
+
+    /// hostPaths: own `host!`s ∪ fragment closure.
+    pub fn resolved_host_paths(&self, own: &[&str], callees: &[&str]) -> Vec<String> {
+        self.resolved(own, callees, |f| f.host_paths)
+    }
+
+    /// Input artifact ports: own `load_artifact*!`s ∪ fragment closure.
+    pub fn resolved_in_artifacts(&self, own: &[&str], callees: &[&str]) -> Vec<String> {
+        self.resolved(own, callees, |f| f.in_artifacts)
+    }
+
+    /// Output artifact ports: own `save_artifact*!`s ∪ fragment closure.
+    pub fn resolved_out_artifacts(&self, own: &[&str], callees: &[&str]) -> Vec<String> {
+        self.resolved(own, callees, |f| f.out_artifacts)
+    }
+}
+
+/// Argo input-artifact ports for the resolved `load_artifact*!` names
+/// (`{name, path}` only — no source; wired externally / by other steps).
+pub fn artifact_inputs(names: &[String]) -> Vec<api::Artifact> {
+    names
+        .iter()
+        .map(|n| api::Artifact {
+            name: n.clone(),
+            path: format!("{}/{n}", rt::IN_DIR),
+            ..Default::default()
+        })
+        .collect()
+}
+
+/// Argo output-artifact ports for the resolved `save_artifact*!` names.
+pub fn artifact_outputs(names: &[String]) -> Vec<api::Artifact> {
+    names
+        .iter()
+        .map(|n| api::Artifact {
+            name: n.clone(),
+            path: format!("{}/{n}", rt::OUT_DIR),
+            ..Default::default()
+        })
+        .collect()
 }
 
 /// Accumulates the reachable templates (as `WorkflowTemplate`s) and the
@@ -484,7 +655,7 @@ fn volume_name(path: &str) -> String {
     format!("host-{n}")
 }
 
-/// Build the `volumes` + matching `volumeMounts` for a set of hostPaths.
+/// `volumes` + `volumeMounts` for a set of hostPaths (from `host!`).
 pub fn host_path_volumes(paths: &[String]) -> (Vec<api::Volume>, Vec<api::VolumeMount>) {
     let mut vols = Vec::new();
     let mut mounts = Vec::new();
@@ -496,6 +667,7 @@ pub fn host_path_volumes(paths: &[String]) -> (Vec<api::Volume>, Vec<api::Volume
                 path: p.clone(),
                 r#type: String::new(),
             }),
+            ..Default::default()
         });
         mounts.push(api::VolumeMount {
             name,
@@ -503,6 +675,27 @@ pub fn host_path_volumes(paths: &[String]) -> (Vec<api::Volume>, Vec<api::Volume
             read_only: false,
         });
     }
+    (vols, mounts)
+}
+
+/// Every container template's volumes/mounts: the always-present
+/// `emptyDir` scratch at [`ATHENA_DIR`] (binary tarball, in/out artifact
+/// ports, extraction, result — all writable on any image) followed by the
+/// declared hostPaths.
+pub fn container_volumes(host_paths: &[String]) -> (Vec<api::Volume>, Vec<api::VolumeMount>) {
+    let mut vols = vec![api::Volume {
+        name: SCRATCH_VOLUME.to_string(),
+        empty_dir: Some(api::EmptyDirVolumeSource {}),
+        ..Default::default()
+    }];
+    let mut mounts = vec![api::VolumeMount {
+        name: SCRATCH_VOLUME.to_string(),
+        mount_path: ATHENA_DIR.to_string(),
+        read_only: false,
+    }];
+    let (hv, hm) = host_path_volumes(host_paths);
+    vols.extend(hv);
+    mounts.extend(hm);
     (vols, mounts)
 }
 

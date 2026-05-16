@@ -15,7 +15,7 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::parse::Parser;
-use syn::{Expr, ItemFn, Path, Stmt, Type, parse_quote, visit::Visit, visit_mut::VisitMut};
+use syn::{Expr, ItemFn, Path, Stmt, Type, visit::Visit, visit_mut::VisitMut};
 
 // ---------------------------------------------------------------------------
 // shared helpers
@@ -40,24 +40,84 @@ fn fn_args(func: &ItemFn) -> Vec<(syn::Ident, Box<Type>)> {
         .collect()
 }
 
-/// Static collector: every `host!(literal)` (all branches) + every called ident.
+/// The declaration macros the attribute macros statically collect + gate.
+/// `(public ident, private ident, which `BodyScan` bucket)`.
+const DECL_MACROS: &[(&str, &str, DeclKind)] = &[
+    ("host", "__cargo_athena_host", DeclKind::Host),
+    (
+        "load_artifact",
+        "__cargo_athena_load_artifact",
+        DeclKind::InArtifact,
+    ),
+    (
+        "load_artifact_str",
+        "__cargo_athena_load_artifact_str",
+        DeclKind::InArtifact,
+    ),
+    (
+        "save_artifact",
+        "__cargo_athena_save_artifact",
+        DeclKind::OutArtifact,
+    ),
+    (
+        "save_artifact_str",
+        "__cargo_athena_save_artifact_str",
+        DeclKind::OutArtifact,
+    ),
+]; // NB: keep in sync with the macro pairs in cargo-athena-core.
+
+#[derive(Clone, Copy, PartialEq)]
+enum DeclKind {
+    Host,
+    InArtifact,
+    OutArtifact,
+}
+
+fn decl_kind(mac: &syn::Macro) -> Option<(DeclKind, &'static str)> {
+    let last = mac.path.segments.last()?;
+    DECL_MACROS
+        .iter()
+        .find(|(public, ..)| last.ident == public)
+        .map(|(_, private, kind)| (*kind, *private))
+}
+
+/// First string-literal argument of a decl macro (`host!("p")`,
+/// `save_artifact!("n", expr)` → `"n"`). Literal-only by contract.
+fn first_str_lit(mac: &syn::Macro) -> Option<String> {
+    let args = mac
+        .parse_body_with(
+            syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated,
+        )
+        .ok()?;
+    match args.first()? {
+        Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(s),
+            ..
+        }) => Some(s.value()),
+        _ => None,
+    }
+}
+
+/// Static collector: every decl-macro literal (across all branches) + every
+/// called ident, used for the cross-item `#[fragment]` closure.
 #[derive(Default)]
 struct BodyScan {
     host_paths: Vec<String>,
+    in_artifacts: Vec<String>,
+    out_artifacts: Vec<String>,
     callees: Vec<String>,
 }
 
 impl<'ast> Visit<'ast> for BodyScan {
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        let is_host = mac
-            .path
-            .segments
-            .last()
-            .is_some_and(|s| s.ident == "host");
-        if is_host
-            && let Ok(lit) = mac.parse_body::<syn::LitStr>()
+        if let Some((kind, _)) = decl_kind(mac)
+            && let Some(name) = first_str_lit(mac)
         {
-            self.host_paths.push(lit.value());
+            match kind {
+                DeclKind::Host => self.host_paths.push(name),
+                DeclKind::InArtifact => self.in_artifacts.push(name),
+                DeclKind::OutArtifact => self.out_artifacts.push(name),
+            }
         }
         syn::visit::visit_macro(self, mac);
     }
@@ -75,10 +135,15 @@ impl<'ast> Visit<'ast> for BodyScan {
 fn scan_body(func: &ItemFn) -> BodyScan {
     let mut s = BodyScan::default();
     s.visit_block(&func.block);
-    s.host_paths.sort();
-    s.host_paths.dedup();
-    s.callees.sort();
-    s.callees.dedup();
+    for v in [
+        &mut s.host_paths,
+        &mut s.in_artifacts,
+        &mut s.out_artifacts,
+        &mut s.callees,
+    ] {
+        v.sort();
+        v.dedup();
+    }
     s
 }
 
@@ -127,37 +192,30 @@ fn parse_name_override(attr: &TokenStream2) -> Option<String> {
     None
 }
 
-/// Rewrites every `host!(..)` the macro can see into the private
-/// `::cargo_athena::__cargo_athena_host!` (the real expansion).
-///
-/// This is the enforcement half of "`host!` only inside
-/// `#[container]`/`#[fragment]`": the *public* `host!` is a hard
-/// `compile_error!`, so any invocation we don't rewrite here — because
-/// it's in a plain fn, in a `#[workflow]`, or nested inside another
-/// macro's tokens we can't see — fails to compile instead of silently
-/// producing an unmounted path.
-struct HostRewrite;
+/// Rewrites every decl macro (`host!`, `load_artifact*!`,
+/// `save_artifact*!`) the attribute macro can see into its private real
+/// form. Enforcement half of the gate: the *public* forms are hard
+/// `compile_error!`s, so any invocation we don't rewrite here — a plain
+/// fn, a `#[workflow]`, or nested inside another macro's tokens — fails to
+/// compile instead of silently doing nothing.
+struct DeclRewrite;
 
-impl VisitMut for HostRewrite {
+impl VisitMut for DeclRewrite {
     fn visit_macro_mut(&mut self, mac: &mut syn::Macro) {
-        if mac
-            .path
-            .segments
-            .last()
-            .is_some_and(|s| s.ident == "host")
-        {
-            mac.path = parse_quote!(::cargo_athena::__cargo_athena_host);
+        if let Some((_, private)) = decl_kind(mac) {
+            let p: syn::Path =
+                syn::parse_str(&format!("::cargo_athena::{private}")).unwrap();
+            mac.path = p;
         }
         syn::visit_mut::visit_macro_mut(self, mac);
     }
 }
 
-/// Clone `func`, swap its visible `host!`s for the private macro, return
-/// the rewritten fn for emission. The original is left intact for the
-/// (pre-rewrite) static scan.
+/// Clone `func`, swap its visible decl macros for the private forms; the
+/// original is left intact for the (pre-rewrite) static scan.
 fn with_host_rewritten(func: &ItemFn) -> ItemFn {
     let mut out = func.clone();
-    HostRewrite.visit_item_fn_mut(&mut out);
+    DeclRewrite.visit_item_fn_mut(&mut out);
     out
 }
 
@@ -227,6 +285,8 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let inputs_slice = str_slice(&arg_names);
     let host_slice = str_slice(&scan.host_paths);
+    let in_art_slice = str_slice(&scan.in_artifacts);
+    let out_art_slice = str_slice(&scan.out_artifacts);
     let callee_slice = str_slice(&scan.callees);
     let image_opt = match &cfg.image {
         Some(img) => quote! { ::core::option::Option::Some(#img) },
@@ -270,8 +330,10 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
             {
                 let __paths = __ctx.resolved_host_paths(
                     #host_slice, #callee_slice);
+                // emptyDir scratch at /athena (+ host! volumes) so every
+                // athena path is writable on any image.
                 let (__vols, __mounts) =
-                    ::cargo_athena::host_path_volumes(&__paths);
+                    ::cargo_athena::container_volumes(&__paths);
                 // Arbitrary user image + the arch-resolving bootstrap that
                 // pulls & exec's the athena binary delivered as an artifact.
                 let __d = ::cargo_athena::container_delivery(
@@ -279,6 +341,15 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                     <Self as ::cargo_athena::Template>::ARGO_NAME,
                     #image_opt,
                 );
+                // Native Argo artifact ports (no S3): own load/save decls
+                // ∪ the #[fragment] closure.
+                let __in_names = __ctx.resolved_in_artifacts(
+                    #in_art_slice, #callee_slice);
+                let __out_names = __ctx.resolved_out_artifacts(
+                    #out_art_slice, #callee_slice);
+                let mut __in_artifacts = ::std::vec![ __d.artifact ];
+                __in_artifacts.extend(
+                    ::cargo_athena::artifact_inputs(&__in_names));
                 ::cargo_athena::api::Template {
                     name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
                     inputs: ::core::option::Option::Some(::cargo_athena::api::Inputs {
@@ -288,20 +359,20 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                                 ..::core::default::Default::default()
                             } ),*
                         ],
-                        artifacts: ::std::vec![ __d.artifact ],
+                        artifacts: __in_artifacts,
                     }),
                     outputs: ::core::option::Option::Some(::cargo_athena::api::Outputs {
                         parameters: ::std::vec![ ::cargo_athena::api::Parameter {
                             name: "result".to_string(),
                             value_from: ::core::option::Option::Some(
                                 ::cargo_athena::api::ValueFrom {
-                                    path: "/tmp/cargo-athena/result".to_string(),
+                                    path: "/athena/result".to_string(),
                                     ..::core::default::Default::default()
                                 }
                             ),
                             ..::core::default::Default::default()
                         } ],
-                        ..::core::default::Default::default()
+                        artifacts: ::cargo_athena::artifact_outputs(&__out_names),
                     }),
                     container: ::core::option::Option::Some(::cargo_athena::api::Container {
                         image: __d.image,
@@ -581,12 +652,15 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
     let argo_name = make_argo_name(&name_override, &rust_name);
 
     let scan = scan_body(&func);
-    if !scan.host_paths.is_empty() {
+    if !scan.host_paths.is_empty()
+        || !scan.in_artifacts.is_empty()
+        || !scan.out_artifacts.is_empty()
+    {
         return syn::Error::new_spanned(
             &func.sig.ident,
-            "`host!` cannot be used in a #[workflow]: a workflow is a DAG, \
-             not a pod. Declare host paths in the #[container] (or a \
-             #[fragment] it calls) that actually runs in-cluster.",
+            "`host!`/`load_artifact*!`/`save_artifact*!` cannot be used in a \
+             #[workflow]: a workflow is a DAG, not a pod. Declare them in the \
+             #[container] (or a #[fragment] it calls) that runs in-cluster.",
         )
         .to_compile_error()
         .into();
@@ -675,6 +749,8 @@ pub fn fragment(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let scan = scan_body(&func);
     let func = with_host_rewritten(&func);
     let host_slice = str_slice(&scan.host_paths);
+    let in_art_slice = str_slice(&scan.in_artifacts);
+    let out_art_slice = str_slice(&scan.out_artifacts);
     let callee_slice = str_slice(&scan.callees);
 
     let expanded = quote! {
@@ -684,6 +760,8 @@ pub fn fragment(_attr: TokenStream, item: TokenStream) -> TokenStream {
             ::cargo_athena::FragmentReg {
                 rust_name: #rust_name,
                 host_paths: #host_slice,
+                in_artifacts: #in_art_slice,
+                out_artifacts: #out_art_slice,
                 callees: #callee_slice,
             }
         }
