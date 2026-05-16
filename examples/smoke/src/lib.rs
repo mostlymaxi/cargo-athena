@@ -132,15 +132,17 @@ pub fn alarm() {
 }
 
 /// `.continue_on(...)` lets dependents proceed on failure/error;
-/// `.on_exit(t)` is the special unconditional `exit` hook;
-/// `.hooks("expr" = t)` is a conditional lifecycle hook. Hook templates
-/// are force-linked + emitted via the wormhole like any callee.
+/// `.on_exit(t)` is the unconditional `exit` hook; `.on_failure(t)` /
+/// `.on_success(t)` are typed phase predicates (athena generates the
+/// Argo expression); `.hook_if("raw-expr" = t)` is the escape hatch.
+/// Hook templates are force-linked + emitted via the wormhole.
 #[workflow]
 pub fn pipeline_hooks() {
     let raw = fetch("https://example.com".to_string()).continue_on(failed, error);
     transform(raw, 9)
         .on_exit(cleanup)
-        .hooks("steps.x.status == 'Failed'" = alarm);
+        .on_failure(alarm)
+        .hook_if("workflow.status == 'Failed'" = alarm);
 }
 
 #[container]

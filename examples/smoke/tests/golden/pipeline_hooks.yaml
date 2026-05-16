@@ -218,7 +218,12 @@ spec:
             templateRef:
               name: cargo-athena-example-smoke-alarm
               template: cargo-athena-example-smoke-alarm
-            expression: steps.x.status == 'Failed'
+            expression: tasks['transform'].status == "Failed"
+          hook2:
+            templateRef:
+              name: cargo-athena-example-smoke-alarm
+              template: cargo-athena-example-smoke-alarm
+            expression: workflow.status == 'Failed'
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
