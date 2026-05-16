@@ -516,6 +516,19 @@ enum Arg {
     Ref(String),
     /// Reference to one of the workflow's own input parameters.
     Input(String),
+    /// Named-field access into a serde value: `a.b.c` lowered via Argo
+    /// expr-templating `{{=toJSON(fromJSON(<src>)['b']['c'])}}` (the
+    /// universal-safe form — see `node_tokens`). The ghost has already
+    /// type-checked that the field path is valid on the producer's type.
+    Json { src: JsonSrc, path: Vec<String> },
+}
+
+/// Where a `Json` arg's root value comes from.
+enum JsonSrc {
+    /// A prior `let` binding → the producing task (adds a DAG dep).
+    Task(String),
+    /// A `#[workflow]` input parameter (no dep).
+    Input(String),
 }
 
 /// When a hook fires. The concrete Argo `expression` is generated in
@@ -657,6 +670,57 @@ fn expr_to_arg(
                 ))
             }
         }
+        // `a.b.c` — named-field access into a serde value. The base must
+        // resolve to a binding/input; the ghost has already type-checked
+        // that the field path is valid on the producer's real type.
+        Expr::Field(_) => {
+            let mut path: Vec<String> = Vec::new();
+            let mut cur = unwrap_expr(e);
+            while let Expr::Field(fe) = cur {
+                match &fe.member {
+                    syn::Member::Named(id) => path.push(id.to_string()),
+                    syn::Member::Unnamed(_) => {
+                        return Err(syn::Error::new_spanned(
+                            fe,
+                            "tuple-field access (`a.0`) isn't lowered yet — \
+                             v1 supports named struct fields (`a.b.c`).",
+                        ));
+                    }
+                }
+                cur = unwrap_expr(&fe.base);
+            }
+            path.reverse();
+            let Expr::Path(p) = cur else {
+                return Err(syn::Error::new_spanned(
+                    cur,
+                    "field-access base must be a #[workflow] input or a \
+                     prior `let = template(...)` binding.",
+                ));
+            };
+            if p.path.segments.len() != 1 {
+                return Err(syn::Error::new_spanned(cur, UNSUPPORTED_ARG));
+            }
+            let name = p.path.segments[0].ident.to_string();
+            let src = if let Some(task) = bindings.get(&name) {
+                JsonSrc::Task(task.clone())
+            } else if inputs.contains(&name) {
+                JsonSrc::Input(name)
+            } else {
+                return Err(syn::Error::new_spanned(
+                    cur,
+                    format!(
+                        "`{name}` is not a #[workflow] input or a prior \
+                         `let = template(...)` binding. {UNSUPPORTED_ARG}"
+                    ),
+                ));
+            };
+            Ok(Arg::Json { src, path })
+        }
+        Expr::Index(idx) => Err(syn::Error::new_spanned(
+            idx,
+            "index access (`a[i]`) isn't lowered yet — v1 supports named \
+             struct fields (`a.b.c`).",
+        )),
         other => Err(syn::Error::new_spanned(other, UNSUPPORTED_ARG)),
     }
 }
@@ -1132,6 +1196,44 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                 });
             }
         },
+        // `a.b.c` -> Argo expr-templating. toJSON(fromJSON(..)) is the
+        // universal-safe round-trip (athena's run-side is `from_str` else
+        // String, so it reconstructs every field type incl. quoted
+        // strings & nested structs). Bracket form is hyphen/keyword-safe.
+        Arg::Json { src, path } => {
+            let scope = if steps { "steps" } else { "tasks" };
+            let accessor: String =
+                path.iter().map(|f| format!("['{f}']")).collect();
+            let (refexpr, dep_push) = match src {
+                JsonSrc::Task(dep) => {
+                    let r = format!(
+                        "{scope}['{dep}'].outputs.parameters['return']"
+                    );
+                    let dp = if steps {
+                        quote! {}
+                    } else {
+                        quote! { __deps.push(#dep.to_string()); }
+                    };
+                    (r, dp)
+                }
+                JsonSrc::Input(name) => {
+                    (format!("inputs.parameters['{name}']"), quote! {})
+                }
+            };
+            let value =
+                format!("{{{{=toJSON(fromJSON({refexpr}){accessor})}}}}");
+            quote! {
+                {
+                    let __name = __inputs.get(#i).copied().unwrap_or_default().to_string();
+                    #dep_push
+                    __params.push(::cargo_athena::api::Parameter {
+                        name: __name,
+                        value: ::core::option::Option::Some(#value.to_string()),
+                        ..::core::default::Default::default()
+                    });
+                }
+            }
+        }
     });
 
     let push = if steps {
@@ -1222,6 +1324,31 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                         });
                     }
                 },
+                // Same expr-templating lowering as task args; hooks add
+                // no DAG dependency.
+                Arg::Json { src, path } => {
+                    let s = if steps { "steps" } else { "tasks" };
+                    let accessor: String =
+                        path.iter().map(|f| format!("['{f}']")).collect();
+                    let refexpr = match src {
+                        JsonSrc::Task(dep) => format!(
+                            "{s}['{dep}'].outputs.parameters['return']"
+                        ),
+                        JsonSrc::Input(name) => {
+                            format!("inputs.parameters['{name}']")
+                        }
+                    };
+                    let value = format!(
+                        "{{{{=toJSON(fromJSON({refexpr}){accessor})}}}}"
+                    );
+                    quote! {
+                        __hp.push(::cargo_athena::api::Parameter {
+                            name: __hin.get(#i).copied().unwrap_or_default().to_string(),
+                            value: ::core::option::Option::Some(#value.to_string()),
+                            ..::core::default::Default::default()
+                        });
+                    }
+                }
             });
             quote! {
                 {

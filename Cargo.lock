@@ -70,6 +70,7 @@ name = "cargo-athena-example-smoke"
 version = "0.1.0"
 dependencies = [
  "cargo-athena",
+ "serde",
 ]
 
 [[package]]

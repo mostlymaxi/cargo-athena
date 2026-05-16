@@ -39,6 +39,23 @@ README is intentionally lean (user-facing); the *why* lives here.
   change the Rust type while the emit still passes the raw serialized
   param → silent ghost↔Argo mismatch). `__athena_sig`/the ghost are also
   what make calling a `#[fragment]`/regular fn from `#[workflow]` fail.
+- **`a.field` (struct-field access).** A named-field chain `a.b.c` on a
+  binding/input lowers to Argo expr-templating
+  `{{=toJSON(fromJSON(<src>)['b']['c'])}}` where `<src>` is bracket-form
+  `tasks['dep'].outputs.parameters['return']` / `steps[...]` /
+  `inputs.parameters['name']` (bracket = hyphen/keyword-safe; the plain
+  whole-binding ref stays non-expr `{{tasks.dep…}}`). Binding source ⇒
+  DAG dep (like `Ref`); input ⇒ none. **`toJSON(fromJSON(..))` is the
+  *universal-safe* form** (NOT bare `jsonpath`): athena's run-side is
+  `serde_json::from_str` else `Value::String` (core ~820), so it
+  reconstructs every field type — JSON-quoted strings, numbers, nested
+  structs/arrays — faithfully; bare `jsonpath` is lossy for string
+  fields. The ghost has already type-checked the field path exists & the
+  type matches the consumer, so the lowering is purely mechanical &
+  safe-by-construction. v1 = **named fields only**; tuple `a.0` / index
+  `a[i]` are targeted `compile_error!`s (deferred). Empirically:
+  jsonpath/fromJSON round-trip proven on real Argo v4.0.5, and athena's
+  emitted `pipeline_fields` SUBMIT-OK.
 - **`#[workflow]` body contract (strict, fail-loud).** Only
   `let x = template(args);` and `template(args);` are lowered. Every other
   statement (if/match, for/while/loop, macros, method calls, `let`
