@@ -68,12 +68,38 @@ say "workflow executor RBAC (default SA)"
 # Argo's emissary reports step outputs via workflowtaskresults; the
 # workflow pods run as the namespace 'default' SA, which namespace-install
 # does not grant. Without this every step Errors with a 403.
-kubectl -n argo create role athena-executor \
-  --verb=create,patch --resource=workflowtaskresults.argoproj.io \
-  --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n argo create rolebinding athena-executor-default \
-  --role=athena-executor --serviceaccount=argo:default \
-  --dry-run=client -o yaml | kubectl apply -f -
+#
+# Apply a literal Role/RoleBinding instead of `kubectl create role
+# --resource=workflowtaskresults.argoproj.io`: that form does client-side
+# API discovery and, if the Argo CRD isn't established yet (a race on
+# fresh installs), prints nothing -> "no objects passed to apply" -> exit
+# 1. RBAC rules are plain strings, not validated against discovery, so a
+# manifest applies deterministically regardless of CRD readiness.
+kubectl apply -f - <<'EOF'
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: athena-executor
+  namespace: argo
+rules:
+- apiGroups: ["argoproj.io"]
+  resources: ["workflowtaskresults"]
+  verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: athena-executor-default
+  namespace: argo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: athena-executor
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: argo
+EOF
 
 say "point Argo at MinIO"
 kubectl -n argo patch configmap workflow-controller-configmap \

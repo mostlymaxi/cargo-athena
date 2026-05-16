@@ -14,6 +14,7 @@ version = "0.1.0"
 dependencies = [
  "cargo-athena-core",
  "cargo-athena-macros",
+ "trybuild",
 ]
 
 [[package]]
@@ -54,19 +55,18 @@ name = "cargo-athena-example-e2e"
 version = "0.1.0"
 dependencies = [
  "cargo-athena",
- "trybuild",
 ]
 
 [[package]]
-name = "cargo-athena-example-e2e-consumer"
+name = "cargo-athena-example-importing"
 version = "0.1.0"
 dependencies = [
  "cargo-athena",
- "cargo-athena-example-e2e",
+ "cargo-athena-example-smoke",
 ]
 
 [[package]]
-name = "cargo-athena-example-integration"
+name = "cargo-athena-example-smoke"
 version = "0.1.0"
 dependencies = [
  "cargo-athena",
