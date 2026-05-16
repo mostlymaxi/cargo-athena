@@ -11,7 +11,7 @@ access_key_secret = { name = "athena-s3", key = "accessKey" }
 secret_key_secret = { name = "athena-s3", key = "secretKey" }
 
 [artifact]
-key = "athena/bin/integration/0.1.0/integration.tar.gz"
+key = "athena/bin/e2e/0.1.0/e2e.tar.gz"
 
 [bootstrap]
 targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]

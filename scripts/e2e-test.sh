@@ -10,8 +10,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLUSTER=athena-e2e
 NS=argo
-PKG=cargo-athena-example-integration
-BIN=integration
+PKG=cargo-athena-example-e2e
+BIN=e2e
 export ATHENA_CONFIG="$ROOT/scripts/athena.toml"
 say() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 
@@ -71,7 +71,7 @@ PF=$!
 until (exec 3<>/dev/tcp/127.0.0.1/9000) 2>/dev/null; do sleep 1; done
 mc alias set athena-e2e http://127.0.0.1:9000 athena athena12345 >/dev/null
 mc cp "$TARBALL" \
-  athena-e2e/athena-artifacts/athena/bin/integration/0.1.0/integration.tar.gz
+  athena-e2e/athena-artifacts/athena/bin/e2e/0.1.0/e2e.tar.gz
 
 say "emit WorkflowTemplates + Workflow"
 ( cd "$ROOT" && cargo run -q -p cargo-athena-cli -- athena emit \

@@ -28,11 +28,15 @@ jobs:
       # cargo-zigbuild, kind/kubectl/argo/mc) isn't re-fetched every run
       # (~2 min). This job populates it; the e2e matrix jobs restore the
       # same key (same flake => same closure). Keyed on the flake inputs.
+      # NO gc-max-store-size: the pre-save GC prunes rust-docs while
+      # rust-default still symlinks into it -> dangling symlinks -> the
+      # cached tar fails to restore. Key invalidates on flake bump; stale
+      # whole-cache entries are pruned via `purge` (needs actions:write)
+      # and GitHub's 10 GB LRU.
       - uses: nix-community/cache-nix-action@v6
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'rust-toolchain.toml') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
-          gc-max-store-size-linux: 5G
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
           purge-created: 0
@@ -50,11 +54,11 @@ jobs:
           ATHENA_CONFIG: scripts/athena.toml
         run: |
           nix develop -c cargo run -q -p cargo-athena-cli -- athena build \
-            --package cargo-athena-example-integration --bin integration
+            --package cargo-athena-example-e2e --bin e2e
       - uses: actions/upload-artifact@v4
         with:
-          name: athena-integration-tarball
-          path: target/athena/integration.tar.gz
+          name: athena-e2e-tarball
+          path: target/athena/e2e.tar.gz
           if-no-files-found: error
           retention-days: 3
 
@@ -90,17 +94,16 @@ jobs:
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'rust-toolchain.toml') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
-          gc-max-store-size-linux: 5G
           purge: false
       - uses: actions/download-artifact@v4
         with:
-          name: athena-integration-tarball
+          name: athena-e2e-tarball
           path: dist
       - name: deploy + e2e against Argo ${{ matrix.argo }}
         env:
           ARGO_VERSION: ${{ matrix.argo }}
           ATHENA_SKIP_BUILD: "1"
-          ATHENA_TARBALL: ${{ github.workspace }}/dist/integration.tar.gz
+          ATHENA_TARBALL: ${{ github.workspace }}/dist/e2e.tar.gz
         run: |
           nix develop -c bash -c 'scripts/deploy.sh && scripts/e2e-test.sh'
       - name: teardown
