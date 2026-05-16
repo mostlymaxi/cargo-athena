@@ -355,8 +355,8 @@ spec:
   - name: cargo-athena-example-smoke-combine
     inputs:
       parameters:
-      - name: x
-      - name: y
+      - name: lhs
+      - name: rhs
       artifacts:
       - name: athena-dist
         path: /athena/dist.tar.gz
@@ -397,10 +397,10 @@ spec:
         export CARGO_ATHENA_OUTPUT=/athena/result
         exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-combine
       env:
-      - name: ATHENA_PARAM_x
-        value: '{{inputs.parameters.x}}'
-      - name: ATHENA_PARAM_y
-        value: '{{inputs.parameters.y}}'
+      - name: ATHENA_PARAM_lhs
+        value: '{{inputs.parameters.lhs}}'
+      - name: ATHENA_PARAM_rhs
+        value: '{{inputs.parameters.rhs}}'
       volumeMounts:
       - name: athena-work
         mountPath: /athena
@@ -569,9 +569,9 @@ spec:
         - t
         arguments:
           parameters:
-          - name: x
+          - name: lhs
             value: '{{tasks.a.outputs.parameters.return}}'
-          - name: y
+          - name: rhs
             value: '{{tasks.t.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-smoke-combine

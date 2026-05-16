@@ -187,6 +187,65 @@ fn make_argo_name(name_override: &Option<String>, rust_name: &str) -> String {
     }
 }
 
+/// YAML 1.1 parsers (Argo's Go YAML→JSON among them) read certain bare
+/// words as bool/null even though YAML 1.2 / serde_norway treat them as
+/// strings — the classic "Norway problem". Returns how `s` would be
+/// mis-typed, or `None` if it is safe. (Rust identifiers can't be the
+/// numeric/sexagesimal forms, so only the word set can ever fire.)
+fn yaml_ambiguous(s: &str) -> Option<&'static str> {
+    match s.to_ascii_lowercase().as_str() {
+        "y" | "yes" | "n" | "no" | "true" | "false" | "on" | "off" => {
+            Some("a YAML 1.1 boolean")
+        }
+        "null" | "~" => Some("a YAML 1.1 null"),
+        _ => None,
+    }
+}
+
+/// Reject argument names (→ Argo parameter names) and `name = "…"`
+/// overrides that a YAML 1.1 parser would silently mis-type. Spanned at
+/// the offending token so the fix is obvious. Synthetic `if`/`else`
+/// wrappers reuse the `#[workflow]` codegen path, so their captured
+/// inputs are covered by the same check.
+fn check_yaml_safe_names(
+    func: &ItemFn,
+    name_override: &Option<String>,
+) -> Result<(), TokenStream> {
+    for (ident, _) in fn_args(func) {
+        if let Some(why) = yaml_ambiguous(&ident.to_string()) {
+            let n = ident.to_string();
+            return Err(syn::Error::new(
+                ident.span(),
+                format!(
+                    "Argo parameter name `{n}` is unsafe: a YAML 1.1 \
+                     parser (including Argo's Go YAML→JSON) reads the bare \
+                     word `{n}` as {why}, not a string — likewise \
+                     y/yes/n/no/on/off/true/false (any case) and null/~. \
+                     The emitted workflow would be silently mis-typed. \
+                     Rename this argument."
+                ),
+            )
+            .to_compile_error()
+            .into());
+        }
+    }
+    if let Some(n) = name_override
+        && let Some(why) = yaml_ambiguous(n)
+    {
+        return Err(syn::Error::new(
+            func.sig.ident.span(),
+            format!(
+                "`name = \"{n}\"` is unsafe: a YAML 1.1 parser \
+                 (including Argo's) reads `{n}` as {why}, not a \
+                 string. Choose a different Argo name."
+            ),
+        )
+        .to_compile_error()
+        .into());
+    }
+    Ok(())
+}
+
 // Attribute args, parsed with `deluxe` (all fields optional/defaulted).
 
 /// `#[container(image = "...", name = "...", service_account = "...",
@@ -323,6 +382,9 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(c) => c,
         Err(e) => return e,
     };
+    if let Err(e) = check_yaml_safe_names(&func, &cfg.name) {
+        return e;
+    }
 
     let ident = func.sig.ident.clone();
     let rust_name = ident.to_string();
@@ -1658,6 +1720,9 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(c) => c,
         Err(e) => return e,
     };
+    if let Err(e) = check_yaml_safe_names(&func, &cfg.name) {
+        return e;
+    }
     let steps_mode = cfg.steps.is_set();
 
     let vis = &func.vis;

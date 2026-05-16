@@ -74,8 +74,8 @@ pub fn branchy(mode: String) {
     service_account = "athena-runner",
     node_selector = { "kubernetes.io/arch" = "amd64", "disktype" = "ssd" }
 )]
-pub fn combine(x: String, y: String) -> String {
-    format!("{x}+{y}")
+pub fn combine(lhs: String, rhs: String) -> String {
+    format!("{lhs}+{rhs}")
 }
 
 #[container]
