@@ -302,7 +302,13 @@ fn ghost_fn(func: &ItemFn) -> TokenStream2 {
     quote! {
         #[doc(hidden)]
         #[allow(dead_code, unused, clippy::all)]
-        fn #name(#inputs) #output #block
+        fn #name(#inputs) #output {
+            // In scope so `list.fan_out(|x| C::__athena_sig(x, ..))`
+            // type-checks (element type, closure, resulting `Vec<U>`).
+            #[allow(unused_imports)]
+            use ::cargo_athena::AthenaList;
+            #block
+        }
     }
 }
 
@@ -521,6 +527,9 @@ enum Arg {
     /// universal-safe form — see `node_tokens`). The ghost has already
     /// type-checked that the field path is valid on the producer's type.
     Json { src: JsonSrc, path: Vec<String> },
+    /// The fan-out closure parameter: `|x| C(x)` → `{{item}}`,
+    /// `|x| C(x.f)` → `{{item.f}}` (only valid on a `fan_out` node).
+    Item { path: Vec<String> },
 }
 
 /// Where a `Json` arg's root value comes from.
@@ -528,6 +537,15 @@ enum JsonSrc {
     /// A prior `let` binding → the producing task (adds a DAG dep).
     Task(String),
     /// A `#[workflow]` input parameter (no dep).
+    Input(String),
+}
+
+/// The list a `fan_out` iterates (Argo `withParam`).
+enum FanSrc {
+    /// Prior `let` binding (Vec/array from a task) → `{{tasks.<t>.…}}`
+    /// (adds a DAG dep on the producer).
+    Task(String),
+    /// A `#[workflow]` input list parameter → `{{inputs.parameters.<n>}}`.
     Input(String),
 }
 
@@ -580,6 +598,9 @@ struct Node {
     args: Vec<Arg>,
     continue_on: Option<(bool, bool)>,
     hooks: Vec<Hook>,
+    /// `Some` ⇒ this is a `fan_out` task (Argo `withParam` over the
+    /// source list; the callee runs once per `{{item}}`).
+    fan: Option<FanSrc>,
 }
 
 fn unwrap_expr(e: &Expr) -> &Expr {
@@ -723,6 +744,120 @@ fn expr_to_arg(
         )),
         other => Err(syn::Error::new_spanned(other, UNSUPPORTED_ARG)),
     }
+}
+
+/// Like `expr_to_arg`, but inside a `fan_out` closure `|it| …`: an
+/// expression rooted at the item param `it` (optionally `.clone()`/
+/// `.to_owned()`-wrapped, with named `.field`s) becomes `Arg::Item`
+/// (`{{item}}`/`{{item.f}}`); anything else resolves normally.
+fn resolve_arg(
+    e: &Expr,
+    item: Option<&str>,
+    bindings: &std::collections::HashMap<String, String>,
+    inputs: &std::collections::HashSet<String>,
+) -> syn::Result<Arg> {
+    if let Some(it) = item {
+        let mut cur = unwrap_expr(e);
+        while let Expr::MethodCall(mc) = cur {
+            if mc.args.is_empty()
+                && matches!(
+                    mc.method.to_string().as_str(),
+                    "clone" | "to_owned"
+                )
+            {
+                cur = unwrap_expr(&mc.receiver);
+            } else {
+                break;
+            }
+        }
+        let mut path: Vec<String> = Vec::new();
+        while let Expr::Field(fe) = cur {
+            match &fe.member {
+                syn::Member::Named(id) => path.push(id.to_string()),
+                syn::Member::Unnamed(_) => {
+                    return Err(syn::Error::new_spanned(
+                        fe,
+                        "tuple-field access on a `fan_out` item isn't \
+                         lowered yet — use named fields.",
+                    ));
+                }
+            }
+            cur = unwrap_expr(&fe.base);
+        }
+        if let Expr::Path(p) = cur
+            && p.path.is_ident(it)
+        {
+            path.reverse();
+            return Ok(Arg::Item { path });
+        }
+    }
+    expr_to_arg(e, bindings, inputs)
+}
+
+/// The tail expression of a closure body (`|x| C(x)` or `|x| { …; C(x) }`).
+fn closure_tail(b: &Expr) -> &Expr {
+    if let Expr::Block(eb) = b
+        && let Some(Stmt::Expr(e, _)) = eb.block.stmts.last()
+    {
+        return e;
+    }
+    b
+}
+
+/// `<list>.fan_out(|item| C(args))` → `(receiver, item-name, C, C-args)`.
+/// `None` if `e` isn't that exact shape.
+fn fan_parts(e: &Expr) -> Option<(Expr, String, Path, Vec<Expr>)> {
+    let Expr::MethodCall(mc) = unwrap_expr(e) else {
+        return None;
+    };
+    if mc.method != "fan_out" {
+        return None;
+    }
+    let mut it = mc.args.iter();
+    let (Some(a0), None) = (it.next(), it.next()) else {
+        return None;
+    };
+    let Expr::Closure(cl) = unwrap_expr(a0) else {
+        return None;
+    };
+    if cl.inputs.len() != 1 {
+        return None;
+    }
+    let item = match local_binding(&cl.inputs[0]) {
+        Ok(Some(n)) => n,
+        _ => return None,
+    };
+    let (callee, raw) = call_parts(closure_tail(&cl.body))?;
+    Some(((*mc.receiver).clone(), item, callee, raw))
+}
+
+/// Resolve a `fan_out` receiver (the list) to its Argo source: a prior
+/// `let` binding (a producing task, adds a dep) or a `#[workflow]` input.
+fn fan_src(
+    recv: &Expr,
+    bindings: &std::collections::HashMap<String, String>,
+    inputs: &std::collections::HashSet<String>,
+) -> syn::Result<FanSrc> {
+    let Expr::Path(p) = unwrap_expr(recv) else {
+        return Err(syn::Error::new_spanned(
+            recv,
+            "`fan_out` source must be a prior `let` binding or a \
+             #[workflow] input (a list).",
+        ));
+    };
+    if p.path.segments.len() == 1 {
+        let name = p.path.segments[0].ident.to_string();
+        if let Some(task) = bindings.get(&name) {
+            return Ok(FanSrc::Task(task.clone()));
+        } else if inputs.contains(&name) {
+            return Ok(FanSrc::Input(name));
+        }
+    }
+    Err(syn::Error::new_spanned(
+        recv,
+        "`fan_out` source must be a prior `let` binding or a #[workflow] \
+         input (a list).",
+    ))
 }
 
 /// A call `path(args...)` where `path` is any path expression. Returns the
@@ -966,6 +1101,8 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
                          raw: Vec<Expr>,
                          base: &str,
                          opts: NodeOpts,
+                         item: Option<&str>,
+                         fan: Option<FanSrc>,
                          used: &mut std::collections::HashSet<String>,
                          nodes: &mut Vec<Node>,
                          bindings: &std::collections::HashMap<String, String>|
@@ -973,10 +1110,10 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
         let task = uniq_task(used, base);
         let args = raw
             .iter()
-            .map(|a| expr_to_arg(a, bindings, &inputs))
+            .map(|a| resolve_arg(a, item, bindings, &inputs))
             .collect::<syn::Result<Vec<_>>>()?;
-        // Resolve each hook's raw args against the same binding/input
-        // scope as the task's own args.
+        // Resolve each hook's raw args against the same scope (incl. the
+        // fan-out item, if any) as the task's own args.
         let hooks = opts
             .hooks
             .into_iter()
@@ -984,7 +1121,7 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
                 let args = h
                     .raw_args
                     .iter()
-                    .map(|a| expr_to_arg(a, bindings, &inputs))
+                    .map(|a| resolve_arg(a, item, bindings, &inputs))
                     .collect::<syn::Result<Vec<_>>>()?;
                 Ok(Hook {
                     when: h.when,
@@ -999,6 +1136,7 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
             args,
             continue_on: opts.continue_on,
             hooks,
+            fan,
         });
         Ok(task)
     };
@@ -1023,13 +1161,30 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
                     ));
                 }
                 let (base_expr, opts) = peel_builders(&init.expr)?;
-                let (callee, raw) = call_parts(base_expr).ok_or_else(|| {
-                    syn::Error::new_spanned(&init.expr, NOT_A_TEMPLATE_CALL)
-                })?;
-                let base = bind.clone().unwrap_or_else(|| path_leaf(&callee));
-                let task = push_call(
-                    callee, raw, &base, opts, &mut used, &mut nodes, &bindings,
-                )?;
+                let task = if let Some((recv, item, callee, raw)) =
+                    fan_parts(base_expr)
+                {
+                    let fsrc = fan_src(&recv, &bindings, &inputs)?;
+                    let base =
+                        bind.clone().unwrap_or_else(|| path_leaf(&callee));
+                    push_call(
+                        callee, raw, &base, opts, Some(item.as_str()),
+                        Some(fsrc), &mut used, &mut nodes, &bindings,
+                    )?
+                } else {
+                    let (callee, raw) =
+                        call_parts(base_expr).ok_or_else(|| {
+                            syn::Error::new_spanned(
+                                &init.expr, NOT_A_TEMPLATE_CALL,
+                            )
+                        })?;
+                    let base =
+                        bind.clone().unwrap_or_else(|| path_leaf(&callee));
+                    push_call(
+                        callee, raw, &base, opts, None, None, &mut used,
+                        &mut nodes, &bindings,
+                    )?
+                };
                 if let Some(b) = bind {
                     bindings.insert(b, task);
                 }
@@ -1076,8 +1231,8 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
                                 })?;
                             let base = path_leaf(&callee);
                             push_call(
-                                callee, raw, &base, opts, &mut used,
-                                &mut nodes, &bindings,
+                                callee, raw, &base, opts, None, None,
+                                &mut used, &mut nodes, &bindings,
                             )?
                         }
                     });
@@ -1108,15 +1263,28 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
                     // call: peel `.continue_on`/`.hooks`/`.on_exit`, then
                     // the base must be a template call.
                     let (base_expr, opts) = peel_builders(expr)?;
-                    let (callee, raw) =
-                        call_parts(base_expr).ok_or_else(|| {
-                            syn::Error::new_spanned(expr, UNSUPPORTED_STMT)
-                        })?;
-                    let base = path_leaf(&callee);
-                    let task = push_call(
-                        callee, raw, &base, opts, &mut used, &mut nodes,
-                        &bindings,
-                    )?;
+                    let task = if let Some((recv, item, callee, raw)) =
+                        fan_parts(base_expr)
+                    {
+                        let fsrc = fan_src(&recv, &bindings, &inputs)?;
+                        let base = path_leaf(&callee);
+                        push_call(
+                            callee, raw, &base, opts, Some(item.as_str()),
+                            Some(fsrc), &mut used, &mut nodes, &bindings,
+                        )?
+                    } else {
+                        let (callee, raw) =
+                            call_parts(base_expr).ok_or_else(|| {
+                                syn::Error::new_spanned(
+                                    expr, UNSUPPORTED_STMT,
+                                )
+                            })?;
+                        let base = path_leaf(&callee);
+                        push_call(
+                            callee, raw, &base, opts, None, None,
+                            &mut used, &mut nodes, &bindings,
+                        )?
+                    };
                     if is_last && semi.is_none() && want_output {
                         output_task = Some(task);
                     }
@@ -1234,6 +1402,23 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                 }
             }
         }
+        // The fan-out closure param: `{{item}}` / `{{item.f.g}}`. Argo
+        // binds `item` per iteration of this task's `withParam`.
+        Arg::Item { path } => {
+            let mut v = String::from("{{item");
+            for f in path {
+                v.push('.');
+                v.push_str(f);
+            }
+            v.push_str("}}");
+            quote! {
+                __params.push(::cargo_athena::api::Parameter {
+                    name: __inputs.get(#i).copied().unwrap_or_default().to_string(),
+                    value: ::core::option::Option::Some(#v.to_string()),
+                    ..::core::default::Default::default()
+                });
+            }
+        }
     });
 
     let push = if steps {
@@ -1349,6 +1534,21 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                         });
                     }
                 }
+                Arg::Item { path } => {
+                    let mut v = String::from("{{item");
+                    for f in path {
+                        v.push('.');
+                        v.push_str(f);
+                    }
+                    v.push_str("}}");
+                    quote! {
+                        __hp.push(::cargo_athena::api::Parameter {
+                            name: __hin.get(#i).copied().unwrap_or_default().to_string(),
+                            value: ::core::option::Option::Some(#v.to_string()),
+                            ..::core::default::Default::default()
+                        });
+                    }
+                }
             });
             quote! {
                 {
@@ -1389,6 +1589,23 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
         })
         .collect();
 
+    // `fan_out` -> Argo `withParam` over the list source (+ a DAG dep on
+    // the producing task when the source is a prior binding).
+    let (with_param_val, fan_dep) = match &node.fan {
+        Some(FanSrc::Task(dep)) => (
+            format!("{ref_scope}{dep}.outputs.parameters.return}}}}"),
+            if steps {
+                quote! {}
+            } else {
+                quote! { __deps.push(#dep.to_string()); }
+            },
+        ),
+        Some(FanSrc::Input(name)) => {
+            (format!("{{{{inputs.parameters.{name}}}}}"), quote! {})
+        }
+        None => (String::new(), quote! {}),
+    };
+
     quote! {
         {
             // Resolved by the type system across modules/crates:
@@ -1400,6 +1617,7 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                 ::std::vec::Vec::new();
             let mut __deps: ::std::vec::Vec<::std::string::String> =
                 ::std::vec::Vec::new();
+            #fan_dep
             #( #arg_stmts )*
             __deps.sort();
             __deps.dedup();
@@ -1426,6 +1644,7 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                 ),
                 continue_on: __continue_on,
                 hooks: __hooks,
+                with_param: #with_param_val.to_string(),
             };
             #push
         }

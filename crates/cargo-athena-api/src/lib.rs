@@ -242,6 +242,9 @@ argo! {
         /// special unconditional on-completion hook; others fire when
         /// their `expression` holds.
         pub hooks: BTreeMap<String, LifecycleHook>,
+        /// Fan-out: a JSON-array string; the task runs once per element
+        /// with `{{item}}` bound. Empty == no fan-out (skip-serialized).
+        pub with_param: String,
     }
 
     /// Proceed to dependents even if this task fails/errors.

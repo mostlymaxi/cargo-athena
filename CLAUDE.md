@@ -56,6 +56,25 @@ README is intentionally lean (user-facing); the *why* lives here.
   `a[i]` are targeted `compile_error!`s (deferred). Empirically:
   jsonpath/fromJSON round-trip proven on real Argo v4.0.5, and athena's
   emitted `pipeline_fields` SUBMIT-OK.
+- **`.fan_out` (list → Argo `withParam`).** `let b =
+  a.fan_out(|x| C(x, lit));` lowers `C` to a task with `withParam:
+  {{tasks.<a>.outputs.parameters.return}}` (or `{{inputs.parameters.<a>}}`
+  if `a` is a workflow input), `dependencies:[a]`, the closure param → the
+  `{{item}}` arg (other args resolve normally; `{{item.field}}` for a
+  field-chain on the param). `AthenaList<T>` is a **ghost-only** trait
+  (`cargo-athena-core`, blanket `impl` for `Vec<T>`/`[T;N]`, body
+  `unimplemented!()`, re-exported via facade) injected into the ghost as
+  `use ::cargo_athena::AthenaList;` so `a.fan_out(|x| C::__athena_sig(x,…))`
+  type-checks element/closure/result. The aggregated output is consumed as
+  a **normal** `{{tasks.<b>.outputs.parameters.return}}` ref → `Vec<U>`:
+  **empirically proven** on real Argo v4.0.5 that the `withParam`
+  aggregate of valid-JSON returns is already a clean JSON array (no
+  base64, no `toJSON`/`fromJSON` renormalize — the run-side
+  `from_str`-else-`String` contract makes it universally
+  `from_str::<Vec<U>>`-able), and athena's emitted `pipeline_fanout`
+  SUBMIT-OK. The closure body MUST be a template call (else
+  `compile_error!`); the `fan_out` source must be a prior binding or
+  workflow input.
 - **`#[workflow]` body contract (strict, fail-loud).** Only
   `let x = template(args);` and `template(args);` are lowered. Every other
   statement (if/match, for/while/loop, macros, method calls, `let`

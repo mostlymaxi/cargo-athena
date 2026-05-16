@@ -29,6 +29,23 @@ pub use inventory;
 pub use serde_json;
 pub use serde_yaml;
 
+/// Fan-out: `list.fan_out(|x| template(x, ..))` runs `template` once per
+/// element (Argo `withParam`); the binding is the aggregated `Vec<U>` of
+/// the per-element returns. This trait exists only so the ghost
+/// type-checks the element type, the closure, and the resulting
+/// `Vec<U>`; the macro lowers the call to Argo and it never runs.
+pub trait AthenaList<T> {
+    #[doc(hidden)]
+    fn fan_out<U, F: FnOnce(T) -> U>(self, _f: F) -> Vec<U>
+    where
+        Self: Sized,
+    {
+        unimplemented!("athena ghost: never executed")
+    }
+}
+impl<T> AthenaList<T> for Vec<T> {}
+impl<T, const N: usize> AthenaList<T> for [T; N] {}
+
 /// `host!("/lit/path")` — declare a hostPath volume for the enclosing
 /// container, evaluating to the (already-mounted) path at runtime.
 ///
