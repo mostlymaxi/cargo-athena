@@ -9,6 +9,7 @@ use std::process::Command;
 const BIN_PIPELINE: &str = env!("CARGO_BIN_EXE_smoke");
 const BIN_RETURNS: &str = env!("CARGO_BIN_EXE_smoke-returns");
 const BIN_HOOKS: &str = env!("CARGO_BIN_EXE_smoke-hooks");
+const BIN_ONEXIT: &str = env!("CARGO_BIN_EXE_smoke-onexit");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -73,6 +74,13 @@ fn emit_pipeline_returns() {
 #[test]
 fn emit_pipeline_hooks() {
     assert_golden("pipeline_hooks.yaml", &run_bin(BIN_HOOKS, &[]));
+}
+
+/// `#[workflow(on_exit=…)]` -> runnable Workflow `spec.onExit`, plus an
+/// `.on_exit(record("done"))` exit hook carrying arguments.
+#[test]
+fn emit_pipeline_onexit() {
+    assert_golden("pipeline_onexit.yaml", &run_bin(BIN_ONEXIT, &[]));
 }
 
 /// Run mode: a container that returns a value (JSON to stdout).

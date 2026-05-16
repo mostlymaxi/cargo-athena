@@ -142,3 +142,22 @@ pub fn pipeline_hooks() {
         .on_exit(cleanup)
         .hooks("steps.x.status == 'Failed'" = alarm);
 }
+
+#[container]
+pub fn teardown() {
+    println!("teardown");
+}
+
+#[container]
+pub fn record(tag: String) {
+    println!("record {tag}");
+}
+
+/// `#[workflow(on_exit = t)]` → the runnable Workflow's `spec.onExit`
+/// (only when this is the emit root). `.on_exit(record("done"))` → an
+/// exit hook *with arguments* (resolved like task args).
+#[workflow(on_exit = teardown)]
+pub fn pipeline_onexit() {
+    let raw = fetch("https://example.com".to_string());
+    transform(raw, 2).on_exit(record("done"));
+}
