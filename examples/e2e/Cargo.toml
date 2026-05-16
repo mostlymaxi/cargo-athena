@@ -1,0 +1,26 @@
+[package]
+name = "cargo-athena-example-e2e"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+# Stable e2e fixture — do NOT edit casually; goldens in tests/golden/ are
+# pinned to its emitted output. Regenerate with `UPDATE_EXPECT=1`.
+[lib]
+name = "cargo_athena_example_e2e"
+path = "src/lib.rs"
+
+[[bin]]
+name = "e2e"
+path = "src/main.rs"
+
+[[bin]]
+name = "e2e-another"
+path = "src/bin/another_main.rs"
+
+[dependencies]
+cargo-athena = { workspace = true }
+
+[dev-dependencies]
+trybuild = "1"

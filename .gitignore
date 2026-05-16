@@ -1,0 +1,11 @@
+# Rust build artifacts
+/target
+
+# Backup files from rustfmt / rustc
+**/*.rs.bk
+*.pdb
+
+# direnv / nix
+.direnv/
+result
+result-*

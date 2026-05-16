@@ -1,0 +1,13 @@
+# Future codegen path (kept in sync with build.rs):
+#   buf generate
+# requires protoc-gen-prost / protoc-gen-prost-serde on PATH.
+# Until those plugins are vendored into the flake, build.rs (prost-build)
+# is authoritative and produces byte-identical types.
+version: v2
+plugins:
+  - remote: buf.build/community/neoeinstein-prost
+    out: src/gen
+    opt:
+      - bytes=.
+  - remote: buf.build/community/neoeinstein-prost-serde
+    out: src/gen

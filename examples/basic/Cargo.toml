@@ -1,0 +1,9 @@
+[package]
+name = "cargo-athena-example-basic"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+cargo-athena = { workspace = true }

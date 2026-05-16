@@ -1,0 +1,344 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-branchy
+spec:
+  entrypoint: cargo-athena-example-e2e-branchy
+  templates:
+  - name: cargo-athena-example-e2e-branchy
+    inputs:
+      parameters:
+      - name: mode
+    outputs:
+      parameters:
+      - name: result
+        valueFrom:
+          path: /tmp/cargo-athena/result
+    container:
+      image: ghcr.io/acme/tools:latest
+      command:
+      - app
+      args:
+      - --cargo-athena-template
+      - cargo-athena-example-e2e-branchy
+      volumeMounts:
+      - name: host-cache-fast
+        mountPath: /cache/fast
+      - name: host-cache-slow
+        mountPath: /cache/slow
+      - name: host-data-default
+        mountPath: /data/default
+      - name: host-data-empty
+        mountPath: /data/empty
+      - name: host-var-lib-a
+        mountPath: /var/lib/a
+      - name: host-var-lib-b
+        mountPath: /var/lib/b
+    volumes:
+    - name: host-cache-fast
+      hostPath:
+        path: /cache/fast
+    - name: host-cache-slow
+      hostPath:
+        path: /cache/slow
+    - name: host-data-default
+      hostPath:
+        path: /data/default
+    - name: host-data-empty
+      hostPath:
+        path: /data/empty
+    - name: host-var-lib-a
+      hostPath:
+        path: /var/lib/a
+    - name: host-var-lib-b
+      hostPath:
+        path: /var/lib/b
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-combine
+spec:
+  entrypoint: cargo-athena-example-e2e-combine
+  templates:
+  - name: cargo-athena-example-e2e-combine
+    inputs:
+      parameters:
+      - name: x
+      - name: y
+    outputs:
+      parameters:
+      - name: result
+        valueFrom:
+          path: /tmp/cargo-athena/result
+    container:
+      image: ghcr.io/acme/combine:latest
+      command:
+      - app
+      args:
+      - --cargo-athena-template
+      - cargo-athena-example-e2e-combine
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-consumer-consumer-pipeline
+spec:
+  entrypoint: cargo-athena-example-e2e-consumer-consumer-pipeline
+  templates:
+  - name: cargo-athena-example-e2e-consumer-consumer-pipeline
+    dag:
+      tasks:
+      - name: n
+        arguments:
+          parameters:
+          - name: note
+            value: hello
+        templateRef:
+          name: cargo-athena-example-e2e-consumer-consumer-step
+          template: cargo-athena-example-e2e-consumer-consumer-step
+      - name: pipeline
+        arguments: {}
+        templateRef:
+          name: cargo-athena-example-e2e-pipeline
+          template: cargo-athena-example-e2e-pipeline
+      - name: finalize
+        dependencies:
+        - n
+        arguments:
+          parameters:
+          - name: x
+            value: '{{tasks.n.outputs.result}}'
+        templateRef:
+          name: cargo-athena-example-e2e-consumer-finalize
+          template: cargo-athena-example-e2e-consumer-finalize
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-consumer-consumer-step
+spec:
+  entrypoint: cargo-athena-example-e2e-consumer-consumer-step
+  templates:
+  - name: cargo-athena-example-e2e-consumer-consumer-step
+    inputs:
+      parameters:
+      - name: note
+    outputs:
+      parameters:
+      - name: result
+        valueFrom:
+          path: /tmp/cargo-athena/result
+    container:
+      image: REPLACE_ME
+      command:
+      - app
+      args:
+      - --cargo-athena-template
+      - cargo-athena-example-e2e-consumer-consumer-step
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-consumer-finalize
+spec:
+  entrypoint: cargo-athena-example-e2e-consumer-finalize
+  templates:
+  - name: cargo-athena-example-e2e-consumer-finalize
+    inputs:
+      parameters:
+      - name: x
+    outputs:
+      parameters:
+      - name: result
+        valueFrom:
+          path: /tmp/cargo-athena/result
+    container:
+      image: REPLACE_ME
+      command:
+      - app
+      args:
+      - --cargo-athena-template
+      - cargo-athena-example-e2e-consumer-finalize
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-fetch
+spec:
+  entrypoint: cargo-athena-example-e2e-fetch
+  templates:
+  - name: cargo-athena-example-e2e-fetch
+    inputs:
+      parameters:
+      - name: url
+    outputs:
+      parameters:
+      - name: result
+        valueFrom:
+          path: /tmp/cargo-athena/result
+    container:
+      image: ghcr.io/acme/fetch:1.2.3
+      command:
+      - /usr/local/bin/fetch
+      args:
+      - --cargo-athena-template
+      - cargo-athena-example-e2e-fetch
+      volumeMounts:
+      - name: host-secrets-token
+        mountPath: /secrets/token
+    volumes:
+    - name: host-secrets-token
+      hostPath:
+        path: /secrets/token
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-ingest
+spec:
+  entrypoint: cargo-athena-example-e2e-ingest
+  templates:
+  - name: cargo-athena-example-e2e-ingest
+    inputs:
+      parameters:
+      - name: source
+    dag:
+      tasks:
+      - name: raw
+        arguments:
+          parameters:
+          - name: url
+            value: '{{inputs.parameters.source}}'
+        templateRef:
+          name: cargo-athena-example-e2e-fetch
+          template: cargo-athena-example-e2e-fetch
+      - name: clean
+        dependencies:
+        - raw
+        arguments:
+          parameters:
+          - name: data
+            value: '{{tasks.raw.outputs.result}}'
+          - name: factor
+            value: '2'
+        templateRef:
+          name: cargo-athena-example-e2e-transform
+          template: cargo-athena-example-e2e-transform
+      - name: publish
+        dependencies:
+        - clean
+        arguments:
+          parameters:
+          - name: report
+            value: '{{tasks.clean.outputs.result}}'
+        templateRef:
+          name: cargo-athena-example-e2e-publish
+          template: cargo-athena-example-e2e-publish
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-pipeline
+spec:
+  entrypoint: cargo-athena-example-e2e-pipeline
+  templates:
+  - name: cargo-athena-example-e2e-pipeline
+    dag:
+      tasks:
+      - name: a
+        arguments:
+          parameters:
+          - name: source
+            value: https://example.com/data
+        templateRef:
+          name: cargo-athena-example-e2e-ingest
+          template: cargo-athena-example-e2e-ingest
+      - name: branchy
+        arguments:
+          parameters:
+          - name: mode
+            value: fast
+        templateRef:
+          name: cargo-athena-example-e2e-branchy
+          template: cargo-athena-example-e2e-branchy
+      - name: t
+        arguments:
+          parameters:
+          - name: data
+            value: seed
+          - name: factor
+            value: '3'
+        templateRef:
+          name: cargo-athena-example-e2e-transform
+          template: cargo-athena-example-e2e-transform
+      - name: combine
+        dependencies:
+        - a
+        - t
+        arguments:
+          parameters:
+          - name: x
+            value: '{{tasks.a.outputs.result}}'
+          - name: y
+            value: '{{tasks.t.outputs.result}}'
+        templateRef:
+          name: cargo-athena-example-e2e-combine
+          template: cargo-athena-example-e2e-combine
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-publish
+spec:
+  entrypoint: cargo-athena-example-e2e-publish
+  templates:
+  - name: cargo-athena-example-e2e-publish
+    inputs:
+      parameters:
+      - name: report
+    outputs:
+      parameters:
+      - name: result
+        valueFrom:
+          path: /tmp/cargo-athena/result
+    container:
+      image: REPLACE_ME
+      command:
+      - app
+      args:
+      - --cargo-athena-template
+      - cargo-athena-example-e2e-publish
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-e2e-transform
+spec:
+  entrypoint: cargo-athena-example-e2e-transform
+  templates:
+  - name: cargo-athena-example-e2e-transform
+    inputs:
+      parameters:
+      - name: data
+      - name: factor
+    outputs:
+      parameters:
+      - name: result
+        valueFrom:
+          path: /tmp/cargo-athena/result
+    container:
+      image: REPLACE_ME
+      command:
+      - app
+      args:
+      - --cargo-athena-template
+      - cargo-athena-example-e2e-transform
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: cargo-athena-example-e2e-consumer-consumer-pipeline-
+spec:
+  workflowTemplateRef:
+    name: cargo-athena-example-e2e-consumer-consumer-pipeline

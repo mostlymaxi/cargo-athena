@@ -1,0 +1,13 @@
+# buf is the schema source-of-truth (lint/breaking-change config).
+# Codegen itself currently runs through prost-build in build.rs for
+# reliability/offline builds; `buf.gen.yaml` documents the buf-plugin
+# path we migrate to once the protoc-gen-prost plugins are vendored.
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE

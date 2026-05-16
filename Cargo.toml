@@ -1,0 +1,39 @@
+# Workspace root for cargo-athena: compile regular Rust into Argo Workflow YAML.
+#
+# Crate roles:
+#   cargo-athena-api    — Argo API types generated from protobuf (prost), serde-able for YAML.
+#   cargo-athena-core   — runtime: modes, registration (inventory), DAG/promise types, YAML emit.
+#   cargo-athena-macros — #[workflow] / #[container] / #[fragment] proc macros + host!/image!/env!.
+#   cargo-athena        — facade crate users depend on; re-exports the above behind one name.
+#   cargo-athena-cli    — the `cargo athena` subcommand binary.
+#   examples/*        — end-to-end usage.
+[workspace]
+resolver = "3"
+members = ["crates/*", "examples/*"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/acme/cargo-athena"
+
+[workspace.dependencies]
+cargo-athena-api = { path = "crates/cargo-athena-api", version = "0.1.0" }
+cargo-athena-core = { path = "crates/cargo-athena-core", version = "0.1.0" }
+cargo-athena-macros = { path = "crates/cargo-athena-macros", version = "0.1.0" }
+cargo-athena = { path = "crates/cargo-athena", version = "0.1.0" }
+
+# proc-macro stack
+syn = { version = "2", features = ["full", "extra-traits", "visit", "visit-mut"] }
+quote = "1"
+proc-macro2 = "1"
+
+# protobuf / serialization
+prost = "0.13"
+prost-build = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# registration
+inventory = "0.3"

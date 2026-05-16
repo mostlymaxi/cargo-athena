@@ -1,0 +1,5 @@
+error: `host!` cannot be used in a #[workflow]: a workflow is a DAG, not a pod. Declare host paths in the #[container] (or a #[fragment] it calls) that actually runs in-cluster.
+ --> tests/ui/host_in_workflow.rs:4:4
+  |
+4 | fn wf() {
+  |    ^^

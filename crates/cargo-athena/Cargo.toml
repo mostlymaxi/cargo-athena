@@ -1,0 +1,11 @@
+[package]
+name = "cargo-athena"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Compile regular Rust into Argo Workflow YAML — facade crate"
+
+[dependencies]
+cargo-athena-core = { workspace = true }
+cargo-athena-macros = { workspace = true }
