@@ -429,47 +429,55 @@ fn unwrap_expr(e: &Expr) -> &Expr {
     }
 }
 
-/// Best-effort: extract a literal string, a previous-task reference, or a
-/// workflow-input reference.
+const UNSUPPORTED_ARG: &str = "unsupported argument in a #[workflow] call. \
+Allowed: a literal, a workflow input parameter, a binding from a prior \
+`let x = template(...);`, or `.to_string()`/`.to_owned()`/`.into()` on one \
+of those. Computed values, regular variables/consts, method calls, and \
+other expressions aren't lowered yet.";
+
+/// Strict: a literal, a previous-task reference, or a workflow-input
+/// reference. Anything else is a hard `compile_error!` (no silent
+/// stringify) — an unmodeled arg would otherwise emit a bogus Argo param.
 fn expr_to_arg(
     e: &Expr,
     bindings: &std::collections::HashMap<String, String>,
     inputs: &std::collections::HashSet<String>,
-) -> Arg {
+) -> syn::Result<Arg> {
     match unwrap_expr(e) {
-        Expr::Lit(syn::ExprLit { lit, .. }) => match lit {
+        Expr::Lit(syn::ExprLit { lit, .. }) => Ok(match lit {
             syn::Lit::Str(s) => Arg::Lit(s.value()),
             syn::Lit::Int(i) => Arg::Lit(i.base10_digits().to_string()),
+            syn::Lit::Float(f) => Arg::Lit(f.base10_digits().to_string()),
             syn::Lit::Bool(b) => Arg::Lit(b.value.to_string()),
             other => Arg::Lit(quote!(#other).to_string()),
-        },
+        }),
+        // `<x>.to_string()/.to_owned()/.into()` — only if the receiver is
+        // itself a supported arg (literal / input / prior binding).
         Expr::MethodCall(mc)
             if matches!(
                 mc.method.to_string().as_str(),
                 "to_string" | "to_owned" | "into"
-            ) =>
+            ) && mc.args.is_empty() =>
         {
-            if let Expr::Lit(syn::ExprLit {
-                lit: syn::Lit::Str(s),
-                ..
-            }) = unwrap_expr(&mc.receiver)
-            {
-                Arg::Lit(s.value())
-            } else {
-                expr_to_arg(&mc.receiver, bindings, inputs)
-            }
+            expr_to_arg(&mc.receiver, bindings, inputs)
         }
         Expr::Path(p) if p.path.segments.len() == 1 => {
             let name = p.path.segments[0].ident.to_string();
             if let Some(task) = bindings.get(&name) {
-                Arg::Ref(task.clone())
+                Ok(Arg::Ref(task.clone()))
             } else if inputs.contains(&name) {
-                Arg::Input(name)
+                Ok(Arg::Input(name))
             } else {
-                Arg::Lit(name)
+                Err(syn::Error::new_spanned(
+                    e,
+                    format!(
+                        "`{name}` is not a #[workflow] input or a binding from \
+                         a prior `let = template(...)`. {UNSUPPORTED_ARG}"
+                    ),
+                ))
             }
         }
-        other => Arg::Lit(quote!(#other).to_string().replace(char::is_whitespace, "")),
+        other => Err(syn::Error::new_spanned(other, UNSUPPORTED_ARG)),
     }
 }
 
@@ -493,71 +501,203 @@ fn path_leaf(p: &Path) -> String {
         .unwrap_or_else(|| "task".to_string())
 }
 
-fn analyze_workflow(func: &ItemFn) -> Vec<Node> {
+const UNSUPPORTED_STMT: &str = "unsupported statement in a #[workflow]: only \
+`let x = template(args);` and `template(args);` are lowered. if/match, \
+for/while/loop, macros, method calls and other expressions aren't \
+supported yet — they'll be lowered differently later.";
+
+const NOT_A_TEMPLATE_CALL: &str = "expected a template call `name(args)` — a \
+#[container] or #[workflow]. #[fragment]s and regular functions are not \
+templates and can't be called from a #[workflow].";
+
+const RETURN_UNRESOLVED: &str = "this #[workflow] declares a return type but \
+its returned value isn't produced by a template call. End with a tail \
+template call `name(args)` (no `;`) or return a `let` binding from one.";
+
+/// The binding name a `let` pattern introduces: `Some(name)` for a plain
+/// (optionally `mut`/typed) ident, `None` for `_`. Anything else (tuple,
+/// ref, struct, or-pattern) is unsupported in a #[workflow].
+fn local_binding(pat: &syn::Pat) -> syn::Result<Option<String>> {
+    match pat {
+        syn::Pat::Ident(p) if p.by_ref.is_none() && p.subpat.is_none() => {
+            Ok(Some(p.ident.to_string()))
+        }
+        syn::Pat::Wild(_) => Ok(None),
+        syn::Pat::Type(t) => local_binding(&t.pat),
+        other => Err(syn::Error::new_spanned(
+            other,
+            "unsupported `let` pattern in #[workflow]: bind a single name \
+             (`let x = template(...);`) or `_`.",
+        )),
+    }
+}
+
+/// Allocate a kebab task name unique within the workflow.
+fn uniq_task(used: &mut std::collections::HashSet<String>, base: &str) -> String {
+    let mut task = kebab(base);
+    let mut n = 1;
+    while used.contains(&task) {
+        n += 1;
+        task = format!("{}-{n}", kebab(base));
+    }
+    used.insert(task.clone());
+    task
+}
+
+/// Returns `(nodes, Some(output_task))` where `output_task` is the task
+/// whose `result` the workflow returns (only when it declares a return
+/// type). Every statement is strictly matched: anything unmodeled is a
+/// hard `compile_error!` rather than a silently dropped node.
+fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
     let mut bindings: std::collections::HashMap<String, String> = Default::default();
     let mut used: std::collections::HashSet<String> = Default::default();
     let inputs: std::collections::HashSet<String> = fn_args(func)
         .iter()
         .map(|(i, _)| i.to_string())
         .collect();
-    let mut nodes = Vec::new();
+    let want_output = matches!(func.sig.output, syn::ReturnType::Type(..));
+    let mut nodes: Vec<Node> = Vec::new();
+    let mut output_task: Option<String> = None;
 
-    let mut record = |callee: Path, raw_args: Vec<Expr>, binding: Option<String>,
-                       bindings: &std::collections::HashMap<String, String>|
-     -> (Node, Option<String>) {
-        let base = binding.clone().unwrap_or_else(|| path_leaf(&callee));
-        let mut task = kebab(&base);
-        let mut n = 1;
-        while used.contains(&task) {
-            n += 1;
-            task = format!("{}-{n}", kebab(&base));
-        }
-        used.insert(task.clone());
-        let args = raw_args
+    // Record a `callee(raw...)` call as a node; returns its task name.
+    let push_call = |callee: Path,
+                         raw: Vec<Expr>,
+                         base: &str,
+                         used: &mut std::collections::HashSet<String>,
+                         nodes: &mut Vec<Node>,
+                         bindings: &std::collections::HashMap<String, String>|
+     -> syn::Result<String> {
+        let task = uniq_task(used, base);
+        let args = raw
             .iter()
             .map(|a| expr_to_arg(a, bindings, &inputs))
-            .collect();
-        (
-            Node {
-                task: task.clone(),
-                callee,
-                args,
-            },
-            binding.map(|_| task),
-        )
+            .collect::<syn::Result<Vec<_>>>()?;
+        nodes.push(Node {
+            task: task.clone(),
+            callee,
+            args,
+        });
+        Ok(task)
     };
 
-    for stmt in &func.block.stmts {
+    let stmts = &func.block.stmts;
+    for (idx, stmt) in stmts.iter().enumerate() {
+        let is_last = idx + 1 == stmts.len();
         match stmt {
             Stmt::Local(local) => {
-                let bind = match &local.pat {
-                    syn::Pat::Ident(p) => Some(p.ident.to_string()),
-                    syn::Pat::Type(t) => match &*t.pat {
-                        syn::Pat::Ident(p) => Some(p.ident.to_string()),
-                        _ => None,
-                    },
-                    _ => None,
-                };
-                if let (Some(init), Some(bind)) = (&local.init, bind)
-                    && let Some((callee, raw)) = call_parts(&init.expr)
-                {
-                    let (node, task) = record(callee, raw, Some(bind.clone()), &bindings);
-                    if let Some(t) = task {
-                        bindings.insert(bind, t);
+                let bind = local_binding(&local.pat)?;
+                let init = local.init.as_ref().ok_or_else(|| {
+                    syn::Error::new_spanned(
+                        local,
+                        "a #[workflow] `let` must bind a template call: \
+                         `let x = template(args);`.",
+                    )
+                })?;
+                if init.diverge.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        local,
+                        "`let ... else` is not supported in #[workflow].",
+                    ));
+                }
+                let (callee, raw) = call_parts(&init.expr).ok_or_else(|| {
+                    syn::Error::new_spanned(&init.expr, NOT_A_TEMPLATE_CALL)
+                })?;
+                let base = bind.clone().unwrap_or_else(|| path_leaf(&callee));
+                let task = push_call(
+                    callee, raw, &base, &mut used, &mut nodes, &bindings,
+                )?;
+                if let Some(b) = bind {
+                    bindings.insert(b, task);
+                }
+            }
+            Stmt::Expr(expr, semi) => match unwrap_expr(expr) {
+                Expr::Return(r) => {
+                    let target = r.expr.as_deref().ok_or_else(|| {
+                        syn::Error::new_spanned(
+                            expr,
+                            "#[workflow] `return` must return a template result.",
+                        )
+                    })?;
+                    output_task = Some(match unwrap_expr(target) {
+                        Expr::Path(p) if p.path.segments.len() == 1 => {
+                            let name = p.path.segments[0].ident.to_string();
+                            bindings.get(&name).cloned().ok_or_else(|| {
+                                syn::Error::new_spanned(
+                                    target,
+                                    format!(
+                                        "`{name}` is returned but isn't a \
+                                         binding from a `let = template(...)`."
+                                    ),
+                                )
+                            })?
+                        }
+                        _ => {
+                            let (callee, raw) =
+                                call_parts(target).ok_or_else(|| {
+                                    syn::Error::new_spanned(
+                                        target,
+                                        NOT_A_TEMPLATE_CALL,
+                                    )
+                                })?;
+                            let base = path_leaf(&callee);
+                            push_call(
+                                callee, raw, &base, &mut used, &mut nodes,
+                                &bindings,
+                            )?
+                        }
+                    });
+                }
+                Expr::Call(_) => {
+                    let (callee, raw) = call_parts(expr).ok_or_else(|| {
+                        syn::Error::new_spanned(expr, NOT_A_TEMPLATE_CALL)
+                    })?;
+                    let base = path_leaf(&callee);
+                    let task = push_call(
+                        callee, raw, &base, &mut used, &mut nodes, &bindings,
+                    )?;
+                    if is_last && semi.is_none() && want_output {
+                        output_task = Some(task);
                     }
-                    nodes.push(node);
                 }
-            }
-            Stmt::Expr(expr, _) => {
-                if let Some((callee, raw)) = call_parts(expr) {
-                    let (node, _) = record(callee, raw, None, &bindings);
-                    nodes.push(node);
+                // tail bare binding ident == the returned value
+                Expr::Path(p)
+                    if is_last
+                        && semi.is_none()
+                        && p.path.segments.len() == 1 =>
+                {
+                    let name = p.path.segments[0].ident.to_string();
+                    output_task = Some(
+                        bindings.get(&name).cloned().ok_or_else(|| {
+                            syn::Error::new_spanned(
+                                expr,
+                                format!(
+                                    "`{name}` is returned but isn't a binding \
+                                     from a `let = template(...)`."
+                                ),
+                            )
+                        })?,
+                    );
                 }
+                other => {
+                    return Err(syn::Error::new_spanned(other, UNSUPPORTED_STMT));
+                }
+            },
+            Stmt::Macro(m) => {
+                return Err(syn::Error::new_spanned(m, UNSUPPORTED_STMT));
             }
-            _ => {}
+            Stmt::Item(it) => {
+                return Err(syn::Error::new_spanned(it, UNSUPPORTED_STMT));
+            }
         }
     }
-    nodes
+
+    if want_output && output_task.is_none() {
+        return Err(syn::Error::new_spanned(&func.sig.output, RETURN_UNRESOLVED));
+    }
+    if !want_output {
+        output_task = None;
+    }
+    Ok((nodes, output_task))
 }
 
 /// `steps`: emit an Argo `steps` group (sequential, refs via
@@ -686,11 +826,44 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         .to_compile_error()
         .into();
     }
-    let nodes = analyze_workflow(&func);
+    let (nodes, output_task) = match analyze_workflow(&func) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
     let node_blocks: Vec<_> = nodes
         .iter()
         .map(|n| node_tokens(n, steps_mode))
         .collect();
+
+    // A returned value bubbles the terminal task's `result` up as this
+    // template's own output, so a parent can wire {{tasks.X.outputs.result}}
+    // to a sub-workflow exactly like a container.
+    let outputs_tokens = match &output_task {
+        Some(t) => {
+            let scope = if steps_mode { "steps" } else { "tasks" };
+            let refstr = format!("{{{{{scope}.{t}.outputs.result}}}}");
+            quote! {
+                outputs: ::core::option::Option::Some(
+                    ::cargo_athena::api::Outputs {
+                        parameters: ::std::vec![
+                            ::cargo_athena::api::Parameter {
+                                name: "result".to_string(),
+                                value_from: ::core::option::Option::Some(
+                                    ::cargo_athena::api::ValueFrom {
+                                        parameter: #refstr.to_string(),
+                                        ..::core::default::Default::default()
+                                    }
+                                ),
+                                ..::core::default::Default::default()
+                            }
+                        ],
+                        ..::core::default::Default::default()
+                    }
+                ),
+            }
+        }
+        None => quote! {},
+    };
 
     // Distinct callee paths -> recurse their `collect` (force-links them).
     let mut seen_callees = std::collections::HashSet::new();
@@ -733,6 +906,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
                 name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
                 inputs: #inputs_tokens,
                 steps: __steps,
+                #outputs_tokens
                 ..::core::default::Default::default()
             }
         }
@@ -746,6 +920,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
                 inputs: #inputs_tokens,
                 dag: ::core::option::Option::Some(
                     ::cargo_athena::api::DagTemplate { tasks: __tasks }),
+                #outputs_tokens
                 ..::core::default::Default::default()
             }
         }

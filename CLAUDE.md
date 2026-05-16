@@ -18,6 +18,28 @@ README is intentionally lean (user-facing); the *why* lives here.
   `#[workflow(name=…)]`).
 - **Hybrid DAG**: `#[workflow]` bodies are *statically analyzed, not
   executed* — the seam for a future functional promise-graph.
+- **`#[workflow]` body contract (strict, fail-loud).** Only
+  `let x = template(args);` and `template(args);` are lowered. Every other
+  statement (if/match, for/while/loop, macros, method calls, `let`
+  with non-ident/tuple patterns, `let…else`) is a hard `compile_error!`
+  with a spanned message — never a silently dropped task. Args must be a
+  literal, a `#[workflow]` input, a prior `let` binding, or
+  `.to_string()/.to_owned()/.into()` on one of those (no lossy
+  stringify). `#[fragment]`s/regular fns aren't `Template`s, so calling
+  one from a `#[workflow]` fails via the type system (`<x as Template>`
+  → "expected type, found function"). Loops/branches will be lowered
+  differently later — until then they must error, not mislower.
+- **`#[workflow]` return values.** A workflow with a return type bubbles
+  its **terminal** task's `result` up as the template's own
+  `outputs.parameters.result` via `valueFrom.parameter:
+  "{{tasks|steps.<task>.outputs.result}}"` (terminal = tail template
+  call, or a `return`/tail binding ident → its producing task).
+  Return-type-but-unresolvable is a `compile_error!`. This makes a
+  sub-workflow's result resolvable exactly like a container's, so
+  workflow→X data-deps now work on **all** Argo versions (the producing
+  WT genuinely declares the output). Containers still use
+  `valueFrom.path: /athena/result`; only DAG/steps templates use
+  `valueFrom.parameter`.
 - **Resource collection = static AST union, not a trace.** The attribute
   macro sees every branch's tokens, so `host!`/artifact-key decls are
   collected across all `if`/`match`/loop arms. This is *correct* (Argo's
