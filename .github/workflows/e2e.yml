@@ -59,6 +59,10 @@ jobs:
           - v3.6.19   # minimum supported (EOL, hard gate)
     runs-on: ubuntu-latest
     name: e2e (argo ${{ matrix.argo }})
+    # `secrets` isn't a valid context in a step `if:`; job-level env can
+    # read it, so collapse "both badge secrets present" into one flag.
+    env:
+      BADGE_ENABLED: ${{ secrets.BADGE_GIST_ID != '' && secrets.GIST_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v16
@@ -85,7 +89,7 @@ jobs:
       - name: publish status badge
         if: >-
           ${{ always() && github.ref == 'refs/heads/main'
-              && secrets.BADGE_GIST_ID != '' && secrets.GIST_TOKEN != '' }}
+              && env.BADGE_ENABLED == 'true' }}
         continue-on-error: true
         uses: schneegans/dynamic-badges-action@v1.7.0
         with:
