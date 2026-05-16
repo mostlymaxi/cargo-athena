@@ -29,6 +29,28 @@ README is intentionally lean (user-facing); the *why* lives here.
   one from a `#[workflow]` fails via the type system (`<x as Template>`
   → "expected type, found function"). Loops/branches will be lowered
   differently later — until then they must error, not mislower.
+- **Per-task builder chain.** A task call may be suffixed with, in any
+  order, at most one each of `.continue_on(failed|error|failed, error)`
+  (→ `DAGTask.continueOn`), `.on_exit(t)` (→ the special `exit` hook,
+  `templateRef=t`, no expression), and any number of `.hooks("argo-expr"
+  = t, …)` (→ `LifecycleHook{expression, templateRef=t}`, auto-keyed
+  `hook1`,`hook2`,… in source order). `peel_builders` strips them off
+  the call before `call_parts`; valid on stmt / `let` / tail / `return`
+  calls (not on a returned binding). Malformed *known* builder =
+  targeted `compile_error!`; an unknown trailing `.foo()` falls through
+  to the usual not-a-template-call error. Hook templates are paths,
+  force-linked + emitted via the wormhole exactly like callees (added to
+  the `collect()` closure). v1 hooks pass no arguments. Argo-validated:
+  smoke `pipeline_hooks` SUBMIT-OK on real v4.0.5.
+- **`nodeSelector` DOES cascade (empirical, real Argo v4.0.5,
+  2026-05-16).** A parent DAG/steps template's `nodeSelector` is merged
+  by the Argo controller onto the pods of templates it calls via
+  `templateRef` (probe: a leaf WT with no selector got its ancestor
+  DAG's `{disktype:doesnotexist}` and went Pending). So the earlier
+  "DAG creates no pod ⇒ nodeSelector is a no-op / no inheritance"
+  reasoning is WRONG. athena's per-`#[container(node_selector=…)]`
+  (leaf-level) is correct; a future `#[workflow(node_selector=…)]` would
+  legitimately cascade to every task's pod.
 - **`#[workflow]` return values (WORK e2e — proven on real Argo).** Every
   template's serialized fn return value is captured as an output
   **parameter named `return`** (`outputs.parameters.return`): container =

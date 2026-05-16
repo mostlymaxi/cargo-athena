@@ -229,6 +229,26 @@ argo! {
         pub dependencies: Vec<String>,
         pub arguments: Option<Arguments>,
         pub template_ref: Option<TemplateRef>,
+        // Declared last + skip-if-empty so tasks that use neither leave
+        // every existing golden byte-identical.
+        pub continue_on: Option<ContinueOn>,
+        /// Argo lifecycle hooks: arbitrary key -> hook. Key `exit` is the
+        /// special unconditional on-completion hook; others fire when
+        /// their `expression` holds.
+        pub hooks: BTreeMap<String, LifecycleHook>,
+    }
+
+    /// Proceed to dependents even if this task fails/errors.
+    pub struct ContinueOn {
+        pub error: bool,
+        pub failed: bool,
+    }
+
+    /// A hook that runs a template on a lifecycle event. `expression`
+    /// empty == the special `exit` hook (runs on completion).
+    pub struct LifecycleHook {
+        pub template_ref: Option<TemplateRef>,
+        pub expression: String,
     }
 
     pub struct Container {

@@ -415,6 +415,25 @@ enum Arg {
     Input(String),
 }
 
+/// One lifecycle hook chained onto a task call. `expression: None` is the
+/// special `exit` hook (runs unconditionally on completion); `Some(e)`
+/// runs the template when the Argo expression `e` holds.
+struct HookSpec {
+    expression: Option<String>,
+    /// Hook template path — force-linked + emitted as a `templateRef`
+    /// exactly like a callee.
+    template: Path,
+}
+
+/// Per-task builders peeled off a call: `.continue_on(...)`, `.hooks(...)`,
+/// `.on_exit(...)`.
+#[derive(Default)]
+struct NodeOpts {
+    /// `(error, failed)` for Argo `continueOn`.
+    continue_on: Option<(bool, bool)>,
+    hooks: Vec<HookSpec>,
+}
+
 struct Node {
     task: String,
     /// Callee path exactly as written (`ingest`, `foo::ingest`, …) — used
@@ -422,6 +441,7 @@ struct Node {
     /// Argo name/inputs across modules and crates and force-links it.
     callee: Path,
     args: Vec<Arg>,
+    opts: NodeOpts,
 }
 
 fn unwrap_expr(e: &Expr) -> &Expr {
@@ -496,6 +516,127 @@ fn call_parts(e: &Expr) -> Option<(Path, Vec<Expr>)> {
     None
 }
 
+/// A bare path expression → its `Path` (a template identity).
+fn expr_path(e: &Expr) -> Option<Path> {
+    match unwrap_expr(e) {
+        Expr::Path(p) => Some(p.path.clone()),
+        _ => None,
+    }
+}
+
+/// Peel trailing builder method calls (`.continue_on`/`.hooks`/`.on_exit`)
+/// off `e`, accumulating a `NodeOpts`, and return the inner base
+/// expression (which the caller still validates is a template call). An
+/// unknown trailing method is *not* consumed — left for the caller's
+/// normal not-a-template-call diagnostic — but a malformed *known*
+/// builder is a hard, targeted `compile_error!`.
+fn peel_builders(e: &Expr) -> syn::Result<(&Expr, NodeOpts)> {
+    let mut opts = NodeOpts::default();
+    let mut on_exit_seen = false;
+    let mut cur = e;
+    while let Expr::MethodCall(mc) = unwrap_expr(cur) {
+        match mc.method.to_string().as_str() {
+            "continue_on" => {
+                if opts.continue_on.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        mc, "`.continue_on(...)` specified more than once.",
+                    ));
+                }
+                if mc.args.is_empty() {
+                    return Err(syn::Error::new_spanned(
+                        mc,
+                        "`.continue_on(...)` needs `failed` and/or `error`.",
+                    ));
+                }
+                let (mut err, mut failed) = (false, false);
+                for a in &mc.args {
+                    match expr_path(a).and_then(|p| p.get_ident().map(|i| i.to_string())) {
+                        Some(s) if s == "error" => err = true,
+                        Some(s) if s == "failed" => failed = true,
+                        _ => {
+                            return Err(syn::Error::new_spanned(
+                                a,
+                                "`.continue_on(...)` only accepts the bare \
+                                 idents `failed` and/or `error`.",
+                            ));
+                        }
+                    }
+                }
+                opts.continue_on = Some((err, failed));
+            }
+            "on_exit" => {
+                if on_exit_seen {
+                    return Err(syn::Error::new_spanned(
+                        mc, "`.on_exit(...)` specified more than once.",
+                    ));
+                }
+                on_exit_seen = true;
+                let mut it = mc.args.iter();
+                let (Some(arg), None) = (it.next(), it.next()) else {
+                    return Err(syn::Error::new_spanned(
+                        mc, "`.on_exit(t)` takes exactly one template path.",
+                    ));
+                };
+                let template = expr_path(arg).ok_or_else(|| {
+                    syn::Error::new_spanned(
+                        arg, "`.on_exit(t)`: `t` must be a template path.",
+                    )
+                })?;
+                opts.hooks.push(HookSpec { expression: None, template });
+            }
+            "hooks" => {
+                if mc.args.is_empty() {
+                    return Err(syn::Error::new_spanned(
+                        mc,
+                        "`.hooks(...)` needs at least one \
+                         `\"argo-expression\" = template` entry.",
+                    ));
+                }
+                for a in &mc.args {
+                    let Expr::Assign(asn) = unwrap_expr(a) else {
+                        return Err(syn::Error::new_spanned(
+                            a,
+                            "each `.hooks(...)` entry must be \
+                             `\"argo-expression\" = template`.",
+                        ));
+                    };
+                    let expression = match unwrap_expr(&asn.left) {
+                        Expr::Lit(syn::ExprLit {
+                            lit: syn::Lit::Str(s), ..
+                        }) => s.value(),
+                        _ => {
+                            return Err(syn::Error::new_spanned(
+                                &asn.left,
+                                "hook key must be a string-literal Argo \
+                                 expression.",
+                            ));
+                        }
+                    };
+                    let template = expr_path(&asn.right).ok_or_else(|| {
+                        syn::Error::new_spanned(
+                            &asn.right,
+                            "hook value must be a template path.",
+                        )
+                    })?;
+                    opts.hooks.push(HookSpec {
+                        expression: Some(expression),
+                        template,
+                    });
+                }
+            }
+            // Unknown trailing method: stop peeling. The caller's
+            // call_parts() will fail on it and emit the usual
+            // not-a-template-call / unsupported-statement error.
+            _ => break,
+        }
+        cur = &mc.receiver;
+    }
+    // We traverse outermost→innermost = reverse source order; restore it
+    // so hook keys (hook1, hook2, …) are deterministic & source-ordered.
+    opts.hooks.reverse();
+    Ok((cur, opts))
+}
+
 /// Short name for a callee path (its last segment), used to derive a
 /// default DAG task name.
 fn path_leaf(p: &Path) -> String {
@@ -563,10 +704,12 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
     let mut nodes: Vec<Node> = Vec::new();
     let mut output_task: Option<String> = None;
 
-    // Record a `callee(raw...)` call as a node; returns its task name.
+    // Record a `callee(raw...)` call (+ its peeled builder opts) as a
+    // node; returns its task name.
     let push_call = |callee: Path,
                          raw: Vec<Expr>,
                          base: &str,
+                         opts: NodeOpts,
                          used: &mut std::collections::HashSet<String>,
                          nodes: &mut Vec<Node>,
                          bindings: &std::collections::HashMap<String, String>|
@@ -580,6 +723,7 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
             task: task.clone(),
             callee,
             args,
+            opts,
         });
         Ok(task)
     };
@@ -603,27 +747,39 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
                         "`let ... else` is not supported in #[workflow].",
                     ));
                 }
-                let (callee, raw) = call_parts(&init.expr).ok_or_else(|| {
+                let (base_expr, opts) = peel_builders(&init.expr)?;
+                let (callee, raw) = call_parts(base_expr).ok_or_else(|| {
                     syn::Error::new_spanned(&init.expr, NOT_A_TEMPLATE_CALL)
                 })?;
                 let base = bind.clone().unwrap_or_else(|| path_leaf(&callee));
                 let task = push_call(
-                    callee, raw, &base, &mut used, &mut nodes, &bindings,
+                    callee, raw, &base, opts, &mut used, &mut nodes, &bindings,
                 )?;
                 if let Some(b) = bind {
                     bindings.insert(b, task);
                 }
             }
-            Stmt::Expr(expr, semi) => match unwrap_expr(expr) {
-                Expr::Return(r) => {
+            Stmt::Expr(expr, semi) => {
+                if let Expr::Return(r) = unwrap_expr(expr) {
                     let target = r.expr.as_deref().ok_or_else(|| {
                         syn::Error::new_spanned(
                             expr,
                             "#[workflow] `return` must return a template result.",
                         )
                     })?;
-                    output_task = Some(match unwrap_expr(target) {
+                    let (base_expr, opts) = peel_builders(target)?;
+                    output_task = Some(match unwrap_expr(base_expr) {
                         Expr::Path(p) if p.path.segments.len() == 1 => {
+                            if opts.continue_on.is_some()
+                                || !opts.hooks.is_empty()
+                            {
+                                return Err(syn::Error::new_spanned(
+                                    target,
+                                    "`.continue_on`/`.hooks`/`.on_exit` must \
+                                     be chained on a template call, not a \
+                                     returned binding.",
+                                ));
+                            }
                             let name = p.path.segments[0].ident.to_string();
                             bindings.get(&name).cloned().ok_or_else(|| {
                                 syn::Error::new_spanned(
@@ -637,7 +793,7 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
                         }
                         _ => {
                             let (callee, raw) =
-                                call_parts(target).ok_or_else(|| {
+                                call_parts(base_expr).ok_or_else(|| {
                                     syn::Error::new_spanned(
                                         target,
                                         NOT_A_TEMPLATE_CALL,
@@ -645,30 +801,21 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
                                 })?;
                             let base = path_leaf(&callee);
                             push_call(
-                                callee, raw, &base, &mut used, &mut nodes,
-                                &bindings,
+                                callee, raw, &base, opts, &mut used,
+                                &mut nodes, &bindings,
                             )?
                         }
                     });
-                }
-                Expr::Call(_) => {
-                    let (callee, raw) = call_parts(expr).ok_or_else(|| {
-                        syn::Error::new_spanned(expr, NOT_A_TEMPLATE_CALL)
-                    })?;
-                    let base = path_leaf(&callee);
-                    let task = push_call(
-                        callee, raw, &base, &mut used, &mut nodes, &bindings,
-                    )?;
-                    if is_last && semi.is_none() && want_output {
-                        output_task = Some(task);
-                    }
-                }
-                // tail bare binding ident == the returned value
-                Expr::Path(p)
-                    if is_last
+                } else if let Expr::Path(p) = unwrap_expr(expr) {
+                    // tail bare binding ident == the returned value
+                    if !(is_last
                         && semi.is_none()
-                        && p.path.segments.len() == 1 =>
-                {
+                        && p.path.segments.len() == 1)
+                    {
+                        return Err(syn::Error::new_spanned(
+                            expr, UNSUPPORTED_STMT,
+                        ));
+                    }
                     let name = p.path.segments[0].ident.to_string();
                     output_task = Some(
                         bindings.get(&name).cloned().ok_or_else(|| {
@@ -681,11 +828,25 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
                             )
                         })?,
                     );
+                } else {
+                    // A (possibly builder-chained) call statement / tail
+                    // call: peel `.continue_on`/`.hooks`/`.on_exit`, then
+                    // the base must be a template call.
+                    let (base_expr, opts) = peel_builders(expr)?;
+                    let (callee, raw) =
+                        call_parts(base_expr).ok_or_else(|| {
+                            syn::Error::new_spanned(expr, UNSUPPORTED_STMT)
+                        })?;
+                    let base = path_leaf(&callee);
+                    let task = push_call(
+                        callee, raw, &base, opts, &mut used, &mut nodes,
+                        &bindings,
+                    )?;
+                    if is_last && semi.is_none() && want_output {
+                        output_task = Some(task);
+                    }
                 }
-                other => {
-                    return Err(syn::Error::new_spanned(other, UNSUPPORTED_STMT));
-                }
-            },
+            }
             Stmt::Macro(m) => {
                 return Err(syn::Error::new_spanned(m, UNSUPPORTED_STMT));
             }
@@ -771,6 +932,56 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
         quote! { __tasks.push(__step); }
     };
 
+    // `.continue_on(...)` -> Argo continueOn.
+    let continue_on_tok = match node.opts.continue_on {
+        Some((err, failed)) => quote! {
+            ::core::option::Option::Some(::cargo_athena::api::ContinueOn {
+                error: #err,
+                failed: #failed,
+            })
+        },
+        None => quote! { ::core::option::Option::None },
+    };
+
+    // `.on_exit(t)` -> key `exit` (no expression); `.hooks("e" = t, …)` ->
+    // keys hook1, hook2, … (source order). Hook templates resolve their
+    // Argo name via the wormhole, exactly like callees.
+    let mut hook_n: u32 = 0;
+    let hook_inserts: Vec<TokenStream2> = node
+        .opts
+        .hooks
+        .iter()
+        .map(|h| {
+            let hp = &h.template;
+            let (key, expr_lit) = match &h.expression {
+                None => ("exit".to_string(), String::new()),
+                Some(e) => {
+                    hook_n += 1;
+                    (format!("hook{hook_n}"), e.clone())
+                }
+            };
+            quote! {
+                {
+                    let __hn =
+                        <#hp as ::cargo_athena::Template>::ARGO_NAME;
+                    __hooks.insert(
+                        #key.to_string(),
+                        ::cargo_athena::api::LifecycleHook {
+                            template_ref: ::core::option::Option::Some(
+                                ::cargo_athena::api::TemplateRef {
+                                    name: __hn.to_string(),
+                                    template: __hn.to_string(),
+                                    cluster_scope: false,
+                                },
+                            ),
+                            expression: #expr_lit.to_string(),
+                        },
+                    );
+                }
+            }
+        })
+        .collect();
+
     quote! {
         {
             // Resolved by the type system across modules/crates:
@@ -785,6 +996,12 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
             #( #arg_stmts )*
             __deps.sort();
             __deps.dedup();
+            let __continue_on = #continue_on_tok;
+            let mut __hooks: ::std::collections::BTreeMap<
+                ::std::string::String,
+                ::cargo_athena::api::LifecycleHook,
+            > = ::std::collections::BTreeMap::new();
+            #( #hook_inserts )*
             let __step = ::cargo_athena::api::DagTask {
                 name: #task.to_string(),
                 template: ::std::string::String::new(),
@@ -800,6 +1017,8 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                         cluster_scope: false,
                     }
                 ),
+                continue_on: __continue_on,
+                hooks: __hooks,
             };
             #push
         }
@@ -875,11 +1094,15 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         None => quote! {},
     };
 
-    // Distinct callee paths -> recurse their `collect` (force-links them).
+    // Distinct callee + hook-template paths -> recurse their `collect`
+    // (force-links them so hook templates are emitted like any callee).
     let mut seen_callees = std::collections::HashSet::new();
     let callee_paths: Vec<&Path> = nodes
         .iter()
-        .map(|n| &n.callee)
+        .flat_map(|n| {
+            std::iter::once(&n.callee)
+                .chain(n.opts.hooks.iter().map(|h| &h.template))
+        })
         .filter(|p| seen_callees.insert(quote!(#p).to_string()))
         .collect();
 
