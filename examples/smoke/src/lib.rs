@@ -164,3 +164,34 @@ pub fn pipeline_onexit() {
     let raw = fetch("https://example.com".to_string());
     transform(raw, 2).on_exit(record("done"));
 }
+
+// --- struct-field access (`a.field`) ---------------------------------------
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct Meta {
+    pub id: String,
+    pub n: i64,
+}
+
+#[container]
+pub fn make_meta() -> Meta {
+    Meta {
+        id: "abc".to_string(),
+        n: 7,
+    }
+}
+
+#[container]
+pub fn use_id(id: String) {
+    println!("id={id}");
+}
+
+/// `g(a.field)` — the consumer is wired a single struct field, lowered
+/// via `{{=toJSON(fromJSON(tasks['m'].outputs.parameters['return'])['id'])}}`.
+/// The ghost has already type-checked that `Meta::id` exists and is the
+/// `String` `use_id` expects.
+#[workflow]
+pub fn pipeline_fields() {
+    let m = make_meta();
+    use_id(m.id);
+}

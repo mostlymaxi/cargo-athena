@@ -1,0 +1,5 @@
+error: tuple-field access (`a.0`) isn't lowered yet — v1 supports named struct fields (`a.b.c`).
+  --> tests/ui/wf_field_tuple.rs:16:10
+   |
+16 |     sink(a.0);
+   |          ^^^
