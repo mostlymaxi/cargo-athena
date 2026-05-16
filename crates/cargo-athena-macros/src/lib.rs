@@ -179,15 +179,19 @@ struct ContainerArgs {
     name: Option<String>,
     service_account: Option<String>,
     node_selector: std::collections::BTreeMap<String, String>,
+    /// `on_exit = path::to::template` — wired onto the runnable
+    /// Workflow's `spec.onExit` when this is the emit root.
+    on_exit: Option<syn::Path>,
 }
 
-/// `#[workflow(name = "...", steps)]` — bare `steps` opts into Argo
-/// `steps:` (sequential) instead of the default `dag:`.
+/// `#[workflow(name = "...", steps, on_exit = teardown)]` — bare `steps`
+/// opts into Argo `steps:` (sequential) instead of the default `dag:`.
 #[derive(deluxe::ParseMetaItem, Default)]
 #[deluxe(default)]
 struct WorkflowArgs {
     name: Option<String>,
     steps: deluxe::Flag,
+    on_exit: Option<syn::Path>,
 }
 
 /// Parse attribute args into `T`, or return a `compile_error!`.
@@ -277,6 +281,21 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let ns_vals: Vec<&String> = cfg.node_selector.values().collect();
     let vis = &func.vis;
 
+    // `#[container(on_exit = t)]`: Template::ON_EXIT (root-only effect) +
+    // force-link/emit the handler template.
+    let (on_exit_const, on_exit_collect) = match &cfg.on_exit {
+        Some(p) => (
+            quote! {
+                const ON_EXIT: ::core::option::Option<&'static str> =
+                    ::core::option::Option::Some(
+                        <#p as ::cargo_athena::Template>::ARGO_NAME,
+                    );
+            },
+            quote! { <#p as ::cargo_athena::Template>::collect(__out); },
+        ),
+        None => (quote! {}, quote! {}),
+    };
+
     let expanded = quote! {
         // Hidden real implementation — executed in-pod (Run mode).
         #impl_fn
@@ -290,6 +309,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
             const INPUTS: &'static [&'static str] = #inputs_slice;
             const KIND: ::cargo_athena::TemplateKind =
                 ::cargo_athena::TemplateKind::Container;
+            #on_exit_const
 
             fn run(__in: ::cargo_athena::serde_json::Value)
                 -> ::cargo_athena::serde_json::Value
@@ -396,6 +416,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                     <Self as ::cargo_athena::Template>::ARGO_NAME,
                     <Self as ::cargo_athena::Template>::run,
                 );
+                #on_exit_collect
             }
         }
     };
@@ -415,14 +436,17 @@ enum Arg {
     Input(String),
 }
 
-/// One lifecycle hook chained onto a task call. `expression: None` is the
-/// special `exit` hook (runs unconditionally on completion); `Some(e)`
-/// runs the template when the Argo expression `e` holds.
+/// A hook peeled off a call, args still as raw `Expr` (resolved against
+/// bindings/inputs later in `push_call`). `expression: None` == the
+/// special `exit` hook; `Some(e)` runs when the Argo expression holds.
 struct HookSpec {
     expression: Option<String>,
     /// Hook template path — force-linked + emitted as a `templateRef`
     /// exactly like a callee.
     template: Path,
+    /// `.on_exit(t(args))` — args to the hook template (empty for a bare
+    /// path or for `.hooks(...)`, whose arg-grammar is still deferred).
+    raw_args: Vec<Expr>,
 }
 
 /// Per-task builders peeled off a call: `.continue_on(...)`, `.hooks(...)`,
@@ -434,6 +458,13 @@ struct NodeOpts {
     hooks: Vec<HookSpec>,
 }
 
+/// A hook with its args resolved to `Arg`s (post `push_call`).
+struct Hook {
+    expression: Option<String>,
+    template: Path,
+    args: Vec<Arg>,
+}
+
 struct Node {
     task: String,
     /// Callee path exactly as written (`ingest`, `foo::ingest`, …) — used
@@ -441,7 +472,8 @@ struct Node {
     /// Argo name/inputs across modules and crates and force-links it.
     callee: Path,
     args: Vec<Arg>,
-    opts: NodeOpts,
+    continue_on: Option<(bool, bool)>,
+    hooks: Vec<Hook>,
 }
 
 fn unwrap_expr(e: &Expr) -> &Expr {
@@ -574,15 +606,30 @@ fn peel_builders(e: &Expr) -> syn::Result<(&Expr, NodeOpts)> {
                 let mut it = mc.args.iter();
                 let (Some(arg), None) = (it.next(), it.next()) else {
                     return Err(syn::Error::new_spanned(
-                        mc, "`.on_exit(t)` takes exactly one template path.",
+                        mc,
+                        "`.on_exit(t)` / `.on_exit(t(args))` takes exactly \
+                         one template (optionally called with args).",
                     ));
                 };
-                let template = expr_path(arg).ok_or_else(|| {
-                    syn::Error::new_spanned(
-                        arg, "`.on_exit(t)`: `t` must be a template path.",
-                    )
-                })?;
-                opts.hooks.push(HookSpec { expression: None, template });
+                // `t` (bare path) OR `t(arg, …)` (call with args).
+                let (template, raw_args) = if let Some((p, raw)) =
+                    call_parts(arg)
+                {
+                    (p, raw)
+                } else if let Some(p) = expr_path(arg) {
+                    (p, Vec::new())
+                } else {
+                    return Err(syn::Error::new_spanned(
+                        arg,
+                        "`.on_exit(t)`/`.on_exit(t(args))`: `t` must be a \
+                         template path.",
+                    ));
+                };
+                opts.hooks.push(HookSpec {
+                    expression: None,
+                    template,
+                    raw_args,
+                });
             }
             "hooks" => {
                 if mc.args.is_empty() {
@@ -612,15 +659,20 @@ fn peel_builders(e: &Expr) -> syn::Result<(&Expr, NodeOpts)> {
                             ));
                         }
                     };
+                    // `.hooks(...)` arg-grammar is deferred — value must
+                    // be a bare template path for now.
                     let template = expr_path(&asn.right).ok_or_else(|| {
                         syn::Error::new_spanned(
                             &asn.right,
-                            "hook value must be a template path.",
+                            "hook value must be a bare template path \
+                             (passing args to `.hooks(...)` targets isn't \
+                             supported yet — use `.on_exit(t(args))`).",
                         )
                     })?;
                     opts.hooks.push(HookSpec {
                         expression: Some(expression),
                         template,
+                        raw_args: Vec::new(),
                     });
                 }
             }
@@ -719,11 +771,30 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
             .iter()
             .map(|a| expr_to_arg(a, bindings, &inputs))
             .collect::<syn::Result<Vec<_>>>()?;
+        // Resolve each hook's raw args against the same binding/input
+        // scope as the task's own args.
+        let hooks = opts
+            .hooks
+            .into_iter()
+            .map(|h| {
+                let args = h
+                    .raw_args
+                    .iter()
+                    .map(|a| expr_to_arg(a, bindings, &inputs))
+                    .collect::<syn::Result<Vec<_>>>()?;
+                Ok(Hook {
+                    expression: h.expression,
+                    template: h.template,
+                    args,
+                })
+            })
+            .collect::<syn::Result<Vec<_>>>()?;
         nodes.push(Node {
             task: task.clone(),
             callee,
             args,
-            opts,
+            continue_on: opts.continue_on,
+            hooks,
         });
         Ok(task)
     };
@@ -933,7 +1004,7 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
     };
 
     // `.continue_on(...)` -> Argo continueOn.
-    let continue_on_tok = match node.opts.continue_on {
+    let continue_on_tok = match node.continue_on {
         Some((err, failed)) => quote! {
             ::core::option::Option::Some(::cargo_athena::api::ContinueOn {
                 error: #err,
@@ -943,12 +1014,13 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
         None => quote! { ::core::option::Option::None },
     };
 
-    // `.on_exit(t)` -> key `exit` (no expression); `.hooks("e" = t, …)` ->
-    // keys hook1, hook2, … (source order). Hook templates resolve their
-    // Argo name via the wormhole, exactly like callees.
+    // `.on_exit(t)`/`.on_exit(t(args))` -> key `exit` (no expression);
+    // `.hooks("e" = t, …)` -> keys hook1, hook2, … (source order). Hook
+    // templates resolve their Argo name + INPUTS via the wormhole, like
+    // callees; hook args use the same scope as the task's own args
+    // (literal / workflow input / prior binding), but add NO dependency.
     let mut hook_n: u32 = 0;
     let hook_inserts: Vec<TokenStream2> = node
-        .opts
         .hooks
         .iter()
         .map(|h| {
@@ -960,10 +1032,60 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                     (format!("hook{hook_n}"), e.clone())
                 }
             };
+            let arg_pushes = h.args.iter().enumerate().map(|(i, a)| match a {
+                Arg::Lit(v) => quote! {
+                    __hp.push(::cargo_athena::api::Parameter {
+                        name: __hin.get(#i).copied().unwrap_or_default().to_string(),
+                        value: ::core::option::Option::Some(#v.to_string()),
+                        ..::core::default::Default::default()
+                    });
+                },
+                Arg::Ref(dep) => quote! {
+                    {
+                        let mut __v = ::std::string::String::from(#ref_scope);
+                        __v.push_str(#dep);
+                        __v.push_str(".outputs.parameters.return}}");
+                        __hp.push(::cargo_athena::api::Parameter {
+                            name: __hin.get(#i).copied().unwrap_or_default().to_string(),
+                            value: ::core::option::Option::Some(__v),
+                            ..::core::default::Default::default()
+                        });
+                    }
+                },
+                Arg::Input(name) => quote! {
+                    {
+                        let mut __v =
+                            ::std::string::String::from("{{inputs.parameters.");
+                        __v.push_str(#name);
+                        __v.push_str("}}");
+                        __hp.push(::cargo_athena::api::Parameter {
+                            name: __hin.get(#i).copied().unwrap_or_default().to_string(),
+                            value: ::core::option::Option::Some(__v),
+                            ..::core::default::Default::default()
+                        });
+                    }
+                },
+            });
             quote! {
                 {
                     let __hn =
                         <#hp as ::cargo_athena::Template>::ARGO_NAME;
+                    let __hin: &[&str] =
+                        <#hp as ::cargo_athena::Template>::INPUTS;
+                    let mut __hp: ::std::vec::Vec<
+                        ::cargo_athena::api::Parameter,
+                    > = ::std::vec::Vec::new();
+                    #( #arg_pushes )*
+                    let __hargs = if __hp.is_empty() {
+                        ::core::option::Option::None
+                    } else {
+                        ::core::option::Option::Some(
+                            ::cargo_athena::api::Arguments {
+                                parameters: __hp,
+                                ..::core::default::Default::default()
+                            },
+                        )
+                    };
                     __hooks.insert(
                         #key.to_string(),
                         ::cargo_athena::api::LifecycleHook {
@@ -974,6 +1096,7 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                                     cluster_scope: false,
                                 },
                             ),
+                            arguments: __hargs,
                             expression: #expr_lit.to_string(),
                         },
                     );
@@ -1094,15 +1217,16 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         None => quote! {},
     };
 
-    // Distinct callee + hook-template paths -> recurse their `collect`
-    // (force-links them so hook templates are emitted like any callee).
+    // Distinct callee + hook-template + on_exit paths -> recurse their
+    // `collect` (force-links them so they're emitted like any callee).
     let mut seen_callees = std::collections::HashSet::new();
     let callee_paths: Vec<&Path> = nodes
         .iter()
         .flat_map(|n| {
             std::iter::once(&n.callee)
-                .chain(n.opts.hooks.iter().map(|h| &h.template))
+                .chain(n.hooks.iter().map(|h| &h.template))
         })
+        .chain(cfg.on_exit.iter())
         .filter(|p| seen_callees.insert(quote!(#p).to_string()))
         .collect();
 
@@ -1159,6 +1283,18 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
+    // `#[workflow(on_exit = t)]` -> Template::ON_EXIT (only the emit
+    // root's reaches a runnable Workflow's spec.onExit).
+    let on_exit_const = match &cfg.on_exit {
+        Some(p) => quote! {
+            const ON_EXIT: ::core::option::Option<&'static str> =
+                ::core::option::Option::Some(
+                    <#p as ::cargo_athena::Template>::ARGO_NAME,
+                );
+        },
+        None => quote! {},
+    };
+
     let expanded = quote! {
         // The body is compiled to Argo; the public identity is a type.
         #[allow(non_camel_case_types)]
@@ -1169,6 +1305,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
             const INPUTS: &'static [&'static str] = #inputs_slice;
             const KIND: ::cargo_athena::TemplateKind =
                 ::cargo_athena::TemplateKind::Workflow;
+            #on_exit_const
 
             fn build(_ctx: &::cargo_athena::BuildCtx)
                 -> ::cargo_athena::api::Template

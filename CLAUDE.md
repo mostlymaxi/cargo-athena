@@ -40,8 +40,26 @@ README is intentionally lean (user-facing); the *why* lives here.
   targeted `compile_error!`; an unknown trailing `.foo()` falls through
   to the usual not-a-template-call error. Hook templates are paths,
   force-linked + emitted via the wormhole exactly like callees (added to
-  the `collect()` closure). v1 hooks pass no arguments. Argo-validated:
-  smoke `pipeline_hooks` SUBMIT-OK on real v4.0.5.
+  the `collect()` closure). `.on_exit(t(args))` may pass arguments
+  (resolved like task args: literal / `#[workflow]` input / prior
+  binding; param names from the hook template's `INPUTS`). `.hooks(...)`
+  arg-grammar is still **deferred** (bare path only — value-with-args is
+  a `compile_error!` for now, pending a design chat). Argo-validated:
+  smoke `pipeline_hooks`/`pipeline_onexit` SUBMIT-OK on real v4.0.5.
+- **Whole-workflow exit handler: `#[workflow(on_exit=t)]` /
+  `#[container(on_exit=t)]` → `Template::ON_EXIT` (default `None`).**
+  `emit::<E>()` wires it onto the runnable Workflow as
+  **`spec.hooks.exit.templateRef`** — NOT the legacy `spec.onExit`
+  string. EMPIRICAL (kind v4.0.5): `spec.onExit: <name>` is REJECTED
+  (`template reference … not found`) because it resolves only a *local*
+  `templates[]` name and the runnable Workflow is just a
+  `workflowTemplateRef`; `spec.hooks.exit.templateRef` is SUBMIT-OK and
+  the handler pod runs (proven, `EXITRAN`). Same wormhole lesson as
+  `outputs.result`→`outputs.parameters.return`: structured `templateRef`
+  survives, name-strings don't. Only the **emit root**'s `ON_EXIT`
+  reaches a runnable Workflow, so non-root `on_exit` is naturally inert
+  (matches Argo's entrypoint/workflow scope) — no static entrypoint
+  detection needed. Handler template force-linked via `collect()`.
 - **`nodeSelector` DOES cascade (empirical, real Argo v4.0.5,
   2026-05-16).** A parent DAG/steps template's `nodeSelector` is merged
   by the Argo controller onto the pods of templates it calls via

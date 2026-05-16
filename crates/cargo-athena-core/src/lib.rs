@@ -205,6 +205,12 @@ pub trait Template {
     /// Declared input parameter names, in order.
     const INPUTS: &'static [&'static str];
     const KIND: TemplateKind;
+    /// Whole-workflow exit-handler template name, from
+    /// `#[workflow(on_exit=…)]`/`#[container(on_exit=…)]`. Only the emit
+    /// root becomes a runnable `Workflow`, so only the root's takes
+    /// effect (Argo `spec.onExit` is entrypoint/workflow-scoped) —
+    /// non-root values are naturally inert.
+    const ON_EXIT: Option<&'static str> = None;
 
     /// Build this template's inner Argo `template` object.
     fn build(ctx: &BuildCtx) -> api::Template;
@@ -667,6 +673,27 @@ impl Collector {
                     cluster_scope: false,
                 }),
                 service_account_name: ctx.config().defaults.service_account.clone(),
+                // Only the emit root's on_exit reaches a runnable Workflow,
+                // and it must be `hooks.exit` with a templateRef (the
+                // legacy `spec.onExit` name-string can't cross the
+                // one-WT-per-template wormhole).
+                hooks: E::ON_EXIT
+                    .map(|n| {
+                        let mut m = std::collections::BTreeMap::new();
+                        m.insert(
+                            "exit".to_string(),
+                            api::LifecycleHook {
+                                template_ref: Some(api::TemplateRef {
+                                    name: n.to_string(),
+                                    template: n.to_string(),
+                                    cluster_scope: false,
+                                }),
+                                ..Default::default()
+                            },
+                        );
+                        m
+                    })
+                    .unwrap_or_default(),
                 ..Default::default()
             }),
         };

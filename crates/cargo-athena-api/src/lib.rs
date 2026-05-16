@@ -122,6 +122,12 @@ argo! {
         /// Set on a runnable Workflow that just invokes a WorkflowTemplate.
         pub workflow_template_ref: Option<WorkflowTemplateRef>,
         pub service_account_name: String,
+        /// Whole-workflow lifecycle hooks. Key `exit` is the exit handler
+        /// (runs once when the Workflow finishes). We use this (with a
+        /// `templateRef`) rather than the legacy `spec.onExit` string,
+        /// which only resolves a *local* template name — unusable across
+        /// the one-WT-per-template wormhole.
+        pub hooks: BTreeMap<String, LifecycleHook>,
     }
 
     /// Points a runnable Workflow at a WorkflowTemplate resource.
@@ -248,6 +254,7 @@ argo! {
     /// empty == the special `exit` hook (runs on completion).
     pub struct LifecycleHook {
         pub template_ref: Option<TemplateRef>,
+        pub arguments: Option<Arguments>,
         pub expression: String,
     }
 
