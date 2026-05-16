@@ -27,7 +27,7 @@ spec:
           none: {}
     outputs:
       parameters:
-      - name: result
+      - name: return
         valueFrom:
           path: /athena/result
     container:
@@ -119,7 +119,7 @@ spec:
           none: {}
     outputs:
       parameters:
-      - name: result
+      - name: return
         valueFrom:
           path: /athena/result
     container:
@@ -185,7 +185,7 @@ spec:
           none: {}
     outputs:
       parameters:
-      - name: result
+      - name: return
         valueFrom:
           path: /athena/result
     container:
@@ -249,7 +249,7 @@ spec:
         arguments:
           parameters:
           - name: data
-            value: '{{tasks.raw.outputs.result}}'
+            value: '{{tasks.raw.outputs.parameters.return}}'
           - name: factor
             value: '2'
         templateRef:
@@ -261,7 +261,7 @@ spec:
         arguments:
           parameters:
           - name: report
-            value: '{{tasks.clean.outputs.result}}'
+            value: '{{tasks.clean.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-smoke-publish
           template: cargo-athena-example-smoke-publish
@@ -309,9 +309,9 @@ spec:
         arguments:
           parameters:
           - name: x
-            value: '{{tasks.a.outputs.result}}'
+            value: '{{tasks.a.outputs.parameters.return}}'
           - name: y
-            value: '{{tasks.t.outputs.result}}'
+            value: '{{tasks.t.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-smoke-combine
           template: cargo-athena-example-smoke-combine
@@ -360,7 +360,7 @@ spec:
           none: {}
     outputs:
       parameters:
-      - name: result
+      - name: return
         valueFrom:
           path: /athena/result
       artifacts:
@@ -438,7 +438,7 @@ spec:
           none: {}
     outputs:
       parameters:
-      - name: result
+      - name: return
         valueFrom:
           path: /athena/result
     container:

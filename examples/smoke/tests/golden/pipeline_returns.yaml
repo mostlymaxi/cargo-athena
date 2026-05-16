@@ -27,7 +27,7 @@ spec:
           none: {}
     outputs:
       parameters:
-      - name: result
+      - name: return
         valueFrom:
           path: /athena/result
     container:
@@ -88,7 +88,7 @@ spec:
         arguments:
           parameters:
           - name: report
-            value: '{{tasks.r.outputs.result}}'
+            value: '{{tasks.r.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-smoke-publish
           template: cargo-athena-example-smoke-publish
@@ -137,7 +137,7 @@ spec:
           none: {}
     outputs:
       parameters:
-      - name: result
+      - name: return
         valueFrom:
           path: /athena/result
       artifacts:
@@ -198,9 +198,9 @@ spec:
       - name: seed
     outputs:
       parameters:
-      - name: result
+      - name: return
         valueFrom:
-          parameter: '{{tasks.transform.outputs.result}}'
+          parameter: '{{tasks.transform.outputs.parameters.return}}'
     dag:
       tasks:
       - name: fetched
@@ -217,7 +217,7 @@ spec:
         arguments:
           parameters:
           - name: data
-            value: '{{tasks.fetched.outputs.result}}'
+            value: '{{tasks.fetched.outputs.parameters.return}}'
           - name: factor
             value: '7'
         templateRef:
@@ -254,7 +254,7 @@ spec:
           none: {}
     outputs:
       parameters:
-      - name: result
+      - name: return
         valueFrom:
           path: /athena/result
     container:

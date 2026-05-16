@@ -346,7 +346,11 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                     }),
                     outputs: ::core::option::Option::Some(::cargo_athena::api::Outputs {
                         parameters: ::std::vec![ ::cargo_athena::api::Parameter {
-                            name: "result".to_string(),
+                            // Named `return` (NOT `result`): `outputs.result`
+                            // is Argo's script-stdout alias — a distinct
+                            // thing. This is the serialized fn return value,
+                            // captured from the /athena/result file.
+                            name: "return".to_string(),
                             value_from: ::core::option::Option::Some(
                                 ::cargo_athena::api::ValueFrom {
                                     path: "/athena/result".to_string(),
@@ -730,7 +734,11 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                     #dep_push
                     let mut __v = ::std::string::String::from(#ref_scope);
                     __v.push_str(#dep);
-                    __v.push_str(".outputs.result}}");
+                    // `outputs.parameters.return` — the explicitly declared
+                    // param. NOT `outputs.result` (Argo's script-stdout
+                    // alias: only exists for container/script tmpls, never
+                    // dag/steps, so a sub-workflow's return needs this).
+                    __v.push_str(".outputs.parameters.return}}");
                     __params.push(::cargo_athena::api::Parameter {
                         name: __name,
                         value: ::core::option::Option::Some(__v),
@@ -835,19 +843,21 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|n| node_tokens(n, steps_mode))
         .collect();
 
-    // A returned value bubbles the terminal task's `result` up as this
-    // template's own output, so a parent can wire {{tasks.X.outputs.result}}
-    // to a sub-workflow exactly like a container.
+    // A returned value bubbles the terminal task's `return` up as this
+    // template's own `outputs.parameters.return`, so a parent can wire
+    // {{tasks.X.outputs.parameters.return}} to a sub-workflow exactly
+    // like a container.
     let outputs_tokens = match &output_task {
         Some(t) => {
             let scope = if steps_mode { "steps" } else { "tasks" };
-            let refstr = format!("{{{{{scope}.{t}.outputs.result}}}}");
+            let refstr =
+                format!("{{{{{scope}.{t}.outputs.parameters.return}}}}");
             quote! {
                 outputs: ::core::option::Option::Some(
                     ::cargo_athena::api::Outputs {
                         parameters: ::std::vec![
                             ::cargo_athena::api::Parameter {
-                                name: "result".to_string(),
+                                name: "return".to_string(),
                                 value_from: ::core::option::Option::Some(
                                     ::cargo_athena::api::ValueFrom {
                                         parameter: #refstr.to_string(),

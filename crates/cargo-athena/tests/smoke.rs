@@ -33,14 +33,14 @@ fn sink(v: String) {
 
 #[workflow]
 fn inner(seed: String) -> String {
-    // returns a value: tail container call -> this workflow's outputs.result
+    // returns a value: tail call -> this workflow's outputs.parameters.return
     prep(seed)
 }
 
 #[workflow]
 fn root() {
     let a = inner("seed".to_string()); // nested workflow that RETURNS
-    let b = leaf(a); // consumes {{tasks.a.outputs.result}}
+    let b = leaf(a); // consumes {{tasks.a.outputs.parameters.return}}
     sink(b);
 }
 
@@ -99,12 +99,13 @@ fn workflow_return_value_bubbles_outputs_result() {
         .split("---")
         .find(|d| d.contains(&format!("name: {}", <inner as Template>::ARGO_NAME)))
         .expect("inner WorkflowTemplate");
-    // A returning #[workflow] declares its own outputs.parameters.result
-    // via valueFrom.parameter (NOT a container's valueFrom.path).
+    // A returning #[workflow] declares its own outputs.parameters.return
+    // via valueFrom.parameter (NOT a container's valueFrom.path, and NOT
+    // the bare `outputs.result` script-stdout alias).
     assert!(inner_wt.contains("outputs:"), "no outputs:\n{inner_wt}");
     assert!(
         inner_wt.contains("parameter: '{{tasks.")
-            && inner_wt.contains(".outputs.result}}'"),
+            && inner_wt.contains(".outputs.parameters.return}}'"),
         "expected valueFrom.parameter task ref:\n{inner_wt}"
     );
 }
@@ -118,5 +119,5 @@ fn steps_mode_emits_sequential_steps_not_dag() {
         .expect("seq WorkflowTemplate");
     assert!(wt.contains("steps:"), "expected steps body:\n{wt}");
     assert!(!wt.contains("dag:"), "steps mode must not emit dag:\n{wt}");
-    assert!(yaml.contains("{{steps.p.outputs.result}}"));
+    assert!(yaml.contains("{{steps.p.outputs.parameters.return}}"));
 }
