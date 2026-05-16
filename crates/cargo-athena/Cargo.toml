@@ -9,3 +9,9 @@ description = "Compile regular Rust into Argo Workflow YAML — facade crate"
 [dependencies]
 cargo-athena-core = { workspace = true }
 cargo-athena-macros = { workspace = true }
+
+[dev-dependencies]
+# trybuild builds tests/ui/*.rs as crates that depend on this package, so
+# the compile-fail fixtures can `use cargo_athena::*` and assert the
+# macro-emitted compile_error!s + the type-system gates.
+trybuild = "1"

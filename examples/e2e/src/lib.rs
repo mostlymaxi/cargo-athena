@@ -1,143 +1,71 @@
-//! Broad-coverage e2e fixture (library form, so it can be imported by
-//! other crates). Exercises, in one place:
+//! Integration fixture exercised by the kind e2e (`scripts/e2e-test.sh`).
 //!
-//! * root `#[workflow]` with a multi-dependency DAG task,
-//! * nested `#[workflow]` (workflow-calls-workflow) with an input-param ref,
-//! * `#[container]` with explicit `image`/`bin` and with defaults,
-//! * mixed arg kinds: string/int literals, `.to_string()`, input refs,
-//!   prior-task refs,
-//! * `host!` declared across BOTH `if/else` and `match` arms (static union),
-//! * transitive `#[fragment]` resource closure (`frag_a` -> `frag_b`),
-//! * an intra-crate cross-*module* workflow (`another::pipeline_another`)
-//!   that composes a local template with the crate-root `pipeline`.
-//!
-//! Every `#[workflow]`/`#[container]` is a `pub` type so downstream crates
-//! (see `examples/e2e-consumer`) can import and compose it. Keep this file
-//! stable; refresh goldens with `UPDATE_EXPECT=1`.
+//! Covered end-to-end against a real Argo + MinIO:
+//! * `#[workflow]` DAG + a nested `#[workflow]` (templateRef, sequencing),
+//! * container -> container **param data-deps** (`{{tasks.x.outputs
+//!   .result}}`) — proves run-mode (de)serialize, `ATHENA_PARAM_*` env in,
+//!   `/athena/result` out,
+//! * default image (busybox) + explicit per-`#[container(image=...)]`,
+//! * `host!` hostPath mount + a `#[fragment]` carrying its own `host!`
+//!   (cross-item closure lands on the container),
+//! * a nested `#[workflow]` that **returns a value** consumed by a
+//!   downstream container (`{{tasks.s.outputs.result}}` resolves because
+//!   the sub-workflow declares `outputs.result`),
+//! * `save_artifact_str!` -> output artifact persisted to MinIO,
+//! * binary delivery: cross-compiled musl tarball in MinIO, the
+//!   `uname`-resolving bootstrap, scheduled on the worker nodes.
 
 use cargo_athena::{container, fragment, workflow};
 
-// --- root workflow ---------------------------------------------------------
-
-#[workflow]
-pub fn pipeline() {
-    let a = ingest("https://example.com/data".to_string()); // nested workflow
-    branchy("fast".to_string()); // container, literal arg
-    let t = transform("seed".to_string(), 3); // container, str + int literals
-    combine(a, t); // multi-dependency DAG task: depends on `a` AND `t`
+#[container]
+pub fn produce() -> String {
+    // default image (busybox); returns a value other tasks consume.
+    "hello".to_string()
 }
 
-// --- nested workflow -------------------------------------------------------
-
-#[workflow]
-pub fn ingest(source: String) {
-    let raw = fetch(source); // `source` -> {{inputs.parameters.source}}
-    let clean = transform(raw, 2); // raw -> task ref; 2 -> literal
-    publish(clean); // clean -> task ref
+#[container(image = "busybox:1.36-musl")]
+pub fn transform(input: String) -> String {
+    // explicit per-container image override path.
+    format!("{input}-transformed")
 }
 
-// --- containers ------------------------------------------------------------
-
-#[container(image = "ghcr.io/acme/fetch:1.2.3")]
-pub fn fetch(url: String) -> String {
-    let _token = cargo_athena::host!("/secrets/token");
-    format!("data-from:{url}")
-}
-
-#[container] // default image (REPLACE_ME) + default bin (app)
-pub fn transform(data: String, factor: i64) -> String {
-    format!("{data}*{factor}")
-}
-
-#[container(image = "ghcr.io/acme/tools:latest")]
-pub fn branchy(mode: String) {
-    // host! collected from BOTH branches even though only one runs.
-    if mode == "fast" {
-        let _ = cargo_athena::host!("/cache/fast");
-    } else {
-        let _ = cargo_athena::host!("/cache/slow");
-    }
-    // ...and from every match arm.
-    let _ = match mode.len() {
-        0 => cargo_athena::host!("/data/empty"),
-        _ => cargo_athena::host!("/data/default"),
-    };
-    frag_a(); // pulls /var/lib/a and (transitively) /var/lib/b
-    println!("branchy mode={mode}");
-}
-
-#[container(
-    image = "ghcr.io/acme/combine:latest",
-    service_account = "athena-runner",
-    node_selector = { "kubernetes.io/arch" = "amd64", "disktype" = "ssd" }
-)]
-pub fn combine(x: String, y: String) -> String {
-    format!("{x}+{y}")
+#[fragment]
+fn extra_mount() {
+    // cross-item: this hostPath must land on `consume`'s template.
+    let _ = cargo_athena::host!("/tmp/athena-frag");
 }
 
 #[container]
-pub fn publish(report: String) {
-    // Native Argo artifact ports (no S3): an input port read at runtime
-    // and an output port written at runtime — both declared on this
-    // container's WorkflowTemplate by static collection.
-    let notes = cargo_athena::load_artifact_str!("notes");
-    println!("publishing {report} (notes: {notes})");
-    cargo_athena::save_artifact!("receipt", format!("ok:{report}"));
+pub fn consume(value: String) {
+    let h = cargo_athena::host!("/tmp/athena-host");
+    extra_mount();
+    println!("consume({value}) host={h}");
+    cargo_athena::save_artifact_str!("result-note", format!("done:{value}"));
 }
 
-// --- fragments (cross-item resource carriers) ------------------------------
-
-#[fragment]
-fn frag_a() {
-    let _a = cargo_athena::host!("/var/lib/a");
-    frag_b(); // transitive: frag_b's host! must also land on `branchy`
+#[container]
+pub fn stamp() -> String {
+    "stamped".to_string()
 }
 
-#[fragment]
-fn frag_b() {
-    let _b = cargo_athena::host!("/var/lib/b");
+#[container]
+pub fn audit(note: String) {
+    // consumes a *workflow's* returned value: workflow -> container dep.
+    println!("audit:{note}");
 }
 
-// --- intra-crate cross-module composition ----------------------------------
-
-pub mod another {
-    //! Proves a workflow in another *module* composes the crate-root
-    //! `pipeline` exactly like any other template (same wormhole path).
-    use cargo_athena::{container, workflow};
-
-    #[container]
-    pub fn local_step(tag: String) -> String {
-        format!("local:{tag}")
-    }
-
-    #[container]
-    pub fn sink(v: String) {
-        println!("sink {v}");
-    }
-
-    #[workflow]
-    pub fn pipeline_another() {
-        let s = local_step("m".to_string());
-        crate::pipeline(); // cross-module workflow -> workflow
-        sink(s); // depends on local_step's output
-    }
-}
-
-// --- workflow return values ------------------------------------------------
-
-/// A nested `#[workflow]` that *returns* a value: the tail template call's
-/// `result` is bubbled up as this workflow-template's own `outputs.result`.
 #[workflow]
-pub fn sub_pipeline(seed: String) -> String {
-    let fetched = fetch(seed); // container -> String; `seed` is an input
-    transform(fetched, 7) // tail call (no `;`) == this workflow's result
+pub fn finalize_wf() -> String {
+    // Nested workflow that RETURNS a value: its tail call's result becomes
+    // this workflow-template's own outputs.result.
+    stamp()
 }
 
-/// Consumes a sub-*workflow*'s return value. Proves workflow→X data deps:
-/// `{{tasks.r.outputs.result}}` resolves only because `sub_pipeline` now
-/// declares that output (it didn't before — workflows had no outputs).
 #[workflow]
-pub fn pipeline_returns() {
-    let r = sub_pipeline("seed".to_string());
-    publish(r);
+pub fn pipeline() {
+    let a = produce();
+    let b = transform(a); // depends on `a`: {{tasks.a.outputs.result}}
+    consume(b); // depends on `b`
+    let s = finalize_wf(); // nested workflow via templateRef, returns a value
+    audit(s); // workflow -> container: {{tasks.s.outputs.result}}
 }

@@ -5,8 +5,12 @@ version.workspace = true
 license.workspace = true
 publish = false
 
-# Stable e2e fixture — do NOT edit casually; goldens in tests/golden/ are
-# pinned to its emitted output. Regenerate with `UPDATE_EXPECT=1`.
+# The ONLY crate the kind e2e (GitHub Actions) builds + submits to a real
+# Argo + MinIO (scripts/e2e-test.sh, .github/workflows/e2e.yml). Scoped to
+# features wired end-to-end: workflow / nested-workflow (sequencing AND a
+# returned value consumed downstream) / container / fragment / host! /
+# save_artifact! / container->container + workflow->container param
+# data-deps / default+override image / multi-arch bootstrap.
 [lib]
 name = "cargo_athena_example_e2e"
 path = "src/lib.rs"
@@ -15,16 +19,5 @@ path = "src/lib.rs"
 name = "e2e"
 path = "src/main.rs"
 
-[[bin]]
-name = "e2e-another"
-path = "src/bin/another_main.rs"
-
-[[bin]]
-name = "e2e-returns"
-path = "src/bin/returns_main.rs"
-
 [dependencies]
 cargo-athena = { workspace = true }
-
-[dev-dependencies]
-trybuild = "1"

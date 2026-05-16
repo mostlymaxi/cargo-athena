@@ -1,14 +1,13 @@
-//! End-to-end: spawn the actual compiled binaries and pin their output.
+//! Golden: spawn the compiled `smoke` bins and pin their emit/run output.
 //!
-//!   cargo test -p cargo-athena-example-e2e                 # assert
-//!   UPDATE_EXPECT=1 cargo test -p cargo-athena-example-e2e # refresh goldens
+//!   cargo test -p cargo-athena-example-smoke                 # assert
+//!   UPDATE_EXPECT=1 cargo test -p cargo-athena-example-smoke # refresh goldens
 
 use std::path::PathBuf;
 use std::process::Command;
 
-const BIN_PIPELINE: &str = env!("CARGO_BIN_EXE_e2e");
-const BIN_ANOTHER: &str = env!("CARGO_BIN_EXE_e2e-another");
-const BIN_RETURNS: &str = env!("CARGO_BIN_EXE_e2e-returns");
+const BIN_PIPELINE: &str = env!("CARGO_BIN_EXE_smoke");
+const BIN_RETURNS: &str = env!("CARGO_BIN_EXE_smoke-returns");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -35,7 +34,7 @@ fn assert_golden(name: &str, actual: &str) {
     assert_eq!(
         actual, expected,
         "\n{name} drifted from its golden. If intended, refresh with \
-         `UPDATE_EXPECT=1 cargo test -p cargo-athena-example-e2e`.\n"
+         `UPDATE_EXPECT=1 cargo test -p cargo-athena-example-smoke`.\n"
     );
 }
 
@@ -44,7 +43,7 @@ fn run_bin(bin: &str, envs: &[(&str, &str)]) -> String {
     for (k, v) in envs {
         cmd.env(k, v);
     }
-    let out = cmd.output().expect("failed to spawn e2e binary");
+    let out = cmd.output().expect("failed to spawn smoke binary");
     assert!(
         out.status.success(),
         "{bin} exited with {:?}\nstderr:\n{}",
@@ -58,13 +57,6 @@ fn run_bin(bin: &str, envs: &[(&str, &str)]) -> String {
 #[test]
 fn emit_pipeline() {
     assert_golden("pipeline.yaml", &run_bin(BIN_PIPELINE, &[]));
-}
-
-/// Cross-*module*: a workflow in `mod another` composing the crate-root
-/// `pipeline`. Its closure must include every `pipeline` template.
-#[test]
-fn emit_pipeline_another() {
-    assert_golden("pipeline_another.yaml", &run_bin(BIN_ANOTHER, &[]));
 }
 
 /// `#[workflow]` return values: `sub_pipeline` (returns its tail call's
@@ -81,7 +73,10 @@ fn run_mode_transform() {
     let out = run_bin(
         BIN_PIPELINE,
         &[
-            ("CARGO_ATHENA_TEMPLATE", "cargo-athena-example-e2e-transform"),
+            (
+                "CARGO_ATHENA_TEMPLATE",
+                "cargo-athena-example-smoke-transform",
+            ),
             ("CARGO_ATHENA_INPUT", r#"{"data":"hello","factor":4}"#),
         ],
     );
@@ -94,7 +89,7 @@ fn run_mode_branchy() {
     let out = run_bin(
         BIN_PIPELINE,
         &[
-            ("CARGO_ATHENA_TEMPLATE", "cargo-athena-example-e2e-branchy"),
+            ("CARGO_ATHENA_TEMPLATE", "cargo-athena-example-smoke-branchy"),
             ("CARGO_ATHENA_INPUT", r#"{"mode":"fast"}"#),
         ],
     );

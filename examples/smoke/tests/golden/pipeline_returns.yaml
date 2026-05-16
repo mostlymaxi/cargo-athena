@@ -1,11 +1,11 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-e2e-fetch
+  name: cargo-athena-example-smoke-fetch
 spec:
-  entrypoint: cargo-athena-example-e2e-fetch
+  entrypoint: cargo-athena-example-smoke-fetch
   templates:
-  - name: cargo-athena-example-e2e-fetch
+  - name: cargo-athena-example-smoke-fetch
     inputs:
       parameters:
       - name: url
@@ -47,7 +47,7 @@ spec:
         tar -xzf /athena/dist.tar.gz -C /athena/bin
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
-        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-fetch
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-fetch
       env:
       - name: ATHENA_PARAM_url
         value: '{{inputs.parameters.url}}'
@@ -67,11 +67,11 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-e2e-pipeline-returns
+  name: cargo-athena-example-smoke-pipeline-returns
 spec:
-  entrypoint: cargo-athena-example-e2e-pipeline-returns
+  entrypoint: cargo-athena-example-smoke-pipeline-returns
   templates:
-  - name: cargo-athena-example-e2e-pipeline-returns
+  - name: cargo-athena-example-smoke-pipeline-returns
     dag:
       tasks:
       - name: r
@@ -80,8 +80,8 @@ spec:
           - name: seed
             value: seed
         templateRef:
-          name: cargo-athena-example-e2e-sub-pipeline
-          template: cargo-athena-example-e2e-sub-pipeline
+          name: cargo-athena-example-smoke-sub-pipeline
+          template: cargo-athena-example-smoke-sub-pipeline
       - name: publish
         dependencies:
         - r
@@ -90,17 +90,17 @@ spec:
           - name: report
             value: '{{tasks.r.outputs.result}}'
         templateRef:
-          name: cargo-athena-example-e2e-publish
-          template: cargo-athena-example-e2e-publish
+          name: cargo-athena-example-smoke-publish
+          template: cargo-athena-example-smoke-publish
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-e2e-publish
+  name: cargo-athena-example-smoke-publish
 spec:
-  entrypoint: cargo-athena-example-e2e-publish
+  entrypoint: cargo-athena-example-smoke-publish
   templates:
-  - name: cargo-athena-example-e2e-publish
+  - name: cargo-athena-example-smoke-publish
     inputs:
       parameters:
       - name: report
@@ -173,7 +173,7 @@ spec:
         tar -xzf /athena/dist.tar.gz -C /athena/bin
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
-        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-publish
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-publish
       env:
       - name: ATHENA_PARAM_report
         value: '{{inputs.parameters.report}}'
@@ -188,11 +188,11 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-e2e-sub-pipeline
+  name: cargo-athena-example-smoke-sub-pipeline
 spec:
-  entrypoint: cargo-athena-example-e2e-sub-pipeline
+  entrypoint: cargo-athena-example-smoke-sub-pipeline
   templates:
-  - name: cargo-athena-example-e2e-sub-pipeline
+  - name: cargo-athena-example-smoke-sub-pipeline
     inputs:
       parameters:
       - name: seed
@@ -209,8 +209,8 @@ spec:
           - name: url
             value: '{{inputs.parameters.seed}}'
         templateRef:
-          name: cargo-athena-example-e2e-fetch
-          template: cargo-athena-example-e2e-fetch
+          name: cargo-athena-example-smoke-fetch
+          template: cargo-athena-example-smoke-fetch
       - name: transform
         dependencies:
         - fetched
@@ -221,17 +221,17 @@ spec:
           - name: factor
             value: '7'
         templateRef:
-          name: cargo-athena-example-e2e-transform
-          template: cargo-athena-example-e2e-transform
+          name: cargo-athena-example-smoke-transform
+          template: cargo-athena-example-smoke-transform
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-e2e-transform
+  name: cargo-athena-example-smoke-transform
 spec:
-  entrypoint: cargo-athena-example-e2e-transform
+  entrypoint: cargo-athena-example-smoke-transform
   templates:
-  - name: cargo-athena-example-e2e-transform
+  - name: cargo-athena-example-smoke-transform
     inputs:
       parameters:
       - name: data
@@ -274,7 +274,7 @@ spec:
         tar -xzf /athena/dist.tar.gz -C /athena/bin
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
-        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-e2e-transform
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-transform
       env:
       - name: ATHENA_PARAM_data
         value: '{{inputs.parameters.data}}'
@@ -291,8 +291,8 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  generateName: cargo-athena-example-e2e-pipeline-returns-
+  generateName: cargo-athena-example-smoke-pipeline-returns-
 spec:
   workflowTemplateRef:
-    name: cargo-athena-example-e2e-pipeline-returns
+    name: cargo-athena-example-smoke-pipeline-returns
   serviceAccountName: default

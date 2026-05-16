@@ -1,0 +1,23 @@
+[package]
+name = "cargo-athena-example-importing"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+# The cross-module + cross-CRATE importing example. Depends on the smoke
+# fixture crate and imports its `pipeline`, composing it with a local
+# cross-module workflow + local templates. Its golden must contain the
+# upstream `cargo-athena-example-smoke-*` templates by reference — the
+# empirical proof the type-wormhole force-links across crates.
+[lib]
+name = "cargo_athena_example_importing"
+path = "src/lib.rs"
+
+[[bin]]
+name = "importing"
+path = "src/main.rs"
+
+[dependencies]
+cargo-athena = { workspace = true }
+cargo-athena-example-smoke = { path = "../smoke" }

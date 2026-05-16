@@ -1,0 +1,26 @@
+[package]
+name = "cargo-athena-example-smoke"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+# The broad "all features" fixture: workflow / nested workflow / containers
+# (explicit+default image) / mixed arg kinds / host! unioned across
+# if+match / transitive #[fragment] closure / native artifact ports /
+# #[workflow] return values. Goldens in tests/golden/ are pinned to its
+# emitted output — regenerate intentionally with `UPDATE_EXPECT=1`.
+[lib]
+name = "cargo_athena_example_smoke"
+path = "src/lib.rs"
+
+[[bin]]
+name = "smoke"
+path = "src/main.rs"
+
+[[bin]]
+name = "smoke-returns"
+path = "src/bin/returns_main.rs"
+
+[dependencies]
+cargo-athena = { workspace = true }

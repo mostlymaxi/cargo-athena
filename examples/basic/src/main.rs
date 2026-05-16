@@ -56,46 +56,7 @@ fn main() {
     cargo_athena::entrypoint::<run_foo>();
 }
 
-#[cfg(test)]
-mod tests {
-    use cargo_athena::{Collector, Template};
-
-    #[test]
-    fn emits_expected_templates() {
-        let mut c = Collector::new();
-        <crate::run_foo as Template>::collect(&mut c);
-        let yaml = c.emit::<crate::run_foo>();
-
-        // One WorkflowTemplate per template, namespaced by crate.
-        assert!(yaml.contains("kind: WorkflowTemplate"));
-        assert!(yaml.contains("name: cargo-athena-example-basic-run-foo"));
-        assert!(yaml.contains("name: cargo-athena-example-basic-some-other-workflow"));
-
-        // Cross-item host! closure landed on the container template.
-        assert!(yaml.contains("/etc/myapp"));
-        assert!(yaml.contains("/var/lib/extra"));
-
-        // Cross-template calls are by reference, and a runnable Workflow
-        // for the entrypoint is appended.
-        assert!(yaml.contains("templateRef:"));
-        assert!(yaml.contains("kind: Workflow\n"));
-        assert!(yaml.contains("workflowTemplateRef:"));
-    }
-
-    #[test]
-    fn workflow_steps_mode() {
-        let mut c = Collector::new();
-        <crate::seq_foo as Template>::collect(&mut c);
-        let yaml = c.emit::<crate::seq_foo>();
-
-        // `#[workflow(steps)]` emits Argo `steps:` (sequential groups),
-        // not `dag:`; cross-step refs use `{{steps.…}}`.
-        let wt = yaml
-            .split("---")
-            .find(|d| d.contains("name: cargo-athena-example-basic-seq-foo"))
-            .expect("seq-foo WorkflowTemplate");
-        assert!(wt.contains("steps:"), "expected steps body:\n{wt}");
-        assert!(!wt.contains("dag:"));
-        assert!(yaml.contains("{{steps.p.outputs.result}}"));
-    }
-}
+// Emit-semantics coverage lives in `crates/cargo-athena/tests/smoke.rs`
+// (per-template WorkflowTemplate, crate namespacing, cross-item host!
+// closure, templateRef, runnable Workflow, `#[workflow(steps)]`,
+// `#[workflow]` return values). This stays a pure, minimal example.
