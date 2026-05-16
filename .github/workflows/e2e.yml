@@ -46,14 +46,17 @@ jobs:
       fail-fast: false
       matrix:
         # Argo maintains only the 2 most recent minors (release policy:
-        # docs/releases.md). v4.0 + v3.7 are the support target; the older
-        # minors are EOL, smoke-tested best-effort. All = latest patch.
+        # docs/releases.md): v4.0 + v3.7 are the support target. v3.6 is
+        # our minimum supported version, kept green as a hard gate even
+        # though EOL. Argo <= 3.5 is unsupported and intentionally NOT in
+        # the matrix: its validator can't resolve {{tasks.X.outputs.*}}
+        # across a templateRef boundary, which athena's one-WT-per-
+        # #[container]/#[workflow] "wormhole" design requires. All legs
+        # are blocking. All = latest patch.
         argo:
           - v4.0.5    # maintained (latest minor)
           - v3.7.14   # maintained (n-1 minor)
-          - v3.6.19   # EOL — best-effort
-          - v3.5.15   # EOL — best-effort
-          - v3.4.18   # EOL — best-effort
+          - v3.6.19   # minimum supported (EOL, hard gate)
     runs-on: ubuntu-latest
     name: e2e (argo ${{ matrix.argo }})
     steps:
@@ -76,10 +79,13 @@ jobs:
 
       # Per-version live status for the README table. GitHub has no
       # per-matrix-job badge, so each job publishes pass/fail to a gist
-      # that shields.io endpoint badges read. No-op (and never fails the
-      # run) until BADGE_GIST_ID + GIST_TOKEN secrets exist.
+      # that shields.io endpoint badges read. Skipped entirely (not just
+      # non-fatal) until BADGE_GIST_ID + GIST_TOKEN secrets exist —
+      # otherwise it PATCHes an empty gist id and 404s every run.
       - name: publish status badge
-        if: ${{ always() && github.ref == 'refs/heads/main' }}
+        if: >-
+          ${{ always() && github.ref == 'refs/heads/main'
+              && secrets.BADGE_GIST_ID != '' && secrets.GIST_TOKEN != '' }}
         continue-on-error: true
         uses: schneegans/dynamic-badges-action@v1.7.0
         with:

@@ -22,7 +22,36 @@ kubectl config use-context "kind-$CLUSTER" >/dev/null
 
 PF=""
 cleanup() { [ -n "$PF" ] && kill "$PF" 2>/dev/null || true; }
-trap cleanup EXIT
+
+# On any failure after the cluster is up, dump why: the controller's
+# verdict (.status.message + per-node messages), the live Workflow,
+# controller logs, and any failed pod. Without this an Argo-version
+# incompatibility just shows "exit code 1" with no cause (esp. in CI).
+dump_diagnostics() {
+  echo
+  printf '\033[1;31m== DIAGNOSTICS (e2e failed, rc=%s)\033[0m\n' "$1"
+  echo "--- argo get @latest"
+  argo get -n "$NS" @latest -o yaml 2>/dev/null \
+    | grep -E '^(  )?(phase|message|name|displayName|templateName|type):' \
+    || echo "  (no workflow / argo get failed)"
+  echo "--- workflow .status.message"
+  kubectl -n "$NS" get wf -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.phase}{"\t"}{.status.message}{"\n"}{end}' 2>/dev/null \
+    || echo "  (none)"
+  echo "--- workflow-controller logs (tail)"
+  kubectl -n "$NS" logs deploy/workflow-controller --tail=60 2>/dev/null \
+    | grep -iE 'error|invalid|fail|reject|unmarshal|unknown field' \
+    || echo "  (no error lines)"
+  echo "--- failed pods"
+  kubectl -n "$NS" get pods -l workflows.argoproj.io/workflow \
+    --field-selector=status.phase=Failed -o name 2>/dev/null \
+    | while read -r p; do
+        echo "  $p"
+        kubectl -n "$NS" describe "$p" 2>/dev/null | grep -A3 -iE 'state:|reason:|message:' | sed 's/^/    /'
+      done
+  printf '\033[1;31m== END DIAGNOSTICS\033[0m\n\n'
+}
+
+trap 'rc=$?; [ "$rc" -ne 0 ] && dump_diagnostics "$rc"; cleanup' EXIT
 
 # CI builds the tarball once (build job) and reuses it across the Argo
 # matrix: set ATHENA_SKIP_BUILD=1 + ATHENA_TARBALL=<path>.
