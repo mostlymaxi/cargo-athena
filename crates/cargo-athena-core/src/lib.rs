@@ -27,7 +27,10 @@ pub use cargo_athena_api as api;
 // Re-exported so macro-generated code has stable paths under `::cargo_athena`.
 pub use inventory;
 pub use serde_json;
-pub use serde_yaml;
+// Maintained serde_yaml fork: YAML 1.1-aware emitter (quotes `n`/`yes`/
+// `null`/… so Argo's Go YAML→JSON parser can't mis-type them). serde_yaml
+// itself is archived/EOL.
+pub use serde_norway;
 
 /// Fan-out: `list.fan_out(|x| template(x, ..))` runs `template` once per
 /// element (Argo `withParam`); the binding is the aggregated `Vec<U>` of
@@ -674,7 +677,7 @@ impl Collector {
 
         let mut docs: Vec<String> = tpls
             .iter()
-            .map(|t| serde_yaml::to_string(t).expect("WorkflowTemplate is serializable"))
+            .map(|t| serde_norway::to_string(t).expect("WorkflowTemplate is serializable"))
             .collect();
 
         let wf = api::Workflow {
@@ -714,7 +717,7 @@ impl Collector {
                 ..Default::default()
             }),
         };
-        docs.push(serde_yaml::to_string(&wf).expect("Workflow is serializable"));
+        docs.push(serde_norway::to_string(&wf).expect("Workflow is serializable"));
         docs.join("---\n")
     }
 }

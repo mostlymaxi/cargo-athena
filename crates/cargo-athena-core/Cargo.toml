@@ -10,6 +10,6 @@ description = "cargo-athena runtime: modes, template registration, DAG/promise t
 cargo-athena-api = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
+serde_norway = { workspace = true }
 toml = { workspace = true }
 inventory = { workspace = true }

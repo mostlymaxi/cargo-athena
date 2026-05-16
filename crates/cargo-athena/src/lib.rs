@@ -25,7 +25,7 @@
 //! ```
 
 // Runtime: modes, registration, BuildCtx, YAML emit, `host!`, re-exported
-// `api` / `inventory` / `serde_json` / `serde_yaml`.
+// `api` / `inventory` / `serde_json` / `serde_norway`.
 pub use cargo_athena_core::*;
 
 // `#[macro_export]` macros live at the dependency's crate root; re-export
