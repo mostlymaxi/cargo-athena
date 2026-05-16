@@ -29,23 +29,28 @@ README is intentionally lean (user-facing); the *why* lives here.
   one from a `#[workflow]` fails via the type system (`<x as Template>`
   → "expected type, found function"). Loops/branches will be lowered
   differently later — until then they must error, not mislower.
-- **Per-task builder chain.** A task call may be suffixed with, in any
-  order, at most one each of `.continue_on(failed|error|failed, error)`
-  (→ `DAGTask.continueOn`), `.on_exit(t)` (→ the special `exit` hook,
-  `templateRef=t`, no expression), and any number of `.hooks("argo-expr"
-  = t, …)` (→ `LifecycleHook{expression, templateRef=t}`, auto-keyed
-  `hook1`,`hook2`,… in source order). `peel_builders` strips them off
-  the call before `call_parts`; valid on stmt / `let` / tail / `return`
-  calls (not on a returned binding). Malformed *known* builder =
-  targeted `compile_error!`; an unknown trailing `.foo()` falls through
-  to the usual not-a-template-call error. Hook templates are paths,
-  force-linked + emitted via the wormhole exactly like callees (added to
-  the `collect()` closure). `.on_exit(t(args))` may pass arguments
-  (resolved like task args: literal / `#[workflow]` input / prior
-  binding; param names from the hook template's `INPUTS`). `.hooks(...)`
-  arg-grammar is still **deferred** (bare path only — value-with-args is
-  a `compile_error!` for now, pending a design chat). Argo-validated:
-  smoke `pipeline_hooks`/`pipeline_onexit` SUBMIT-OK on real v4.0.5.
+- **Per-task builder chain.** A task call may be suffixed, in any order,
+  with:
+  - `.continue_on(failed|error|failed, error)` (≤1) → `DAGTask.continueOn`;
+  - `.on_exit(t)` (≤1) → the special `exit` hook (no expression);
+  - `.on_success(t)` / `.on_failure(t)` / `.on_error(t)` (repeatable) →
+    athena-generated `LifecycleHook.expression` = `<scope>['<task>'].status
+    == "Succeeded|Failed|Error"` where `<scope>` is `tasks` (dag) or
+    `steps`. **Bracket form is load-bearing** — kebab task names have
+    hyphens, so `tasks.x` is invalid; `tasks['x']` works (kind-proven
+    v4.0.5, hyphenated name fires);
+  - `.hook_if("raw-argo-expr" = t, …)` (repeatable) → verbatim Argo
+    expression escape hatch.
+  Any hook target may be `t` or `t(args)` (args resolved like task args:
+  literal / `#[workflow]` input / prior binding; param names from the
+  hook tmpl's `INPUTS` → `LifecycleHook.arguments`). Non-exit hooks are
+  auto-keyed `hook1`,`hook2`,… in source order. `peel_builders` strips
+  the chain before `call_parts`; valid on stmt/`let`/tail/`return`
+  (not a returned binding); malformed *known* builder = targeted
+  `compile_error!`, unknown `.foo()` falls through to not-a-template-call.
+  Hook templates are force-linked/emitted via the wormhole (in
+  `collect()`). Argo-validated: smoke `pipeline_hooks`/`pipeline_onexit`
+  SUBMIT-OK + `.on_failure` fires on real v4.0.5.
 - **Whole-workflow exit handler: `#[workflow(on_exit=t)]` /
   `#[container(on_exit=t)]` → `Template::ON_EXIT` (default `None`).**
   `emit::<E>()` wires it onto the runnable Workflow as

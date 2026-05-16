@@ -436,21 +436,32 @@ enum Arg {
     Input(String),
 }
 
+/// When a hook fires. The concrete Argo `expression` is generated in
+/// `node_tokens` (it needs the task name + dag/steps scope, unknown at
+/// peel time); `Exit` is the special unconditional `exit` hook.
+#[derive(Clone)]
+enum HookWhen {
+    Exit,
+    Success,
+    Failure,
+    Error,
+    /// `.hook_if("raw-argo-expression" = t)` — verbatim Argo expr.
+    Raw(String),
+}
+
 /// A hook peeled off a call, args still as raw `Expr` (resolved against
-/// bindings/inputs later in `push_call`). `expression: None` == the
-/// special `exit` hook; `Some(e)` runs when the Argo expression holds.
+/// bindings/inputs later in `push_call`).
 struct HookSpec {
-    expression: Option<String>,
+    when: HookWhen,
     /// Hook template path — force-linked + emitted as a `templateRef`
     /// exactly like a callee.
     template: Path,
-    /// `.on_exit(t(args))` — args to the hook template (empty for a bare
-    /// path or for `.hooks(...)`, whose arg-grammar is still deferred).
+    /// Args to the hook template (`t(args)`); empty for a bare path.
     raw_args: Vec<Expr>,
 }
 
-/// Per-task builders peeled off a call: `.continue_on(...)`, `.hooks(...)`,
-/// `.on_exit(...)`.
+/// Per-task builders peeled off a call: `.continue_on(...)`, `.on_exit`,
+/// `.on_success`/`.on_failure`/`.on_error`, `.hook_if(...)`.
 #[derive(Default)]
 struct NodeOpts {
     /// `(error, failed)` for Argo `continueOn`.
@@ -460,7 +471,7 @@ struct NodeOpts {
 
 /// A hook with its args resolved to `Arg`s (post `push_call`).
 struct Hook {
-    expression: Option<String>,
+    when: HookWhen,
     template: Path,
     args: Vec<Arg>,
 }
@@ -556,6 +567,36 @@ fn expr_path(e: &Expr) -> Option<Path> {
     }
 }
 
+/// A hook target: `t` (bare path) or `t(arg, …)` (call with args).
+fn hook_target(arg: &Expr) -> syn::Result<(Path, Vec<Expr>)> {
+    if let Some((p, raw)) = call_parts(arg) {
+        Ok((p, raw))
+    } else if let Some(p) = expr_path(arg) {
+        Ok((p, Vec::new()))
+    } else {
+        Err(syn::Error::new_spanned(
+            arg,
+            "hook target must be a template path `t` or call `t(args)`.",
+        ))
+    }
+}
+
+/// The single template-target arg of `.on_exit/.on_success/.on_failure/
+/// .on_error(t)` (exactly one).
+fn single_hook_target(
+    mc: &syn::ExprMethodCall,
+) -> syn::Result<(Path, Vec<Expr>)> {
+    let mut it = mc.args.iter();
+    let (Some(arg), None) = (it.next(), it.next()) else {
+        return Err(syn::Error::new_spanned(
+            mc,
+            "expected exactly one template: `.<hook>(t)` or \
+             `.<hook>(t(args))`.",
+        ));
+    };
+    hook_target(arg)
+}
+
 /// Peel trailing builder method calls (`.continue_on`/`.hooks`/`.on_exit`)
 /// off `e`, accumulating a `NodeOpts`, and return the inner base
 /// expression (which the caller still validates is a template call). An
@@ -603,39 +644,34 @@ fn peel_builders(e: &Expr) -> syn::Result<(&Expr, NodeOpts)> {
                     ));
                 }
                 on_exit_seen = true;
-                let mut it = mc.args.iter();
-                let (Some(arg), None) = (it.next(), it.next()) else {
-                    return Err(syn::Error::new_spanned(
-                        mc,
-                        "`.on_exit(t)` / `.on_exit(t(args))` takes exactly \
-                         one template (optionally called with args).",
-                    ));
-                };
-                // `t` (bare path) OR `t(arg, …)` (call with args).
-                let (template, raw_args) = if let Some((p, raw)) =
-                    call_parts(arg)
-                {
-                    (p, raw)
-                } else if let Some(p) = expr_path(arg) {
-                    (p, Vec::new())
-                } else {
-                    return Err(syn::Error::new_spanned(
-                        arg,
-                        "`.on_exit(t)`/`.on_exit(t(args))`: `t` must be a \
-                         template path.",
-                    ));
-                };
+                let (template, raw_args) = single_hook_target(mc)?;
                 opts.hooks.push(HookSpec {
-                    expression: None,
+                    when: HookWhen::Exit,
                     template,
                     raw_args,
                 });
             }
-            "hooks" => {
+            // Typed phase predicates — athena generates the Argo
+            // `expression`. Repeatable (each = a distinct auto-keyed hook).
+            m @ ("on_success" | "on_failure" | "on_error") => {
+                let when = match m {
+                    "on_success" => HookWhen::Success,
+                    "on_failure" => HookWhen::Failure,
+                    _ => HookWhen::Error,
+                };
+                let (template, raw_args) = single_hook_target(mc)?;
+                opts.hooks.push(HookSpec {
+                    when,
+                    template,
+                    raw_args,
+                });
+            }
+            // Escape hatch: raw Argo expression(s) -> template(args).
+            "hook_if" => {
                 if mc.args.is_empty() {
                     return Err(syn::Error::new_spanned(
                         mc,
-                        "`.hooks(...)` needs at least one \
+                        "`.hook_if(...)` needs at least one \
                          `\"argo-expression\" = template` entry.",
                     ));
                 }
@@ -643,7 +679,7 @@ fn peel_builders(e: &Expr) -> syn::Result<(&Expr, NodeOpts)> {
                     let Expr::Assign(asn) = unwrap_expr(a) else {
                         return Err(syn::Error::new_spanned(
                             a,
-                            "each `.hooks(...)` entry must be \
+                            "each `.hook_if(...)` entry must be \
                              `\"argo-expression\" = template`.",
                         ));
                     };
@@ -654,25 +690,16 @@ fn peel_builders(e: &Expr) -> syn::Result<(&Expr, NodeOpts)> {
                         _ => {
                             return Err(syn::Error::new_spanned(
                                 &asn.left,
-                                "hook key must be a string-literal Argo \
-                                 expression.",
+                                "`.hook_if(...)` key must be a string-literal \
+                                 Argo expression.",
                             ));
                         }
                     };
-                    // `.hooks(...)` arg-grammar is deferred — value must
-                    // be a bare template path for now.
-                    let template = expr_path(&asn.right).ok_or_else(|| {
-                        syn::Error::new_spanned(
-                            &asn.right,
-                            "hook value must be a bare template path \
-                             (passing args to `.hooks(...)` targets isn't \
-                             supported yet — use `.on_exit(t(args))`).",
-                        )
-                    })?;
+                    let (template, raw_args) = hook_target(&asn.right)?;
                     opts.hooks.push(HookSpec {
-                        expression: Some(expression),
+                        when: HookWhen::Raw(expression),
                         template,
-                        raw_args: Vec::new(),
+                        raw_args,
                     });
                 }
             }
@@ -783,7 +810,7 @@ fn analyze_workflow(func: &ItemFn) -> syn::Result<(Vec<Node>, Option<String>)> {
                     .map(|a| expr_to_arg(a, bindings, &inputs))
                     .collect::<syn::Result<Vec<_>>>()?;
                 Ok(Hook {
-                    expression: h.expression,
+                    when: h.when,
                     template: h.template,
                     args,
                 })
@@ -1020,16 +1047,33 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
     // callees; hook args use the same scope as the task's own args
     // (literal / workflow input / prior binding), but add NO dependency.
     let mut hook_n: u32 = 0;
+    // Argo expression scope: a sibling node is `tasks['x']` in a dag,
+    // `steps['x']` in a steps workflow. Bracket form (NOT `tasks.x`) so
+    // hyphenated kebab task names resolve.
+    let scope = if steps { "steps" } else { "tasks" };
     let hook_inserts: Vec<TokenStream2> = node
         .hooks
         .iter()
         .map(|h| {
             let hp = &h.template;
-            let (key, expr_lit) = match &h.expression {
-                None => ("exit".to_string(), String::new()),
-                Some(e) => {
+            let (key, expr_lit) = match &h.when {
+                HookWhen::Exit => ("exit".to_string(), String::new()),
+                when => {
                     hook_n += 1;
-                    (format!("hook{hook_n}"), e.clone())
+                    let expr = match when {
+                        HookWhen::Success => format!(
+                            "{scope}['{task}'].status == \"Succeeded\""
+                        ),
+                        HookWhen::Failure => format!(
+                            "{scope}['{task}'].status == \"Failed\""
+                        ),
+                        HookWhen::Error => format!(
+                            "{scope}['{task}'].status == \"Error\""
+                        ),
+                        HookWhen::Raw(s) => s.clone(),
+                        HookWhen::Exit => unreachable!(),
+                    };
+                    (format!("hook{hook_n}"), expr)
                 }
             };
             let arg_pushes = h.args.iter().enumerate().map(|(i, a)| match a {
