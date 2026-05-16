@@ -10,11 +10,8 @@ concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
 
-# Default GITHUB_TOKEN is read-only on private repos; cache-nix-action's
-# purge step lists/deletes Actions caches and needs actions:write.
 permissions:
   contents: read
-  actions: write
 
 jobs:
   # Cross-compile + package the athena binary tarball ONCE; the Argo
@@ -24,25 +21,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v16
-      # Cache the realised Nix store so the devShell closure (rust+zig+
-      # cargo-zigbuild, kind/kubectl/argo/mc) isn't re-fetched every run
-      # (~2 min). This job populates it; the e2e matrix jobs restore the
-      # same key (same flake => same closure). Keyed on the flake inputs.
-      # NO gc-max-store-size: the pre-save GC prunes rust-docs while
-      # rust-default still symlinks into it -> dangling symlinks -> the
-      # cached tar fails to restore. Key invalidates on flake bump; stale
-      # whole-cache entries are pruned via `purge` (needs actions:write)
-      # and GitHub's 10 GB LRU.
-      - uses: nix-community/cache-nix-action@v6
-        with:
-          # `v2` salt: busts caches poisoned by the earlier GC'd runs
-          # (dangling rust-docs symlinks); bump again if ever re-poisoned.
-          primary-key: nix-v2-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'rust-toolchain.toml') }}
-          restore-prefixes-first-match: nix-v2-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-v2-${{ runner.os }}-
-          purge-created: 0
-          purge-primary-key: never
+      # No Nix-store cache: cache-nix-action on Determinate-installer
+      # runners repeatedly broke (GC dangling-symlinks, then poisoned
+      # keys, then /nix/var/log perms on restore) for a ~2 min saving on
+      # a 15-20 min kind+Argo e2e. Not worth the flake — substitute from
+      # cache.nixos.org instead. Only the cargo cache below is kept.
       - uses: actions/cache@v4
         with:
           path: |
@@ -91,14 +74,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v16
-      # Restore the Nix store cache the build job populated (same key).
-      - uses: nix-community/cache-nix-action@v6
-        with:
-          # `v2` salt: busts caches poisoned by the earlier GC'd runs
-          # (dangling rust-docs symlinks); bump again if ever re-poisoned.
-          primary-key: nix-v2-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'rust-toolchain.toml') }}
-          restore-prefixes-first-match: nix-v2-${{ runner.os }}-
-          purge: false
+      # (no Nix-store cache — see the build job for why)
       - uses: actions/download-artifact@v4
         with:
           name: athena-e2e-tarball
