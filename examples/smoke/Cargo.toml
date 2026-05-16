@@ -22,5 +22,9 @@ path = "src/main.rs"
 name = "smoke-returns"
 path = "src/bin/returns_main.rs"
 
+[[bin]]
+name = "smoke-hooks"
+path = "src/bin/hooks_main.rs"
+
 [dependencies]
 cargo-athena = { workspace = true }

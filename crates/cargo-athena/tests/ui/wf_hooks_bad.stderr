@@ -1,0 +1,5 @@
+error: each `.hooks(...)` entry must be `"argo-expression" = template`.
+  --> tests/ui/wf_hooks_bad.rs:13:33
+   |
+13 |     step("a".to_string()).hooks(notify);
+   |                                 ^^^^^^

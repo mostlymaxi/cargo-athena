@@ -1,0 +1,5 @@
+error: `.continue_on(...)` only accepts the bare idents `failed` and/or `error`.
+ --> tests/ui/wf_continue_on_bad.rs:9:39
+  |
+9 |     step("a".to_string()).continue_on(maybe);
+  |                                       ^^^^^

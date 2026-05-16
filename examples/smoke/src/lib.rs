@@ -118,3 +118,27 @@ pub fn pipeline_returns() {
     let r = sub_pipeline("seed".to_string());
     publish(r);
 }
+
+// --- per-task builders: .continue_on / .hooks / .on_exit --------------------
+
+#[container]
+pub fn cleanup() {
+    println!("cleanup");
+}
+
+#[container]
+pub fn alarm() {
+    println!("alarm");
+}
+
+/// `.continue_on(...)` lets dependents proceed on failure/error;
+/// `.on_exit(t)` is the special unconditional `exit` hook;
+/// `.hooks("expr" = t)` is a conditional lifecycle hook. Hook templates
+/// are force-linked + emitted via the wormhole like any callee.
+#[workflow]
+pub fn pipeline_hooks() {
+    let raw = fetch("https://example.com".to_string()).continue_on(failed, error);
+    transform(raw, 9)
+        .on_exit(cleanup)
+        .hooks("steps.x.status == 'Failed'" = alarm);
+}

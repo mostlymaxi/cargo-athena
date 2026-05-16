@@ -8,6 +8,7 @@ use std::process::Command;
 
 const BIN_PIPELINE: &str = env!("CARGO_BIN_EXE_smoke");
 const BIN_RETURNS: &str = env!("CARGO_BIN_EXE_smoke-returns");
+const BIN_HOOKS: &str = env!("CARGO_BIN_EXE_smoke-hooks");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -65,6 +66,13 @@ fn emit_pipeline() {
 #[test]
 fn emit_pipeline_returns() {
     assert_golden("pipeline_returns.yaml", &run_bin(BIN_RETURNS, &[]));
+}
+
+/// Per-task builders: pins `continueOn`, the `exit` hook, and an
+/// expression hook on the emitted DAG tasks (+ hook templates emitted).
+#[test]
+fn emit_pipeline_hooks() {
+    assert_golden("pipeline_hooks.yaml", &run_bin(BIN_HOOKS, &[]));
 }
 
 /// Run mode: a container that returns a value (JSON to stdout).
