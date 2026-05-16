@@ -421,24 +421,8 @@ pub fn container_delivery(
     let artifact = api::Artifact {
         name: "athena-dist".to_string(),
         path: ARTIFACT_PATH.to_string(),
-        s3: Some(api::S3Artifact {
-            endpoint: s3.endpoint.clone(),
-            bucket: s3.bucket.clone(),
-            region: s3.region.clone(),
-            insecure: s3.insecure,
-            key: cfg.artifact.key.clone(),
-            access_key_secret: Some(api::SecretKeySelector {
-                name: s3.access_key_secret.name.clone(),
-                key: s3.access_key_secret.key.clone(),
-            }),
-            secret_key_secret: Some(api::SecretKeySelector {
-                name: s3.secret_key_secret.name.clone(),
-                key: s3.secret_key_secret.key.clone(),
-            }),
-        }),
-        archive: Some(api::ArchiveStrategy {
-            none: Some(api::NoneStrategy {}),
-        }),
+        s3: Some(s3_loc(s3, &cfg.artifact.key)),
+        archive: Some(archive_none()),
         mode: None,
     };
 
@@ -537,27 +521,72 @@ impl BuildCtx {
     }
 }
 
-/// Argo input-artifact ports for the resolved `load_artifact*!` names
-/// (`{name, path}` only — no source; wired externally / by other steps).
-pub fn artifact_inputs(names: &[String]) -> Vec<api::Artifact> {
-    names
-        .iter()
-        .map(|n| api::Artifact {
-            name: n.clone(),
-            path: format!("{}/{n}", rt::IN_DIR),
-            ..Default::default()
+fn archive_none() -> api::ArchiveStrategy {
+    api::ArchiveStrategy {
+        none: Some(api::NoneStrategy {}),
+    }
+}
+
+/// Build an Argo S3 location (artifact-repository creds from `athena.toml`)
+/// for an exact object `key`.
+pub fn s3_loc(s3: &S3Repo, key: &str) -> api::S3Artifact {
+    api::S3Artifact {
+        endpoint: s3.endpoint.clone(),
+        bucket: s3.bucket.clone(),
+        region: s3.region.clone(),
+        insecure: s3.insecure,
+        key: key.to_string(),
+        access_key_secret: Some(api::SecretKeySelector {
+            name: s3.access_key_secret.name.clone(),
+            key: s3.access_key_secret.key.clone(),
+        }),
+        secret_key_secret: Some(api::SecretKeySelector {
+            name: s3.secret_key_secret.name.clone(),
+            key: s3.secret_key_secret.key.clone(),
+        }),
+    }
+}
+
+/// A valid Argo artifact identifier derived from an S3 key (which may
+/// contain `/`, `.`). The key itself is preserved in `s3.key`.
+fn artifact_ident(key: &str) -> String {
+    let mut s: String = key
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    s = s.trim_matches('-').to_ascii_lowercase();
+    if s.is_empty() {
+        s.push('a');
+    }
+    s
+}
+
+/// `load_artifact!("key")` input ports: Argo pulls the exact S3 object
+/// `key` from the configured repo into the pod (raw, `archive: none`).
+pub fn artifact_inputs(ctx: &BuildCtx, keys: &[String]) -> Vec<api::Artifact> {
+    let s3 = &ctx.config().artifact_repository.s3;
+    keys.iter()
+        .map(|k| api::Artifact {
+            name: artifact_ident(k),
+            path: format!("{}/{k}", rt::IN_DIR),
+            s3: Some(s3_loc(s3, k)),
+            archive: Some(archive_none()),
+            mode: None,
         })
         .collect()
 }
 
-/// Argo output-artifact ports for the resolved `save_artifact*!` names.
-pub fn artifact_outputs(names: &[String]) -> Vec<api::Artifact> {
-    names
-        .iter()
-        .map(|n| api::Artifact {
-            name: n.clone(),
-            path: format!("{}/{n}", rt::OUT_DIR),
-            ..Default::default()
+/// `save_artifact!("key")` output ports: Argo pushes the written file to
+/// the exact S3 object `key` in the configured repo (raw, `archive: none`).
+pub fn artifact_outputs(ctx: &BuildCtx, keys: &[String]) -> Vec<api::Artifact> {
+    let s3 = &ctx.config().artifact_repository.s3;
+    keys.iter()
+        .map(|k| api::Artifact {
+            name: artifact_ident(k),
+            path: format!("{}/{k}", rt::OUT_DIR),
+            s3: Some(s3_loc(s3, k)),
+            archive: Some(archive_none()),
+            mode: None,
         })
         .collect()
 }

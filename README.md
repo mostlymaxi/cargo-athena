@@ -44,22 +44,26 @@ read-only rootfs) with no `mktemp`/`/tmp` dependency, and the dir is shared
 with Argo's init/wait containers for artifact load/collect. `host!`
 hostPaths are appended after it.
 
-### Artifact ports (native Argo, no S3)
+### Artifact ports (S3 by key)
 
-Inside `#[container]`/`#[fragment]` bodies:
+Inside `#[container]`/`#[fragment]` bodies — addressed by an **exact S3
+object key** in the `athena.toml` `[artifact_repository]` (same repo as the
+binary). Producer and consumer are fully **decoupled through the bucket**:
+no DAG dependency, no `{{tasks.…}}`, no ordering — just a shared key.
 
-- `load_artifact!("name")` / `load_artifact_str!("name")` — declare an Argo
-  **input** artifact port `{name, /athena/artifacts/in/name}` (no source —
-  wired by you / another step; no S3 from us) and read it at runtime
-  (`Vec<u8>` / `String`).
-- `save_artifact!("name", data)` / `save_artifact_str!("name", data)` —
-  declare an Argo **output** artifact port `{name,
-  /athena/artifacts/out/name}` and write `data` there at runtime.
+- `load_artifact!("key")` / `load_artifact_str!("key")` — Argo pulls the
+  exact object `key` from the repo into the pod before it starts; read at
+  runtime (`Vec<u8>` / `String`). Missing object → Argo errors (honest).
+- `save_artifact!("key", data)` / `save_artifact_str!("key", data)` —
+  write `data` at runtime; Argo pushes it to the repo at exactly `key`.
 
-Same model as `host!`: literal-key only, collected by static AST union
-across all branches, gated (public form is a `compile_error!` outside
+Both emit an Argo artifact with the `s3{}` block (creds from
+`athena.toml`) + `archive: none` (raw blob round-trips at `key`). Same
+machinery as `host!`: literal-key only, collected by static AST union over
+all branches, gated (public form is a `compile_error!` outside
 `#[container]`/`#[fragment]`; a `#[workflow]` using one is a hard error),
-and propagated through the `#[fragment]` closure.
+and propagated through the `#[fragment]` closure. Validated green against
+real Argo + MinIO (`scripts/e2e-test.sh`).
 
 ```rust
 use cargo_athena::{workflow, container, fragment};   // `host!` used path-qualified

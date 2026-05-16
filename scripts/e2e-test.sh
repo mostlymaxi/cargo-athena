@@ -81,11 +81,13 @@ else
     echo "FAIL: no workflow pod ran on a worker"; exit 1; }
 fi
 
-if mc ls --recursive athena-e2e/athena-artifacts/outputs/ 2>/dev/null \
-   | grep -q 'result-note'; then
-  echo "save_artifact! object found in MinIO"
+# save_artifact!("result-note", …) pushes to the exact S3 key from the
+# port's s3{} block (athena.toml repo), i.e. bucket root key "result-note".
+if mc stat athena-e2e/athena-artifacts/result-note >/dev/null 2>&1; then
+  echo "save_artifact! object found in MinIO (key: result-note)"
 else
-  echo "FAIL: save_artifact! object not found in MinIO"; exit 1
+  echo "FAIL: save_artifact! object not found at athena-artifacts/result-note"
+  exit 1
 fi
 
 say "PASS — full e2e green"

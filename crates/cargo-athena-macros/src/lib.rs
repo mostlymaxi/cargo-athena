@@ -364,7 +364,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                     #out_art_slice, #callee_slice);
                 let mut __in_artifacts = ::std::vec![ __d.artifact ];
                 __in_artifacts.extend(
-                    ::cargo_athena::artifact_inputs(&__in_names));
+                    ::cargo_athena::artifact_inputs(__ctx, &__in_names));
                 ::cargo_athena::api::Template {
                     name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
                     inputs: ::core::option::Option::Some(::cargo_athena::api::Inputs {
@@ -387,7 +387,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                             ),
                             ..::core::default::Default::default()
                         } ],
-                        artifacts: ::cargo_athena::artifact_outputs(&__out_names),
+                        artifacts: ::cargo_athena::artifact_outputs(__ctx, &__out_names),
                     }),
                     container: ::core::option::Option::Some(::cargo_athena::api::Container {
                         image: __d.image,

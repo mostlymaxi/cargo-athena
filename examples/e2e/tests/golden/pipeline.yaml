@@ -342,6 +342,19 @@ spec:
           none: {}
       - name: notes
         path: /athena/artifacts/in/notes
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: notes
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+        archive:
+          none: {}
     outputs:
       parameters:
       - name: result
@@ -350,6 +363,19 @@ spec:
       artifacts:
       - name: receipt
         path: /athena/artifacts/out/receipt
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: receipt
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+        archive:
+          none: {}
     container:
       image: busybox:1.36-musl
       command:
