@@ -1,0 +1,91 @@
+name: e2e
+
+# Only on main (resource-heavy: real kind clusters per Argo version).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Cross-compile + package the athena binary tarball ONCE; the Argo
+  # matrix below reuses it (no per-version rebuild).
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - name: cargo athena build (static-musl, all targets)
+        env:
+          ATHENA_CONFIG: scripts/athena.toml
+        run: |
+          nix develop -c cargo run -q -p cargo-athena-cli -- athena build \
+            --package cargo-athena-example-integration --bin integration
+      - uses: actions/upload-artifact@v4
+        with:
+          name: athena-integration-tarball
+          path: target/athena/integration.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
+  # One real kind cluster + Argo + MinIO per version, in parallel.
+  e2e:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        # Argo maintains only the 2 most recent minors (release policy:
+        # docs/releases.md). v4.0 + v3.7 are the support target; the older
+        # minors are EOL, smoke-tested best-effort. All = latest patch.
+        argo:
+          - v4.0.5    # maintained (latest minor)
+          - v3.7.14   # maintained (n-1 minor)
+          - v3.6.19   # EOL — best-effort
+          - v3.5.15   # EOL — best-effort
+          - v3.4.18   # EOL — best-effort
+    runs-on: ubuntu-latest
+    name: e2e (argo ${{ matrix.argo }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: actions/download-artifact@v4
+        with:
+          name: athena-integration-tarball
+          path: dist
+      - name: deploy + e2e against Argo ${{ matrix.argo }}
+        env:
+          ARGO_VERSION: ${{ matrix.argo }}
+          ATHENA_SKIP_BUILD: "1"
+          ATHENA_TARBALL: ${{ github.workspace }}/dist/integration.tar.gz
+        run: |
+          nix develop -c bash -c 'scripts/deploy.sh && scripts/e2e-test.sh'
+      - name: teardown
+        if: always()
+        run: nix develop -c scripts/teardown.sh || true
+
+      # Per-version live status for the README table. GitHub has no
+      # per-matrix-job badge, so each job publishes pass/fail to a gist
+      # that shields.io endpoint badges read. No-op (and never fails the
+      # run) until BADGE_GIST_ID + GIST_TOKEN secrets exist.
+      - name: publish status badge
+        if: ${{ always() && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_TOKEN }}
+          gistID: ${{ secrets.BADGE_GIST_ID }}
+          filename: athena-argo-${{ matrix.argo }}.json
+          label: argo ${{ matrix.argo }}
+          message: ${{ job.status == 'success' && 'passing' || 'failing' }}
+          color: ${{ job.status == 'success' && 'brightgreen' || 'red' }}

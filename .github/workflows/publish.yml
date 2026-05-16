@@ -1,0 +1,37 @@
+name: publish (stub)
+
+# STUB — not wired up yet. Manual-only.
+#
+# Intent: publish the library (`cargo-athena`) + the `cargo-athena` bin to
+# crates.io on tagged releases. Not active because:
+#   * crates.io is public-only — a private repo can't publish there; we'd
+#     need a public mirror or a private registry first;
+#   * workspace path-deps (core/macros/api) need real semver versions and
+#     a publish order before `cargo publish` works.
+# Kept so the release pipeline has a home once those are sorted.
+
+on:
+  workflow_dispatch:
+    inputs:
+      really:
+        description: "Type 'yes' to actually attempt (still a no-op stub)"
+        required: false
+        default: "no"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: stub
+        run: |
+          echo "::notice::cargo-athena publish is a stub — nothing published."
+          echo "Future steps (in dependency order):"
+          echo "  cargo publish -p cargo-athena-api"
+          echo "  cargo publish -p cargo-athena-macros"
+          echo "  cargo publish -p cargo-athena-core"
+          echo "  cargo publish -p cargo-athena       # facade lib"
+          echo "  cargo publish -p cargo-athena-cli   # the \`cargo athena\` bin"
+          echo "Blocked on: public registry availability + versioned"
+          echo "workspace deps + release tagging. input.really='${{ inputs.really }}'"
+          exit 0

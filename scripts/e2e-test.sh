@@ -24,10 +24,16 @@ PF=""
 cleanup() { [ -n "$PF" ] && kill "$PF" 2>/dev/null || true; }
 trap cleanup EXIT
 
-say "cross-compile + package (cargo athena build)"
-( cd "$ROOT" && cargo run -q -p cargo-athena-cli -- athena build \
-    --package "$PKG" --bin "$BIN" )
-TARBALL="$ROOT/target/athena/${BIN}.tar.gz"
+# CI builds the tarball once (build job) and reuses it across the Argo
+# matrix: set ATHENA_SKIP_BUILD=1 + ATHENA_TARBALL=<path>.
+TARBALL="${ATHENA_TARBALL:-$ROOT/target/athena/${BIN}.tar.gz}"
+if [ "${ATHENA_SKIP_BUILD:-0}" = "1" ]; then
+  say "using prebuilt tarball: $TARBALL"
+else
+  say "cross-compile + package (cargo athena build)"
+  ( cd "$ROOT" && cargo run -q -p cargo-athena-cli -- athena build \
+      --package "$PKG" --bin "$BIN" )
+fi
 test -f "$TARBALL" || { echo "missing $TARBALL"; exit 1; }
 
 say "upload binary tarball to MinIO"
