@@ -17,9 +17,10 @@ fn run_foo() {
 }
 
 #[workflow]
-fn some_other_workflow(b: String) {
+fn some_other_workflow(b: String) -> String {
     let p = prepare(b);
-    finalize(p);
+    finalize(p.clone()); // `p` fans out (finalize + the return) -> explicit
+    p // `.clone()` mirrors Argo copying the param to each consumer
 }
 
 // Opt into Argo `steps:` — each statement is a sequential step group.

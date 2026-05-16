@@ -233,6 +233,11 @@ spec:
     inputs:
       parameters:
       - name: source
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          parameter: '{{tasks.clean.outputs.parameters.return}}'
     dag:
       tasks:
       - name: raw

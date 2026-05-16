@@ -32,10 +32,11 @@ pub fn pipeline() {
 // --- nested workflow -------------------------------------------------------
 
 #[workflow]
-pub fn ingest(source: String) {
+pub fn ingest(source: String) -> String {
     let raw = fetch(source); // `source` -> {{inputs.parameters.source}}
     let clean = transform(raw, 2); // raw -> task ref; 2 -> literal
-    publish(clean); // clean -> task ref
+    publish(clean.clone()); // `clean` fans out (publish + the return);
+    clean // explicit `.clone()` == Argo copying the param to each consumer
 }
 
 // --- containers ------------------------------------------------------------
