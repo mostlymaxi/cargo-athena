@@ -1,8 +1,7 @@
-name: ci
+name: test
 
-# Fast gate (strict clippy + workspace tests) on every PR to main and on
-# main itself. The heavy real-Argo matrix lives in e2e.yml (also gated on
-# PRs to main). main will be branch-protected on these checks.
+# Workspace tests on every PR to main and on main. Separate workflow
+# (not a job in a combined `ci`) so it has its own status badge.
 on:
   pull_request:
     branches: [main]
@@ -11,14 +10,14 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: test-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  check:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,8 +30,4 @@ jobs:
             target
           key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
-      # `-D warnings`: any clippy lint fails the build (strict).
-      - name: clippy (strict)
-        run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
-      - name: test
-        run: nix develop -c cargo test --workspace
+      - run: nix develop -c cargo test --workspace

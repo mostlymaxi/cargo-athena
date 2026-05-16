@@ -1,8 +1,10 @@
 # cargo-athena
 
-Compile regular Rust into [Argo Workflow](https://argoproj.github.io/workflows/) YAML.
-
+[![clippy](https://github.com/mostlymaxi/cargo-athena/actions/workflows/clippy.yml/badge.svg?branch=main)](https://github.com/mostlymaxi/cargo-athena/actions/workflows/clippy.yml)
+[![test](https://github.com/mostlymaxi/cargo-athena/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/mostlymaxi/cargo-athena/actions/workflows/test.yml)
 [![e2e](https://github.com/mostlymaxi/cargo-athena/actions/workflows/e2e.yml/badge.svg?branch=main)](https://github.com/mostlymaxi/cargo-athena/actions/workflows/e2e.yml)
+
+Compile regular Rust into [Argo Workflow](https://argoproj.github.io/workflows/) YAML.
 
 **Supported Argo Workflows** — every push to `main` submits the
 `examples/e2e` workflow to a real Argo + MinIO per version and
