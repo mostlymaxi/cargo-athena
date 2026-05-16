@@ -11,6 +11,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLUSTER=athena-e2e
 ARGO_VERSION=v3.6.10
+# ATHENA_E2E_SINGLE=1 → 1-node cluster (hosts without kind cross-node
+# networking, e.g. NixOS default-drop FORWARD). Default is the 3-node split.
+KIND_CFG="$SCRIPT_DIR/kind-cluster.yaml"
+if [ "${ATHENA_E2E_SINGLE:-0}" = "1" ]; then
+  KIND_CFG="$SCRIPT_DIR/kind-cluster-single.yaml"
+fi
 say() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 
 for t in kind kubectl; do
@@ -31,7 +37,8 @@ say "kind cluster"
 if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
   echo "cluster '$CLUSTER' already exists"
 else
-  kind create cluster --config "$SCRIPT_DIR/kind-cluster.yaml"
+  echo "config: $KIND_CFG"
+  kind create cluster --config "$KIND_CFG"
 fi
 kubectl config use-context "kind-$CLUSTER"
 kubectl wait --for=condition=Ready nodes --all --timeout=120s
@@ -54,6 +61,17 @@ say "athena-s3 secret"
 kubectl -n argo create secret generic athena-s3 \
   --from-literal=accessKey=athena \
   --from-literal=secretKey=athena12345 \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+say "workflow executor RBAC (default SA)"
+# Argo's emissary reports step outputs via workflowtaskresults; the
+# workflow pods run as the namespace 'default' SA, which namespace-install
+# does not grant. Without this every step Errors with a 403.
+kubectl -n argo create role athena-executor \
+  --verb=create,patch --resource=workflowtaskresults.argoproj.io \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n argo create rolebinding athena-executor-default \
+  --role=athena-executor --serviceaccount=argo:default \
   --dry-run=client -o yaml | kubectl apply -f -
 
 say "point Argo at MinIO"

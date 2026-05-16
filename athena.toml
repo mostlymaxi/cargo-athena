@@ -23,3 +23,8 @@ key = "athena/bin/example/0.1.0/app.tar.gz"
 # `default_image` omitted -> busybox:1.36-musl (multi-arch, has sh/tar/uname).
 # Per-#[container(image = "...")] always overrides this.
 targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]
+
+[defaults]
+# ServiceAccount the workflow pods run as. Per-#[container(
+# service_account = "...")] overrides. Bind your RBAC to this SA.
+service_account = "default"

@@ -87,6 +87,7 @@ spec:
     - name: host-var-lib-b
       hostPath:
         path: /var/lib/b
+    serviceAccountName: default
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -150,6 +151,7 @@ spec:
     volumes:
     - name: athena-work
       emptyDir: {}
+    serviceAccountName: athena-runner
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -215,6 +217,7 @@ spec:
     - name: host-secrets-token
       hostPath:
         path: /secrets/token
+    serviceAccountName: default
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -374,6 +377,7 @@ spec:
     volumes:
     - name: athena-work
       emptyDir: {}
+    serviceAccountName: default
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -437,6 +441,7 @@ spec:
     volumes:
     - name: athena-work
       emptyDir: {}
+    serviceAccountName: default
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
@@ -445,3 +450,4 @@ metadata:
 spec:
   workflowTemplateRef:
     name: cargo-athena-example-e2e-pipeline
+  serviceAccountName: default

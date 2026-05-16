@@ -177,6 +177,22 @@ Podman daemon. Covers: param data-deps, run-mode (de)serialize, the
 `uname` bootstrap + binary-artifact delivery, `host!`/`#[fragment]`
 mounts, nested-workflow `templateRef`, and output artifacts.
 
+`deploy.sh` also binds the Argo executor RBAC (`workflowtaskresults`
+create/patch) to the workflow ServiceAccount — `namespace-install.yaml`
+omits it for the `default` SA, so every step would otherwise 403.
+
+> **Host note:** the 3-node split needs working kind cross-node pod
+> networking. On hosts that block it (e.g. NixOS default-drop `FORWARD`),
+> set `ATHENA_E2E_SINGLE=1` for `deploy.sh`/`e2e-test.sh` — a 1-node
+> cluster that still fully exercises cargo-athena (validated green here).
+
+### ServiceAccount
+
+Workflow pods run as `[defaults].service_account` from `athena.toml`
+(default `default`), overridable per template with
+`#[container(service_account = "...")]`. Set on every container template
+and the runnable `Workflow` so you can bind your own RBAC to it.
+
 ## E2E tests (golden, in-process)
 
 `examples/e2e` is a stable, broad-coverage fixture (workflows, nested

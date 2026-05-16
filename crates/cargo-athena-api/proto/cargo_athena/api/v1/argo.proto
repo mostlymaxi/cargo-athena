@@ -40,6 +40,7 @@ message WorkflowSpec {
   Arguments arguments = 3;
   // Set on a runnable Workflow that just invokes a WorkflowTemplate.
   WorkflowTemplateRef workflow_template_ref = 4;
+  string service_account_name = 5;
 }
 
 // Points a runnable Workflow at a WorkflowTemplate resource.
@@ -65,6 +66,8 @@ message Template {
   DagTemplate dag = 5;
   ScriptTemplate script = 6;
   repeated Volume volumes = 7;
+  // Per-template SA override (Argo runs the pod as this).
+  string service_account_name = 8;
 }
 
 message Inputs {

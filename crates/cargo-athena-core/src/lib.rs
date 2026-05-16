@@ -231,6 +231,35 @@ pub struct AthenaConfig {
     pub artifact: ArtifactSpec,
     #[serde(default)]
     pub bootstrap: Bootstrap,
+    #[serde(default)]
+    pub defaults: Defaults,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct Defaults {
+    /// Kubernetes ServiceAccount the workflow pods run as (so users bind
+    /// their own RBAC). Per-`#[container(service_account=...)]` overrides.
+    #[serde(default = "default_service_account")]
+    pub service_account: String,
+}
+
+impl Default for Defaults {
+    fn default() -> Self {
+        Self {
+            service_account: default_service_account(),
+        }
+    }
+}
+
+fn default_service_account() -> String {
+    "default".to_string()
+}
+
+/// Resolve a container template's ServiceAccount: the
+/// `#[container(service_account=...)]` override, else `[defaults]`.
+pub fn service_account(ctx: &BuildCtx, over: Option<&str>) -> String {
+    over.map(str::to_string)
+        .unwrap_or_else(|| ctx.config().defaults.service_account.clone())
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -608,6 +637,7 @@ impl Collector {
                     name: E::ARGO_NAME.to_string(),
                     cluster_scope: false,
                 }),
+                service_account_name: ctx.config().defaults.service_account.clone(),
                 ..Default::default()
             }),
         };
@@ -635,6 +665,7 @@ pub fn wrap_workflow_template(name: String, inner: api::Template) -> api::Workfl
             templates: vec![inner],
             arguments: None,
             workflow_template_ref: None,
+            ..Default::default()
         }),
     }
 }

@@ -228,12 +228,15 @@ struct ContainerArgs {
     /// `None` => fall back to `[bootstrap].default_image` from athena.toml.
     image: Option<String>,
     name: Option<String>,
+    /// `None` => fall back to `[defaults].service_account`.
+    service_account: Option<String>,
 }
 
 fn parse_container_args(attr: TokenStream) -> ContainerArgs {
     let mut args = ContainerArgs {
         image: None,
         name: None,
+        service_account: None,
     };
     if attr.is_empty() {
         return args;
@@ -251,6 +254,7 @@ fn parse_container_args(attr: TokenStream) -> ContainerArgs {
             match key.as_str() {
                 "image" => args.image = Some(s.value()),
                 "name" => args.name = Some(s.value()),
+                "service_account" => args.service_account = Some(s.value()),
                 "bin" => panic!(
                     "#[container] no longer takes `bin`: the athena binary is \
                      delivered as an Argo artifact and exec'd by the bootstrap"
@@ -297,6 +301,10 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let callee_slice = str_slice(&scan.callees);
     let image_opt = match &cfg.image {
         Some(img) => quote! { ::core::option::Option::Some(#img) },
+        None => quote! { ::core::option::Option::None },
+    };
+    let sa_opt = match &cfg.service_account {
+        Some(sa) => quote! { ::core::option::Option::Some(#sa) },
         None => quote! { ::core::option::Option::None },
     };
     let vis = &func.vis;
@@ -395,6 +403,8 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                         ..::core::default::Default::default()
                     }),
                     volumes: __vols,
+                    service_account_name:
+                        ::cargo_athena::service_account(__ctx, #sa_opt),
                     ..::core::default::Default::default()
                 }
             }

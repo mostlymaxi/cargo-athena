@@ -1,0 +1,15 @@
+# Single-node fallback (ATHENA_E2E_SINGLE=1). Use when the host can't do
+# kind cross-node pod networking (e.g. NixOS default-drop FORWARD policy on
+# the docker bridge) — everything runs on one untainted node so there is no
+# worker<->control traffic. Still fully exercises cargo-athena; it just
+# doesn't prove the worker/control split. The 3-node config remains the
+# default for hosts with working cross-node routing.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: athena-e2e
+nodes:
+  # kind auto-removes the control-plane taint for a single control-plane
+  # node, so workflow pods schedule here alongside Argo + MinIO.
+  - role: control-plane
+    labels:
+      athena.dev/role: control

@@ -71,11 +71,15 @@ echo "phase: $PHASE"
 NODES=$(kubectl -n "$NS" get pods -l workflows.argoproj.io/workflow \
   --no-headers -o custom-columns=N:.spec.nodeName | sort -u)
 echo "pod nodes:"; echo "$NODES" | sed 's/^/  /'
-if echo "$NODES" | grep -qx "${CLUSTER}-control-plane"; then
-  echo "FAIL: a workflow pod ran on the control node"; exit 1
+if [ "${ATHENA_E2E_SINGLE:-0}" = "1" ]; then
+  echo "single-node mode: skipping worker/control placement assertion"
+else
+  if echo "$NODES" | grep -qx "${CLUSTER}-control-plane"; then
+    echo "FAIL: a workflow pod ran on the control node"; exit 1
+  fi
+  echo "$NODES" | grep -q "${CLUSTER}-worker" || {
+    echo "FAIL: no workflow pod ran on a worker"; exit 1; }
 fi
-echo "$NODES" | grep -q "${CLUSTER}-worker" || {
-  echo "FAIL: no workflow pod ran on a worker"; exit 1; }
 
 if mc ls --recursive athena-e2e/athena-artifacts/outputs/ 2>/dev/null \
    | grep -q 'result-note'; then
