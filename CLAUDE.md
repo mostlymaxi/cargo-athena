@@ -29,17 +29,29 @@ README is intentionally lean (user-facing); the *why* lives here.
   one from a `#[workflow]` fails via the type system (`<x as Template>`
   → "expected type, found function"). Loops/branches will be lowered
   differently later — until then they must error, not mislower.
-- **`#[workflow]` return values.** A workflow with a return type bubbles
-  its **terminal** task's `result` up as the template's own
-  `outputs.parameters.result` via `valueFrom.parameter:
-  "{{tasks|steps.<task>.outputs.result}}"` (terminal = tail template
-  call, or a `return`/tail binding ident → its producing task).
-  Return-type-but-unresolvable is a `compile_error!`. This makes a
-  sub-workflow's result resolvable exactly like a container's, so
-  workflow→X data-deps now work on **all** Argo versions (the producing
-  WT genuinely declares the output). Containers still use
-  `valueFrom.path: /athena/result`; only DAG/steps templates use
-  `valueFrom.parameter`.
+- **`#[workflow]` return values (WORK e2e — proven on real Argo).** Every
+  template's serialized fn return value is captured as an output
+  **parameter named `return`** (`outputs.parameters.return`): container =
+  `valueFrom.path: /athena/result` (the file the bin writes); workflow
+  with a return type bubbles its **terminal** task's `return` up via
+  `valueFrom.parameter: "{{tasks|steps.<task>.outputs.parameters.return}}"`
+  (terminal = tail template call, or a `return`/tail binding ident → its
+  producing task). Return-type-but-unresolvable is a `compile_error!`.
+  Sibling refs are `{{tasks|steps.<dep>.outputs.parameters.return}}`.
+  **CRITICAL — the `return` name + `.parameters.` path are load-bearing:**
+  Argo's bare `{{….outputs.result}}` is the *script-stdout alias*, only
+  defined for container/script templates, NEVER for dag/steps. We declare
+  an explicit param, so the only correct ref is
+  `outputs.parameters.<name>`. Using bare `outputs.result` (the old bug)
+  *coincidentally* resolved for containers but **failed `failed to
+  resolve` for any DAG/steps output across templateRef** — which made
+  workflow→X data-deps look impossible. Proven by a 4-way kind isolation
+  (real Argo v4.0.5, 2026-05-16): container/DAG × `outputs.result`/
+  `outputs.parameters.ret` — only DAG+`outputs.result` fails; the
+  `parameters` path resolves for BOTH. Named `return` (not `result`) so
+  it can never be confused with the stdout alias again. `examples/e2e`
+  exercises a sub-`#[workflow]` return consumed downstream; both it and
+  smoke `pipeline_returns` SUBMIT-OK on the live cluster.
 - **Resource collection = static AST union, not a trace.** The attribute
   macro sees every branch's tokens, so `host!`/artifact-key decls are
   collected across all `if`/`match`/loop arms. This is *correct* (Argo's

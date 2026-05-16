@@ -7,10 +7,11 @@ publish = false
 
 # The ONLY crate the kind e2e (GitHub Actions) builds + submits to a real
 # Argo + MinIO (scripts/e2e-test.sh, .github/workflows/e2e.yml). Scoped to
-# features wired end-to-end: workflow / nested-workflow (sequencing AND a
-# returned value consumed downstream) / container / fragment / host! /
-# save_artifact! / container->container + workflow->container param
-# data-deps / default+override image / multi-arch bootstrap.
+# features PROVEN end-to-end on real Argo: workflow / nested-workflow /
+# container / fragment / host! / save_artifact! / container->container AND
+# workflow->container param data-deps (outputs.parameters.return resolved
+# across the templateRef wormhole) / default+override image / multi-arch
+# bootstrap.
 [lib]
 name = "cargo_athena_example_e2e"
 path = "src/lib.rs"

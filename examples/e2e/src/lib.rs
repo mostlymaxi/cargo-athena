@@ -1,16 +1,17 @@
 //! Integration fixture exercised by the kind e2e (`scripts/e2e-test.sh`).
 //!
 //! Covered end-to-end against a real Argo + MinIO:
-//! * `#[workflow]` DAG + a nested `#[workflow]` (templateRef, sequencing),
-//! * container -> container **param data-deps** (`{{tasks.x.outputs
-//!   .result}}`) — proves run-mode (de)serialize, `ATHENA_PARAM_*` env in,
-//!   `/athena/result` out,
+//! * `#[workflow]` DAG + a nested `#[workflow]` (templateRef),
+//! * container -> container **param data-deps**
+//!   (`{{tasks.x.outputs.parameters.return}}`) — proves run-mode
+//!   (de)serialize, `ATHENA_PARAM_*` env in, `/athena/result` file out,
+//! * a nested `#[workflow]` that **returns a value** consumed by a
+//!   downstream container — proves workflow->X data-deps resolve across
+//!   the templateRef wormhole (the sub-workflow declares
+//!   `outputs.parameters.return`),
 //! * default image (busybox) + explicit per-`#[container(image=...)]`,
 //! * `host!` hostPath mount + a `#[fragment]` carrying its own `host!`
 //!   (cross-item closure lands on the container),
-//! * a nested `#[workflow]` that **returns a value** consumed by a
-//!   downstream container (`{{tasks.s.outputs.result}}` resolves because
-//!   the sub-workflow declares `outputs.result`),
 //! * `save_artifact_str!` -> output artifact persisted to MinIO,
 //! * binary delivery: cross-compiled musl tarball in MinIO, the
 //!   `uname`-resolving bootstrap, scheduled on the worker nodes.
@@ -50,22 +51,23 @@ pub fn stamp() -> String {
 
 #[container]
 pub fn audit(note: String) {
-    // consumes a *workflow's* returned value: workflow -> container dep.
+    // consumes a *workflow's* returned value: workflow -> container dep,
+    // i.e. {{tasks.s.outputs.parameters.return}} resolved across templateRef.
     println!("audit:{note}");
 }
 
 #[workflow]
 pub fn finalize_wf() -> String {
-    // Nested workflow that RETURNS a value: its tail call's result becomes
-    // this workflow-template's own outputs.result.
+    // Nested workflow that RETURNS a value: its tail call's `return`
+    // becomes this workflow-template's own outputs.parameters.return.
     stamp()
 }
 
 #[workflow]
 pub fn pipeline() {
     let a = produce();
-    let b = transform(a); // depends on `a`: {{tasks.a.outputs.result}}
+    let b = transform(a); // {{tasks.a.outputs.parameters.return}}
     consume(b); // depends on `b`
     let s = finalize_wf(); // nested workflow via templateRef, returns a value
-    audit(s); // workflow -> container: {{tasks.s.outputs.result}}
+    audit(s); // workflow -> container: {{tasks.s.outputs.parameters.return}}
 }
