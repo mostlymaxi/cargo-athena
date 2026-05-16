@@ -34,6 +34,10 @@ path = "src/bin/onexit_main.rs"
 name = "smoke-fields"
 path = "src/bin/fields_main.rs"
 
+[[bin]]
+name = "smoke-fanout"
+path = "src/bin/fanout_main.rs"
+
 [dependencies]
 cargo-athena = { workspace = true }
 serde = { version = "1", features = ["derive"] }

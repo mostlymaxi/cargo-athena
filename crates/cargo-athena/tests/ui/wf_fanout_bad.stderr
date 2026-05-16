@@ -1,0 +1,5 @@
+error: expected a template call `name(args)` — a #[container] or #[workflow]. #[fragment]s and regular functions are not templates and can't be called from a #[workflow].
+  --> tests/ui/wf_fanout_bad.rs:11:14
+   |
+11 |     let _b = a.fan_out(|x| x);
+   |              ^^^^^^^^^^^^^^^^

@@ -11,6 +11,7 @@ const BIN_RETURNS: &str = env!("CARGO_BIN_EXE_smoke-returns");
 const BIN_HOOKS: &str = env!("CARGO_BIN_EXE_smoke-hooks");
 const BIN_ONEXIT: &str = env!("CARGO_BIN_EXE_smoke-onexit");
 const BIN_FIELDS: &str = env!("CARGO_BIN_EXE_smoke-fields");
+const BIN_FANOUT: &str = env!("CARGO_BIN_EXE_smoke-fanout");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -89,6 +90,13 @@ fn emit_pipeline_onexit() {
 #[test]
 fn emit_pipeline_fields() {
     assert_golden("pipeline_fields.yaml", &run_bin(BIN_FIELDS, &[]));
+}
+
+/// `.fan_out`: pins the `withParam` over the list + `{{item}}` arg +
+/// the DAG dep on the producer + the aggregated `Vec` consumed after.
+#[test]
+fn emit_pipeline_fanout() {
+    assert_golden("pipeline_fanout.yaml", &run_bin(BIN_FANOUT, &[]));
 }
 
 /// Run mode: a container that returns a value (JSON to stdout).

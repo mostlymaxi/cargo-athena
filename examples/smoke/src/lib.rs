@@ -195,3 +195,31 @@ pub fn pipeline_fields() {
     let m = make_meta();
     use_id(m.id);
 }
+
+// --- fan-out (`.fan_out` -> Argo `withParam`) -------------------------------
+
+#[container]
+pub fn make_list() -> Vec<String> {
+    vec!["a".to_string(), "b".to_string(), "c".to_string()]
+}
+
+#[container]
+pub fn caps(s: String, suffix: String) -> String {
+    format!("{}{suffix}", s.to_uppercase())
+}
+
+#[container]
+pub fn summarize(items: Vec<String>) {
+    println!("got {} items", items.len());
+}
+
+/// `a.fan_out(|x| caps(x, "!"))` → Argo `withParam` over `a`; `caps`
+/// runs once per element (`{{item}}`), and `b` is the aggregated
+/// `Vec<String>` consumed by `summarize`. The ghost type-checks the
+/// element type, the closure, and that `b: Vec<String>`.
+#[workflow]
+pub fn pipeline_fanout() {
+    let a = make_list();
+    let b = a.fan_out(|x| caps(x, "!".to_string()));
+    summarize(b);
+}
