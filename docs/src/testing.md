@@ -4,16 +4,20 @@ Three levels, from fastest to most thorough.
 
 ## 1. A single step's real logic
 
-A `#[container]` body is ordinary Rust — `cargo athena run` executes it
-in-process with JSON input, exactly as it would in-pod, no cluster:
+A `#[container]` body is ordinary Rust, so the fastest test is just a
+plain `#[test]` calling the function directly — no harness, no infra.
+
+For the *step as it actually runs in-pod* (its image, the injected
+bootstrap, `ATHENA_PARAM_*` env, `host!`/artifact ports), use
+`cargo athena container emulate` — docker/podman locally, exactly as
+Argo would, with the deployed binary pulled from S3:
 
 ```sh
-cargo athena run --template my-crate-transform \
-  --input '{"data":"hi","factor":2}'
+cargo athena container emulate my-crate-transform -p data=hi -p factor=2
 ```
 
-This is the fast unit test for the *code* inside a step. (You can also
-just `#[test]` the plain function directly — it's normal Rust.)
+See [the CLI page](cli.md#container-emulate) for `--build` (local
+binary) and the Kubernetes-context limitations.
 
 ## 2. Guard the generated workflow
 

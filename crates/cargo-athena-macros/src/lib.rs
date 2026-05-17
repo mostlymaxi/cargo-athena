@@ -528,6 +528,11 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|n| format!("{{{{inputs.parameters.{n}}}}}"))
         .collect();
     let inputs_slice = str_slice(&arg_names);
+    // Stringified arg types, parallel to INPUTS — `container emulate`
+    // type-checks supplied params against these before launching.
+    let arg_type_strs: Vec<String> =
+        arg_types.iter().map(|t| quote!(#t).to_string()).collect();
+    let input_types_slice = str_slice(&arg_type_strs);
     let host_slice = str_slice(&scan.host_paths);
     let in_art_slice = str_slice(&scan.in_artifacts);
     let out_art_slice = str_slice(&scan.out_artifacts);
@@ -634,6 +639,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
         impl ::cargo_athena::Template for #ident {
             const ARGO_NAME: &'static str = #argo_name;
             const INPUTS: &'static [&'static str] = #inputs_slice;
+            const INPUT_TYPES: &'static [&'static str] = #input_types_slice;
             const KIND: ::cargo_athena::TemplateKind =
                 ::cargo_athena::TemplateKind::Container;
             #on_exit_const

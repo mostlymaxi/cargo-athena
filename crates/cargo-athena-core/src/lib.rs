@@ -241,6 +241,11 @@ pub trait Template {
     const ARGO_NAME: &'static str;
     /// Declared input parameter names, in order.
     const INPUTS: &'static [&'static str];
+    /// Stringified Rust types of [`Self::INPUTS`], same order (for
+    /// `cargo athena container emulate`'s pre-launch arg checking).
+    /// Defaulted empty: synthetic/hand impls and `#[workflow]`s don't
+    /// emit it — only `#[container]` does (it's what gets emulated).
+    const INPUT_TYPES: &'static [&'static str] = &[];
     const KIND: TemplateKind;
     /// Whole-workflow exit-handler template name, from
     /// `#[workflow(on_exit_if_root=…)]` / `#[container(on_exit_if_root=…)]`.
@@ -410,6 +415,167 @@ pub const ATHENA_BIN_DIR: &str = "/athena/bin";
 pub const ARTIFACT_PATH: &str = "/athena/dist.tar.gz";
 /// Name of the scratch `emptyDir` volume.
 pub const SCRATCH_VOLUME: &str = "athena-work";
+/// Argo input-artifact name of the binary tarball `emit` injects.
+pub const ATHENA_DIST_ARTIFACT: &str = "athena-dist";
+/// Env-var prefix the in-pod bootstrap reads each input parameter from.
+pub const ATHENA_PARAM_PREFIX: &str = "ATHENA_PARAM_";
+
+/// Resolved S3 coordinates for one artifact (creds are supplied
+/// locally, e.g. via AWS env vars — `cargo athena container run` uses
+/// `object_store`; the in-cluster path uses the k8s Secret refs).
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct S3Ref {
+    pub endpoint: String,
+    pub bucket: String,
+    pub region: String,
+    pub insecure: bool,
+    pub key: String,
+}
+
+/// One artifact bound into the container at `path`, backed by S3.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct ArtifactRef {
+    pub s3: S3Ref,
+    pub path: String,
+}
+
+/// An input parameter, the env var the bootstrap reads it from, and its
+/// stringified Rust type (`""` if unknown — synthetic templates).
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct ParamRef {
+    pub name: String,
+    pub env: String,
+    pub ty: String,
+}
+
+/// Purpose-built introspection of one `#[container]`, derived from the
+/// *same* `Template::build()` `emit` uses (so it never drifts), but
+/// expressed in the runner's vocabulary instead of Argo's. Emitted as
+/// JSON by the binary when `CARGO_ATHENA_DESCRIBE=<name>` is set;
+/// consumed by `cargo athena container run` to realize the spec under
+/// docker/podman locally. Also the basis for a future
+/// `cargo athena container describe`.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct ContainerRunMeta {
+    /// Argo template name (`<crate>-<fn>`).
+    pub name: String,
+    /// `"container"`, `"workflow"`, or `"other"` (synthetic).
+    pub kind: String,
+    /// Resolved container image.
+    pub image: String,
+    /// The injected bootstrap command + args, verbatim — run as-is so
+    /// the local execution path is byte-identical to the pod's.
+    pub command: Vec<String>,
+    pub args: Vec<String>,
+    /// Mount path of the pod-scoped scratch dir (the `emptyDir`, e.g.
+    /// `/athena`); bind a host temp dir here to read `result_path` back.
+    pub work_dir: String,
+    /// Input parameters and the env var each is delivered through.
+    pub params: Vec<ParamRef>,
+    /// The binary tarball artifact (always present for a container).
+    pub binary_artifact: Option<ArtifactRef>,
+    /// `load_artifact!` input ports (excludes the binary tarball).
+    pub input_artifacts: Vec<ArtifactRef>,
+    /// `save_artifact!` output ports.
+    pub output_artifacts: Vec<ArtifactRef>,
+    /// `host!` paths (mounted at the same path in-pod; bind 1:1 locally).
+    pub host_paths: Vec<String>,
+    /// File the body writes its serialized return to
+    /// (`outputs.parameters.return`); read it back from the bind mount.
+    pub result_path: Option<String>,
+}
+
+impl ContainerRunMeta {
+    /// Derive the runner metadata from one built Argo template.
+    /// `input_types` is parallel to the template's input parameters
+    /// (same order); empty when unknown.
+    fn from_template(t: &api::Template, input_types: &[&str]) -> Self {
+        let kind = if t.container.is_some() {
+            "container"
+        } else if t.dag.is_some() || !t.steps.is_empty() {
+            "workflow"
+        } else {
+            "other"
+        };
+        let c = t.container.as_ref();
+        let mount_path = |vol: &str| {
+            c.and_then(|c| {
+                c.volume_mounts
+                    .iter()
+                    .find(|m| m.name == vol)
+                    .map(|m| m.mount_path.clone())
+            })
+        };
+        let to_ref = |a: &api::Artifact| {
+            a.s3.as_ref().map(|s| ArtifactRef {
+                s3: S3Ref {
+                    endpoint: s.endpoint.clone(),
+                    bucket: s.bucket.clone(),
+                    region: s.region.clone(),
+                    insecure: s.insecure,
+                    key: s.key.clone(),
+                },
+                path: a.path.clone(),
+            })
+        };
+        let in_arts = t.inputs.as_ref().map(|i| &i.artifacts);
+        ContainerRunMeta {
+            name: t.name.clone(),
+            kind: kind.to_string(),
+            image: c.map(|c| c.image.clone()).unwrap_or_default(),
+            command: c.map(|c| c.command.clone()).unwrap_or_default(),
+            args: c.map(|c| c.args.clone()).unwrap_or_default(),
+            work_dir: mount_path(SCRATCH_VOLUME).unwrap_or_else(|| ATHENA_DIR.to_string()),
+            params: t
+                .inputs
+                .as_ref()
+                .map(|i| {
+                    i.parameters
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, p)| ParamRef {
+                            name: p.name.clone(),
+                            env: format!("{ATHENA_PARAM_PREFIX}{}", p.name),
+                            ty: input_types
+                                .get(idx)
+                                .map(|s| (*s).to_string())
+                                .unwrap_or_default(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            binary_artifact: in_arts
+                .and_then(|a| a.iter().find(|a| a.name == ATHENA_DIST_ARTIFACT))
+                .and_then(to_ref),
+            input_artifacts: in_arts
+                .map(|a| {
+                    a.iter()
+                        .filter(|a| a.name != ATHENA_DIST_ARTIFACT)
+                        .filter_map(to_ref)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            output_artifacts: t
+                .outputs
+                .as_ref()
+                .map(|o| o.artifacts.iter().filter_map(to_ref).collect())
+                .unwrap_or_default(),
+            host_paths: t
+                .volumes
+                .iter()
+                .filter_map(|v| v.host_path.as_ref().map(|h| h.path.clone()))
+                .collect(),
+            result_path: t.outputs.as_ref().and_then(|o| {
+                o.parameters
+                    .iter()
+                    .find(|p| p.name == "return")
+                    .and_then(|p| p.value_from.as_ref())
+                    .map(|vf| vf.path.clone())
+                    .filter(|p| !p.is_empty())
+            }),
+        }
+    }
+}
 
 /// What [`container_delivery`] produces for one `#[container]` template.
 pub struct ContainerDelivery {
@@ -647,6 +813,9 @@ pub struct Collector {
     /// the workflow that is actually submitted (workflow-scoped), so
     /// submitting a sub-workflow's template directly runs its own hook.
     exits: HashMap<String, &'static str>,
+    /// `<argo name> -> stringified input types` (parallel to the
+    /// template's INPUTS), for `container emulate` arg type-checking.
+    types: HashMap<String, &'static [&'static str]>,
 }
 
 impl Default for Collector {
@@ -662,6 +831,7 @@ impl Collector {
             builders: Vec::new(),
             runners: HashMap::new(),
             exits: HashMap::new(),
+            types: HashMap::new(),
         }
     }
 
@@ -683,6 +853,9 @@ impl Collector {
         self.builders.push(T::build);
         if let Some(handler) = T::ON_EXIT {
             self.exits.insert(T::ARGO_NAME.to_string(), handler);
+        }
+        if !T::INPUT_TYPES.is_empty() {
+            self.types.insert(T::ARGO_NAME.to_string(), T::INPUT_TYPES);
         }
     }
 
@@ -921,6 +1094,28 @@ pub fn entrypoint<E: Template>() {
         } else {
             println!("{output}");
         }
+        return;
+    }
+
+    // `cargo athena container run` sets this on the child to fetch ONE
+    // template's built `api::Template` as JSON (it then realizes that
+    // exact spec locally via docker/podman). Reusing `Template::build`
+    // here is what makes the local run identical to Argo by construction
+    // — same image, bootstrap, env, volumes, and artifacts as `emit`.
+    if let Ok(name) = std::env::var("CARGO_ATHENA_DESCRIBE") {
+        let ctx = BuildCtx::collect();
+        let tpl = collector
+            .builders
+            .iter()
+            .map(|b| b(&ctx))
+            .find(|t| t.name == name)
+            .unwrap_or_else(|| panic!("no template named {name:?}"));
+        let input_types = collector.types.get(&name).copied().unwrap_or(&[]);
+        let meta = ContainerRunMeta::from_template(&tpl, input_types);
+        println!(
+            "{}",
+            serde_json::to_string(&meta).expect("ContainerRunMeta is serializable")
+        );
         return;
     }
 

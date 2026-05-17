@@ -312,6 +312,30 @@ README is intentionally lean (user-facing); the *why* lives here.
   in-pod.
 - `#[container(image=…)]` is arbitrary/per-container; just needs POSIX
   `sh`/`tar`/`uname`.
+- **`cargo athena container emulate <name>` (2026-05-17, user-directed;
+  renamed from `run`).** Realizes ONE `#[container]` locally under
+  docker/podman *exactly as Argo would* — same image, the **emitted
+  bootstrap verbatim** (via `--entrypoint command[0]` + `args`), the
+  `ATHENA_PARAM_*` env (Regime-B JSON-encoded from `-p k=v`/
+  `--input-file`), a host tempdir bind-mounted at the `/athena` emptyDir
+  (so `result`/binary/artifact paths round-trip), `host!` 1:1 binds, S3
+  `load/save_artifact!` sync. **Zero-drift by construction:** the binary
+  reports a `core::ContainerRunMeta` (new) derived from the *same*
+  `Template::build()` `emit` uses, via a new entrypoint mode
+  `CARGO_ATHENA_DESCRIBE=<name>` → that one template's meta as JSON (not
+  the Argo `api::Template` — a purpose-built runner struct so the CLI
+  never parses Argo-isms; also backs a future `container describe`).
+  Binary source: **default `--pull`** the deployed tarball from the
+  `athena.toml` S3 repo (smoke-test what's live, no source on node) via
+  `object_store`+lean current-thread `tokio` (both behind the `cli`
+  feature); `--build` = host-arch musl only; `--tarball` verbatim. S3
+  creds from `AWS_*` env. The old top-level in-process `run` was
+  **removed** (superseded). **Limitation (documented):** no k8s context
+  — `service_account`/podSpec (RBAC/`nodeSelector`/podSpecPatch) are NOT
+  emulated; that's the real-Argo path. The module lives at
+  `crates/cargo-athena/src/emulate.rs` via `#[path="../emulate.rs"] mod
+  emulate;` in the bin — NOT under `src/bin/` (that would make it a
+  second binary). Golden `describe_fetch.json` pins the meta contract.
 
 ## Artifact ports
 

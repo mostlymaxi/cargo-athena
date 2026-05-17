@@ -42,3 +42,7 @@ inventory = "0.3"
 
 # cli (optional — behind the `cli` feature of the cargo-athena crate)
 clap = { version = "4", features = ["derive"] }
+# `cargo athena container run` only: S3 pull/push + a lean single-thread
+# async driver for it (CLI tool — no multi-thread runtime needed).
+object_store = { version = "0.11", features = ["aws"] }
+tokio = { version = "1", features = ["rt", "net", "time"] }

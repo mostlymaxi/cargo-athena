@@ -6,7 +6,8 @@ subcommand. It drives *your* workflow crate's binary (the one whose
 
 ```text
 cargo athena [-c FILE] emit  [--package P] [--bin B] [--out FILE] [--with-workflow]
-cargo athena [-c FILE] run   --template <argo-name> [--package P] [--bin B] [--input JSON]
+cargo athena [-c FILE] container emulate <argo-name> [-p k=v].. [--input-file F]
+                                         [--build|--tarball F] [--runtime R] [--skip-artifacts]
 cargo athena [-c FILE] build [--package P] [--bin B] [--target T].. [--print]
 cargo athena            publish [--package P] [--bin B]            (not yet)
 ```
@@ -39,20 +40,45 @@ Needs only an [`athena.toml`](configuration.md) (it bakes the artifact
 source into the YAML) — no cluster, S3, or cross-build. The fast
 iteration loop.
 
-## `run`
+## `container emulate`
 
-Executes one container's body locally, in-process, exactly as it would
-run in-pod — great for unit-testing a single step's real logic without
-a cluster:
+Runs one `#[container]` locally under **docker/podman, exactly as Argo
+would**: the same image, the *same injected bootstrap*, the same
+`ATHENA_PARAM_*` env, the `/athena` scratch dir, `host!` binds, and S3
+artifact ports. Test a single node locally — no Kubernetes, no source
+on the node.
 
 ```sh
-cargo athena run --template my-crate-transform \
-  --input '{"data":"hello","factor":4}'
+# default: pull the *deployed* binary from S3 and run it in its image
+cargo athena container emulate my-crate-transform -p data=hello -p factor=4
+
+cargo athena container emulate my-crate-fetch --input-file args.json
+cargo athena container emulate my-crate-fetch --build         # local musl build instead
 ```
 
-- `--template` (required) is the Argo name — `<crate>-<fn>` kebab-case,
-  or the `#[container(name = "…")]` override.
-- `--input` is the JSON object of the function's arguments.
+Fidelity is by construction: the binary reports its run metadata from
+the *same* `Template::build()` `emit` uses, so there's nothing to keep
+in sync.
+
+- `<argo-name>` (positional) — `<crate>-<fn>` kebab, or the
+  `#[container(name = "…")]` override. A `#[workflow]` is rejected (it's
+  a DAG, not a pod — emulate its containers individually).
+- `-p name=value` (repeatable) / `--input-file F` — the function
+  arguments. A `-p` value is parsed as JSON if it parses (`-p n=4` →
+  number), else a string; all values are JSON-encoded into the env
+  exactly as Argo passes them.
+- Binary source: **default = pull the deployed tarball from the
+  `athena.toml` S3 repo** (smoke-test what's live). `--build` packages a
+  local host-arch musl binary; `--tarball F` uses one verbatim. S3
+  credentials come from the standard `AWS_*` env vars.
+- `--runtime docker|podman` (default: autodetect, prefer docker);
+  `--skip-artifacts` to bypass S3 `load/save_artifact!` sync.
+
+**Limitations — this runs the container *body* faithfully, not the
+pod's Kubernetes context.** `docker run` has no notion of a
+`ServiceAccount`, so `#[container(service_account=…)]` and any
+podSpec-level concerns (RBAC, `nodeSelector`, podSpecPatch) are **not**
+emulated. For those, exercise the real Argo path (`emit` + submit).
 
 ## `build`
 

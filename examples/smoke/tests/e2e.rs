@@ -148,6 +148,22 @@ fn emit_pipeline_ns() {
     assert_golden("pipeline_ns.yaml", &run_bin(BIN_NS, &[]));
 }
 
+/// `CARGO_ATHENA_DESCRIBE`: the binary reports a `ContainerRunMeta`
+/// for one `#[container]`, derived from the *same* `Template::build()`
+/// that `emit` uses — the zero-drift contract `cargo athena container
+/// emulate` consumes (image, params→env, the binary/host!/artifact
+/// ports, the scratch dir, the result path).
+#[test]
+fn describe_fetch() {
+    assert_golden(
+        "describe_fetch.json",
+        &run_bin(
+            BIN_NS,
+            &[("CARGO_ATHENA_DESCRIBE", "cargo-athena-example-smoke-fetch")],
+        ),
+    );
+}
+
 /// Run mode: a container that returns a value (JSON to stdout).
 #[test]
 fn run_mode_transform() {

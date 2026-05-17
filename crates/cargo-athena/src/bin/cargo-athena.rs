@@ -11,6 +11,12 @@ use cargo_athena::{AthenaConfig, serde_json};
 use clap::{Parser, Subcommand};
 use std::process::{Command, Stdio, exit};
 
+// Lives in `src/` (not `src/bin/`, which would make it a second
+// binary); a `#[path]` module so it stays bin-private and can use the
+// helpers below (`cargo_run`, `tool_ok`, `package_meta`, …).
+#[path = "../emulate.rs"]
+mod emulate;
+
 /// Cargo plugin shim: invoked as `cargo athena <cmd>` → argv
 /// `cargo-athena athena <cmd>`, so `athena` is the wrapper subcommand.
 #[derive(Parser)]
@@ -48,19 +54,10 @@ enum Cmd {
         #[arg(long)]
         with_workflow: bool,
     },
-    /// Run one container's body locally, in-process.
-    Run {
-        /// Argo template name (`<crate>-<fn>` kebab, or the
-        /// `#[container(name = "…")]` override).
-        #[arg(long)]
-        template: String,
-        #[arg(long)]
-        package: Option<String>,
-        #[arg(long)]
-        bin: Option<String>,
-        /// JSON object of the function's arguments.
-        #[arg(long)]
-        input: Option<String>,
+    /// Single-`#[container]` operations (room for more later).
+    Container {
+        #[command(subcommand)]
+        cmd: ContainerCmd,
     },
     /// Cross-compile static-musl binaries, package the tarball, print
     /// the upload key.
@@ -83,6 +80,17 @@ enum Cmd {
         #[arg(long)]
         bin: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum ContainerCmd {
+    /// Emulate one `#[container]` locally under docker/podman, exactly
+    /// as Argo would: same image, the injected bootstrap,
+    /// `ATHENA_PARAM_*` env, the `/athena` scratch dir, `host!` binds,
+    /// and S3 artifact ports. By default the binary is *pulled* from
+    /// the deployed S3 tarball, so you can smoke-test what's live with
+    /// no source on the node.
+    Emulate(emulate::EmulateArgs),
 }
 
 fn main() {
@@ -110,17 +118,9 @@ fn main() {
             out.as_deref(),
             with_workflow,
         ),
-        Cmd::Run {
-            template,
-            package,
-            bin,
-            input,
-        } => run(
-            &template,
-            package.as_deref(),
-            bin.as_deref(),
-            input.as_deref(),
-        ),
+        Cmd::Container { cmd } => match cmd {
+            ContainerCmd::Emulate(args) => emulate::container_emulate(args),
+        },
         Cmd::Build {
             package,
             bin,
@@ -169,23 +169,6 @@ fn emit(
         }
         None => print!("{}", String::from_utf8_lossy(&o.stdout)),
     }
-}
-
-// ---- run ------------------------------------------------------------------
-
-fn run(
-    template: &str,
-    package: Option<&str>,
-    bin: Option<&str>,
-    input: Option<&str>,
-) {
-    let mut cmd = cargo_run(package, bin);
-    cmd.env("CARGO_ATHENA_TEMPLATE", template);
-    if let Some(i) = input {
-        cmd.env("CARGO_ATHENA_INPUT", i);
-    }
-    let status = cmd.status().expect("failed to run user binary");
-    exit(status.code().unwrap_or(1));
 }
 
 // ---- build (cross-compile) ------------------------------------------------
