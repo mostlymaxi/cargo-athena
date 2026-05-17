@@ -10,7 +10,7 @@ checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
 name = "cargo-athena"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cargo-athena-core",
  "cargo-athena-macros",
@@ -19,21 +19,21 @@ dependencies = [
 
 [[package]]
 name = "cargo-athena-api"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "cargo-athena-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cargo-athena-core",
 ]
 
 [[package]]
 name = "cargo-athena-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cargo-athena-api",
  "inventory",
@@ -45,21 +45,21 @@ dependencies = [
 
 [[package]]
 name = "cargo-athena-example-basic"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cargo-athena",
 ]
 
 [[package]]
 name = "cargo-athena-example-e2e"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cargo-athena",
 ]
 
 [[package]]
 name = "cargo-athena-example-importing"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cargo-athena",
  "cargo-athena-example-smoke",
@@ -67,7 +67,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-athena-example-smoke"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cargo-athena",
  "serde",
@@ -75,7 +75,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-athena-macros"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "deluxe",
  "proc-macro2",
