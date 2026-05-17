@@ -112,11 +112,31 @@ README is intentionally lean (user-facing); the *why* lives here.
   construction — no expr engine). Out-of-grammar conditions / value-`if`
   without `else` = targeted `compile_error!`. Synthetic structs have no
   ghost/sig-shim/`run` (never called from Rust, never run in-pod);
-  force-linked via the parent's `collect`. v1 does NOT lower a nested
-  *call* in an arg/condition (`foo(bar())`, `if foo() > 3`) — that's a
-  clean follow-on (anon task + ref + dep); today it's the usual
-  not-a-template-call error. Smoke `pipeline_if` SUBMIT-OK on real Argo
-  v4.0.5 (13-template synthetic chain).
+  force-linked via the parent's `collect`. Smoke `pipeline_if` SUBMIT-OK
+  on real Argo v4.0.5 (13-template synthetic chain).
+- **Nested calls.** A template *call* in argument position
+  (`foo(bar())`) lowers `bar` to its own task and wires `foo`'s arg to
+  `{{tasks.bar.outputs.parameters.return}}` + a dep — recursive
+  (`foo(bar(baz()))`), reusing the existing `Arg::Ref` path. A call in an
+  `if` *condition* (`if foo() > 3`) is **hoisted to a parent task**
+  (`__athena_cond_N`) — Rust evaluates the condition unconditionally, so
+  the call runs in the parent DAG and is captured into the wrapper like
+  any binding; identical call exprs within one `if` hoist once
+  (`hoist_cond`/`hoist_operand` over the cond grammar). Not applied
+  inside a `fan_out` closure (item scope) in v1. Ghost type-checks the
+  nesting free (`Foo::__athena_sig(Bar::__athena_sig())`). Smoke
+  `pipeline_nested` SUBMIT-OK on real Argo v4.0.5.
+- **KNOWN latent bug — YAML-1.1-ambiguous parameter *values*.** athena
+  emits `Parameter.value` via serde_norway (YAML 1.2: bare `y`/`no`/`on`
+  = string) but Argo parses YAML 1.1 (those = booleans). A *literal* arg
+  whose value is in the YAML-1.1 set (`y/n/yes/no/on/off/true/false`,
+  `null`, `~`) emits unquoted and Argo's CRD validation rejects it
+  (`must be of type string: "boolean"`). The compile-time guard
+  deliberately covers only param *names* (a value like `"no"` is
+  legitimate data — must be emitted correctly, not rejected). Fix is an
+  emit-layer force-quote of ambiguous scalars (serde_norway has no
+  YAML-1.1 plain-scalar mode); tracked separately, NOT a nested-call
+  regression (any `t("no")` hits it).
 - **Per-task builder chain.** A task call may be suffixed, in any order,
   with:
   - `.continue_on(failed|error|failed, error)` (≤1) → `DAGTask.continueOn`;

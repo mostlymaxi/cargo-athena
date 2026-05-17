@@ -1069,6 +1069,107 @@ fn cond_to_when(
     }
 }
 
+/// A single condition operand: if it's a template call (`if foo() > 3`),
+/// hoist it to a parent task (Rust evaluates the condition regardless of
+/// branch, so it runs unconditionally) and substitute a reference to it;
+/// identical calls within one `if` are hoisted once. Otherwise unchanged.
+#[allow(clippy::too_many_arguments)]
+fn hoist_operand(
+    e: &Expr,
+    used: &mut std::collections::HashSet<String>,
+    nodes: &mut Vec<Node>,
+    bindings: &std::collections::HashMap<String, String>,
+    inputs: &std::collections::HashSet<String>,
+    seen: &mut std::collections::HashMap<String, syn::Ident>,
+    cond_binds: &mut std::collections::HashMap<String, String>,
+) -> syn::Result<Expr> {
+    if let Some((c2, r2)) = call_parts(e) {
+        let key = quote!(#e).to_string();
+        let id = if let Some(id) = seen.get(&key) {
+            id.clone()
+        } else {
+            let leaf = path_leaf(&c2);
+            let t = push_call(
+                c2,
+                r2,
+                &leaf,
+                NodeOpts::default(),
+                None,
+                None,
+                used,
+                nodes,
+                bindings,
+                inputs,
+            )?;
+            let id = format_ident!("__athena_cond_{}", seen.len());
+            cond_binds.insert(id.to_string(), t);
+            seen.insert(key, id.clone());
+            id
+        };
+        Ok(syn::parse_quote!(#id))
+    } else {
+        Ok(e.clone())
+    }
+}
+
+/// Rewrite a condition, hoisting every template-call operand (recursive
+/// over the `== != < <= > >=`, `&&`, `||`, `!` grammar so
+/// `a && foo() == bar()` hoists both). Non-grammar shapes pass through
+/// unchanged — `cond_to_when` then produces the proper error.
+#[allow(clippy::too_many_arguments)]
+fn hoist_cond(
+    e: &Expr,
+    used: &mut std::collections::HashSet<String>,
+    nodes: &mut Vec<Node>,
+    bindings: &std::collections::HashMap<String, String>,
+    inputs: &std::collections::HashSet<String>,
+    seen: &mut std::collections::HashMap<String, syn::Ident>,
+    cond_binds: &mut std::collections::HashMap<String, String>,
+) -> syn::Result<Expr> {
+    match unwrap_expr(e) {
+        Expr::Binary(b) => {
+            use syn::BinOp::*;
+            let mut nb = b.clone();
+            let (l, r) = match b.op {
+                Eq(_) | Ne(_) | Lt(_) | Le(_) | Gt(_) | Ge(_) => (
+                    hoist_operand(
+                        &b.left, used, nodes, bindings, inputs, seen,
+                        cond_binds,
+                    )?,
+                    hoist_operand(
+                        &b.right, used, nodes, bindings, inputs, seen,
+                        cond_binds,
+                    )?,
+                ),
+                And(_) | Or(_) => (
+                    hoist_cond(
+                        &b.left, used, nodes, bindings, inputs, seen,
+                        cond_binds,
+                    )?,
+                    hoist_cond(
+                        &b.right, used, nodes, bindings, inputs, seen,
+                        cond_binds,
+                    )?,
+                ),
+                _ => return Ok(e.clone()),
+            };
+            nb.left = Box::new(l);
+            nb.right = Box::new(r);
+            Ok(Expr::Binary(nb))
+        }
+        Expr::Unary(u) if matches!(u.op, syn::UnOp::Not(_)) => {
+            let mut nu = u.clone();
+            nu.expr = Box::new(hoist_cond(
+                &u.expr, used, nodes, bindings, inputs, seen, cond_binds,
+            )?);
+            Ok(Expr::Unary(nu))
+        }
+        _ => hoist_operand(
+            e, used, nodes, bindings, inputs, seen, cond_binds,
+        ),
+    }
+}
+
 /// A call `path(args...)` where `path` is any path expression. Returns the
 /// full callee path (so cross-crate `foo::ingest(..)` works) and its args.
 fn call_parts(e: &Expr) -> Option<(Path, Vec<Expr>)> {
@@ -1459,10 +1560,33 @@ fn push_call(
     inputs: &std::collections::HashSet<String>,
 ) -> syn::Result<String> {
     let task = uniq_task(used, base);
-    let args = raw
-        .iter()
-        .map(|a| resolve_arg(a, item, bindings, inputs))
-        .collect::<syn::Result<Vec<_>>>()?;
+    // A template *call* in argument position (`foo(bar())`) is lowered
+    // to its own task; `foo` then takes a ref to it (a DAG dep), exactly
+    // like a prior `let`. Recursive (`foo(bar(baz()))`). Not applied
+    // inside a `fan_out` closure (the item scope) in v1.
+    let mut args: Vec<Arg> = Vec::with_capacity(raw.len());
+    for a in &raw {
+        if item.is_none()
+            && let Some((c2, r2)) = call_parts(a)
+        {
+            let leaf = path_leaf(&c2);
+            let t = push_call(
+                c2,
+                r2,
+                &leaf,
+                NodeOpts::default(),
+                None,
+                None,
+                used,
+                nodes,
+                bindings,
+                inputs,
+            )?;
+            args.push(Arg::Ref(t));
+        } else {
+            args.push(resolve_arg(a, item, bindings, inputs)?);
+        }
+    }
     let hooks = opts
         .hooks
         .into_iter()
@@ -1532,6 +1656,38 @@ fn synth_if(
         ));
     }
 
+    // Hoist template-call operands in conditions to parent tasks
+    // (`if foo() > 3` → a parent `foo` node + `__athena_cond_N` ref);
+    // identical calls share one task. Conditions are then plain
+    // binding/input/field/literal expressions again.
+    let mut seen_calls: std::collections::HashMap<String, syn::Ident> =
+        Default::default();
+    let mut cond_binds: std::collections::HashMap<String, String> =
+        Default::default();
+    let arms: Vec<(Option<Expr>, syn::Block)> = arms
+        .into_iter()
+        .map(|(c, b)| -> syn::Result<_> {
+            let c = match c {
+                Some(c) => Some(hoist_cond(
+                    &c,
+                    used,
+                    nodes,
+                    bindings,
+                    inputs,
+                    &mut seen_calls,
+                    &mut cond_binds,
+                )?),
+                None => None,
+            };
+            Ok((c, b))
+        })
+        .collect::<syn::Result<_>>()?;
+    // Parent scope augmented with the hoisted condition tasks.
+    let mut eff_bindings = bindings.clone();
+    for (kk, vv) in &cond_binds {
+        eff_bindings.insert(kk.clone(), vv.clone());
+    }
+
     // Captured free vars = (every arm body ∪ every condition) ∩ parent
     // scope. Whole bindings/inputs only (a field/`.f` captures its base).
     let mut refset: Vec<String> = Vec::new();
@@ -1559,7 +1715,7 @@ fn synth_if(
     }
     let captures: Vec<String> = refset
         .into_iter()
-        .filter(|n| bindings.contains_key(n) || inputs.contains(n))
+        .filter(|n| eff_bindings.contains_key(n) || inputs.contains(n))
         .collect();
     for c in &captures {
         if let Some(why) = yaml_ambiguous(c) {
@@ -1670,7 +1826,7 @@ fn synth_if(
     let parent_args = captures
         .iter()
         .map(|n| {
-            if let Some(t) = bindings.get(n) {
+            if let Some(t) = eff_bindings.get(n) {
                 Arg::Ref(t.clone())
             } else {
                 Arg::Input(n.clone())
