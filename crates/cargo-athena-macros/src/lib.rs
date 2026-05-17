@@ -270,14 +270,30 @@ struct ContainerArgs {
     on_exit_if_root: Option<syn::Path>,
 }
 
-/// `#[workflow(name = "...", steps, on_exit_if_root = teardown)]` —
-/// bare `steps` opts into Argo `steps:` (sequential) vs the default
-/// `dag:`.
+/// `#[workflow(name = "...", steps, node_selector = { "k" = "v", ... },
+///   on_exit_if_root = teardown)]` — bare `steps` opts into Argo
+/// `steps:` (sequential) vs the default `dag:`.
+///
+/// Unlike `#[container]`, `node_selector` keys **and values** are
+/// *literal strings only* (no `"lit" + arg` param injection). A
+/// `#[workflow]` is a DAG/steps template, not a pod: its `nodeSelector`
+/// is set on the dag/steps template and the Argo controller **cascades**
+/// it onto every task pod it `templateRef`s (empirically proven, real
+/// Argo v4.0.5). But a template-scoped `{{=fromJSON(inputs.parameters…)}}`
+/// is cascaded *raw* (the child pod gets the literal, k8s rejects it), so
+/// per-arg injection cannot work here. The only thing that survives the
+/// cascade is `{{workflow.parameters.<NAME>}}` — and that is **always
+/// the submitted root workflow's** parameters, never this template's
+/// inputs when it runs as a sub-`templateRef` (empirically proven). So
+/// dynamic values are an *eyes-open escape hatch*: write a literal
+/// containing `{{workflow.parameters.foo}}` yourself and own the
+/// root-scoping.
 #[derive(deluxe::ParseMetaItem, Default)]
 #[deluxe(default)]
 struct WorkflowArgs {
     name: Option<String>,
     steps: deluxe::Flag,
+    node_selector: std::collections::BTreeMap<String, String>,
     on_exit_if_root: Option<syn::Path>,
 }
 
@@ -2922,6 +2938,20 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
+    // `node_selector` — literal keys *and* values (no injection: see
+    // `WorkflowArgs`). Set on the dag/steps template; the Argo
+    // controller cascades it onto every `templateRef`'d task pod.
+    let ns_keys: Vec<&String> = cfg.node_selector.keys().collect();
+    let ns_vals: Vec<&String> = cfg.node_selector.values().collect();
+    let node_selector_tokens = quote! {
+        node_selector: {
+            let mut __ns = ::std::collections::BTreeMap::new();
+            #( __ns.insert(
+                #ns_keys.to_string(), #ns_vals.to_string()); )*
+            __ns
+        },
+    };
+
     // Default = `dag:` (parallel by data-deps). `#[workflow(steps)]` =
     // `steps:` (one sequential group per statement).
     let build_body = if steps_mode {
@@ -2934,6 +2964,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
                 name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
                 inputs: #inputs_tokens,
                 steps: __steps,
+                #node_selector_tokens
                 #outputs_tokens
                 ..::core::default::Default::default()
             }
@@ -2948,6 +2979,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
                 inputs: #inputs_tokens,
                 dag: ::core::option::Option::Some(
                     ::cargo_athena::api::DagTemplate { tasks: __tasks }),
+                #node_selector_tokens
                 #outputs_tokens
                 ..::core::default::Default::default()
             }

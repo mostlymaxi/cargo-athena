@@ -18,19 +18,53 @@ runtime surprises.
 ## Attribute arguments
 
 ```rust,ignore
-#[workflow(name = "...", steps, on_exit_if_root = path::to::template)]
+#[workflow(name = "...", steps,
+           node_selector = { "k" = "v", ... },
+           on_exit_if_root = path::to::template)]
 ```
 
 | Arg | Effect |
 |---|---|
 | `name = "my-name"` | Override the Argo template name. Default is `<crate>-<fn>` (kebab-case). |
 | `steps` | Emit an Argo `steps:` template (one sequential group per statement, refs via `{{steps.X…}}`, no `dependencies`) instead of the default data-dependency `dag:`. |
+| `node_selector = { "k" = "v" }` | Set `nodeSelector` on this dag/steps template. The Argo controller **cascades** it onto every task pod this workflow `templateRef`s. **Keys and values are literal strings only** — see [Node selector](#node-selector). |
 | `on_exit_if_root = t` | Whole-workflow exit handler. Every workflow that sets it carries it on **its own** `WorkflowTemplate`'s `spec.hooks.exit.templateRef`. Argo runs exit hooks workflow-scoped: only the workflow you actually **submit** fires its handler — so `argo submit --from workflowtemplate/X` runs *X*'s handler; *X*'s handler stays inert when *X* is just a `templateRef`'d sub-step of a bigger run (submit it directly to get it). Distinct from the per-task `.on_exit(t)` builder, which is a different, always-fires task hook. |
 
 All are optional. A parameter *name* (i.e. a function argument) or a
 `name = "…"` value that a YAML 1.1 parser reads as a boolean/null
 (`y/yes/n/no/on/off/true/false`, `null`, `~`, any case) is a compile
 error — Argo's YAML→JSON parser would silently mis-type it.
+
+## Node selector
+
+```rust,ignore
+#[workflow(node_selector = {
+    "kubernetes.io/arch" = "amd64",
+    "topology.kubernetes.io/region" = "{{workflow.parameters.region}}",
+})]
+fn pipeline() { /* ... */ }
+```
+
+Unlike [`#[container(node_selector = …)]`](container.md), a workflow's
+keys **and values are literal strings only — no `"lit" + arg` parameter
+injection.** A `#[workflow]` is a DAG/steps template, not a pod: athena
+puts the selector on the template and the Argo controller cascades it
+onto every task pod the workflow `templateRef`s (proven on real Argo
+v4.0.5). Per-arg injection cannot work here, because:
+
+- a *template-scoped* `{{=fromJSON(inputs.parameters.…)}}` is cascaded
+  **raw** — the child pod receives the literal string and Kubernetes
+  rejects it as an invalid label value; and
+- the only interpolation that survives the parent→child cascade is
+  `{{workflow.parameters.<NAME>}}`, which **always** refers to the
+  *submitted root workflow's* parameters — never this workflow's own
+  inputs when it runs as a `templateRef`'d sub-step.
+
+So a dynamic value is an **eyes-open escape hatch**: write a literal
+containing `{{workflow.parameters.foo}}` yourself (as in `region` above)
+and own the root-scoping — supply `foo` as a parameter of the workflow
+you actually `argo submit`, not of this sub-workflow. Plain static
+labels need no special handling.
 
 ## The body
 
@@ -39,7 +73,7 @@ Only three statement shapes are lowered:
 ```rust,ignore
 let x = template(args);   // a task; `x` binds its output
 template(args);           // a task (no output consumed)
-if cond { … } else { … }  // see "if / else" below
+if cond { ... } else { ... }  // see "if / else" below
 ```
 
 Everything else — `match`, `for`/`while`/`loop`, macros, arbitrary

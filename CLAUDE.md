@@ -216,8 +216,32 @@ README is intentionally lean (user-facing); the *why* lives here.
   DAG's `{disktype:doesnotexist}` and went Pending). So the earlier
   "DAG creates no pod ⇒ nodeSelector is a no-op / no inheritance"
   reasoning is WRONG. athena's per-`#[container(node_selector=…)]`
-  (leaf-level) is correct; a future `#[workflow(node_selector=…)]` would
-  legitimately cascade to every task's pod.
+  (leaf-level) is correct.
+- **`#[workflow(node_selector = { "k" = "v" })]` — IMPLEMENTED, but
+  LITERALS-ONLY (keys *and* values; `BTreeMap<String,String>` in
+  `WorkflowArgs`, NO `inject_lower`/`Injectable`/`syn::Expr`). Set on
+  the dag/steps `api::Template` (both build_body branches); cascades to
+  every task pod (proven 2026-05-17: emitted `pipeline_ns` golden
+  submitted on live v4.0.5 → leaf `fetch` pod got both the static
+  `kubernetes.io/arch=amd64` AND a `-p region=` resolved
+  `{{workflow.parameters.region}}` cascaded onto `.spec.nodeSelector`).**
+  Why no injection (unlike `#[container]`): a `#[workflow]` is a DAG not
+  a pod. Two probes (2026-05-16/17) proved (a) a template-scoped
+  `{{=fromJSON(inputs.parameters.X)}}` on a dag template is cascaded
+  **raw** to the child pod → k8s rejects the literal label; (b)
+  `serviceAccountName` does NOT cascade from a dag template (stays
+  `default`) — so no `#[workflow]` `service_account`/`image` either;
+  (c) `{{workflow.parameters.X}}` is the ONLY interpolation that
+  survives the cascade and is **always root-scoped**: a sub-`templateRef`
+  workflow whose dag `nodeSelector` used `{{workflow.parameters.subp}}`
+  errored because the *submitted root* (not the sub's `subp` input) is
+  what's resolved. So dynamic values are a documented eyes-open escape
+  hatch (raw `{{workflow.parameters.foo}}` literal; user owns
+  root-scoping). Fixture: smoke `pipeline_ns` + bin `smoke-ns` + golden
+  `pipeline_ns.yaml` + `emit_pipeline_ns` test. Synthesized `if`
+  wrappers (`emit_synth`) intentionally do NOT re-stamp it (scope:
+  literals-only, single user template; transitive cascade through synth
+  dags is an untested Argo edge, not claimed).
 - **`#[workflow]` return values (WORK e2e — proven on real Argo).** Every
   template's serialized fn return value is captured as an output
   **parameter named `return`** (`outputs.parameters.return`): container =

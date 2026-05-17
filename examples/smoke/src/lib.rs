@@ -308,3 +308,25 @@ pub fn pipeline_inject() {
     let m = make_meta();
     tag_meta(m);
 }
+
+// --- #[workflow] node_selector (literal-only, cascades to task pods) --------
+
+/// `#[workflow(node_selector = { ... })]` — unlike `#[container]`, keys
+/// **and values** are *literal strings only* (no `"lit" + arg`
+/// injection). A workflow is a DAG, not a pod: athena sets the selector
+/// on this dag template and the Argo controller cascades it onto every
+/// task pod it `templateRef`s. A template-scoped
+/// `{{=fromJSON(inputs.parameters…)}}` would be cascaded *raw* (k8s
+/// rejects the literal), so the only dynamic form is the eyes-open
+/// escape hatch below: a raw `{{workflow.parameters.region}}` literal —
+/// **always** the submitted root workflow's params, never this
+/// template's inputs when it's a sub-`templateRef` (proven on real Argo
+/// v4.0.5).
+#[workflow(node_selector = {
+    "kubernetes.io/arch" = "amd64",
+    "topology.kubernetes.io/region" = "{{workflow.parameters.region}}",
+})]
+pub fn pipeline_ns() {
+    let raw = fetch("https://example.com".to_string());
+    transform(raw, 3);
+}

@@ -73,7 +73,7 @@ those fields when the pod is created:
     node_selector   = { "kubernetes.io/arch" = "amd64",      // literal value
                         "disktype" = profile.disk },         // a named struct field
 )]
-fn run(tag: String, tenant: String, profile: Profile) { /* … */ }
+fn run(tag: String, tenant: String, profile: Profile) { /* ... */ }
 ```
 
 Rules:
