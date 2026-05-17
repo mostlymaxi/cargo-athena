@@ -1,0 +1,129 @@
+# `#[container]`
+
+A `#[container]` is a workflow step whose body is **ordinary Rust,
+executed in a pod**. Unlike a `#[workflow]` (statically analyzed), a
+container's body really runs: arguments are deserialized from Argo
+parameters, the function executes, and its return value is serialized
+back out.
+
+```rust,ignore
+#[container(image = "ghcr.io/acme/app:latest")]
+fn run_a_container(a: String) -> String {
+    println!("regular code, got: {a}");
+    format!("done:{a}")          // -> outputs.parameters.return
+}
+```
+
+It compiles to its own Argo `WorkflowTemplate` (a container template).
+The image is arbitrary — it only needs a POSIX `sh`, `tar`, and `uname`
+(works on distroless / read-only-rootfs images).
+
+### I/O contract
+
+- Each function argument is an Argo **input parameter**, deserialized
+  (serde) from that parameter at pod start.
+- The return value is serialized to **`outputs.parameters.return`**, so
+  a `#[workflow]` consumes it as `{{tasks.<t>.outputs.parameters.return}}`.
+- Container I/O is compile-time bound to `serde` (`DeserializeOwned` /
+  `Serialize`). Borrows can't cross this boundary — take/return owned
+  types (`String`, not `&str`).
+
+### How it runs in-pod
+
+`cargo athena build` cross-compiles one static-musl, multi-arch
+`.tar.gz` into the S3 `ArtifactRepository` from `athena.toml`. `emit`
+injects, into every container template, that tarball as an input
+artifact plus a small `sh` bootstrap that `uname`s, picks the matching
+`app-<triple>`, and `exec`s it with `--cargo-athena-template <name>`.
+All athena paths live under a pod-scoped `emptyDir` at `/athena`.
+
+## Attribute arguments
+
+```rust,ignore
+#[container(
+    image = "ghcr.io/acme/app:latest",
+    name = "...",
+    service_account = "athena-runner",
+    node_selector = { "kubernetes.io/arch" = "amd64", "disktype" = "ssd" },
+    on_exit = path::to::template,
+)]
+```
+
+| Arg | Effect |
+|---|---|
+| `image = "…"` | Container image. Default: `[bootstrap].default_image` from `athena.toml`. Arbitrary per-container. |
+| `name = "…"` | Override the Argo template name. Default `<crate>-<fn>` (kebab). |
+| `service_account = "…"` | Pod `ServiceAccount`. Default: `[defaults].service_account` from `athena.toml`. |
+| `node_selector = { "k" = "v", … }` | Template-level `nodeSelector` (the Argo controller cascades it onto this template's pods). |
+| `on_exit = t` | Exit handler; like `#[workflow(on_exit)]` it reaches a runnable `Workflow` only as the emit root. |
+
+All optional. As with `#[workflow]`, an argument *name* or a `name = "…"`
+value that a YAML 1.1 parser reads as a boolean/null is a compile error.
+
+## `#[fragment]`
+
+A `#[fragment]` is a **plain helper function** — *not* a template. It is
+genuinely called as Rust, so it executes inside the calling
+container's pod:
+
+```rust,ignore
+#[container(image = "ghcr.io/acme/tools:latest")]
+fn build() {
+    frag_a();                                  // ordinary call, runs in this pod
+}
+
+#[fragment]
+fn frag_a() {
+    let _ = cargo_athena::host!("/var/lib/a"); // resource carried to `build`
+    frag_b();                                  // transitive
+}
+
+#[fragment]
+fn frag_b() { let _ = cargo_athena::host!("/var/lib/b"); }
+```
+
+Its purpose is to **carry pod-resource declarations across function
+boundaries**. Every `host!` / artifact-port macro a fragment uses is
+collected onto each `#[container]` that transitively calls it (resolved
+as a closure at emit time). A `#[fragment]` cannot be called from a
+`#[workflow]` (it is not a `Template`, so it fails as a type error).
+
+## Macro calls
+
+These declare pod resources and are only valid inside a `#[container]`
+or `#[fragment]` (the public form is a `compile_error!` anywhere else,
+and a `#[workflow]` using one is a hard error):
+
+| Macro | Effect | Runtime value |
+|---|---|---|
+| `host!("/abs/path")` | a `hostPath` volume mounted at that path | `&str` path |
+| `load_artifact!("key")` | an Argo S3 **input** artifact port at the exact `athena.toml` object key | `Vec<u8>` |
+| `load_artifact_str!("key")` | same, as text | `String` |
+| `save_artifact!("key", bytes)` | an Argo S3 **output** artifact port | writes `impl AsRef<[u8]>` |
+| `save_artifact_str!("key", text)` | same, as text | writes `impl AsRef<str>` |
+
+```rust,ignore
+#[container]
+fn publish(report: String) {
+    let notes = cargo_athena::load_artifact_str!("notes");   // S3 input port
+    println!("publishing {report} (notes: {notes})");
+    cargo_athena::save_artifact!("receipt", format!("ok:{report}"));
+}
+```
+
+Key properties:
+
+- **Literal key only.** The argument is the exact S3 object key (for
+  artifacts) or absolute path (for `host!`) — a string literal/const,
+  resolved at compile time.
+- **Static AST union, not a trace.** Declarations are collected from
+  *every* `if`/`match`/loop branch, not the one path that runs. This is
+  correct, not approximate: Argo fixes the pod spec before the pod runs,
+  so the union is the only expressible semantics.
+- **Decoupled through the bucket.** Artifact producer and consumer share
+  only the S3 key — there is no DAG dependency, no `{{tasks.…}}` wiring,
+  and no ordering imposed. A missing object is an Argo error at run time.
+- **Carried through `#[fragment]`s** transitively, as above.
+
+Used path-qualified (`cargo_athena::host!`) by convention so it doesn't
+require a `use` and the gating compile-errors stay obvious.

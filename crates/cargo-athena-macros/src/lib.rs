@@ -389,6 +389,7 @@ fn ghost_fn(func: &ItemFn) -> TokenStream2 {
 // #[container]
 // ---------------------------------------------------------------------------
 
+#[doc = include_str!("../../../CONTAINER.md")]
 #[proc_macro_attribute]
 pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = syn::parse_macro_input!(item as ItemFn);
@@ -2672,6 +2673,7 @@ fn emit_synth(s: &SynthWf) -> TokenStream2 {
     }
 }
 
+#[doc = include_str!("../../../WORKFLOW.md")]
 #[proc_macro_attribute]
 pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = syn::parse_macro_input!(item as ItemFn);
@@ -2875,6 +2877,12 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
 // #[fragment]
 // ---------------------------------------------------------------------------
 
+/// A plain helper function (not a template) that carries pod-resource
+/// declarations (`host!`, artifact ports) across function boundaries
+/// into every `#[container]` that transitively calls it. It runs as
+/// ordinary Rust inside the caller's pod and cannot be called from a
+/// `#[workflow]`. See the **`#[fragment]`** section of the
+/// [`macro@container`] docs (`CONTAINER.md`) for the full model.
 #[proc_macro_attribute]
 pub fn fragment(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = syn::parse_macro_input!(item as ItemFn);

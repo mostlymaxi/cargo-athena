@@ -16,67 +16,45 @@ asserts it `Succeeded`; these badges are that live result:
 | v3.7.14 | maintained (n‑1 minor)    | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v3.7.14.json) |
 | v3.6.19 | minimum supported (EOL)   | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v3.6.19.json) |
 
-Argo ≤ 3.5 is unsupported (its validator can't resolve
-`{{tasks.X.outputs.*}}` across the `templateRef` boundary athena relies
-on; fixed in Argo 3.6).
+Argo ≤ 3.5 is unsupported - older versions *may* still work, use at your own risk!
 
-## How it works
+## Getting Started
 
-Annotate ordinary functions. Each `#[workflow]`/`#[container]` becomes a
-unit-struct type; referencing that type force-links its crate, so
-workflows compose across modules and crates with no registry.
-
-- **emit** — `cargo athena emit` walks the closure from your entrypoint
-  and prints one `WorkflowTemplate` per template (cross-refs via
-  `templateRef`) plus a runnable `Workflow`.
-- **deliver** — `cargo athena build` cross-compiles one static-musl
-  `.tar.gz` into the S3 `ArtifactRepository` from `athena.toml`; emit
-  injects it + an `sh` bootstrap into every container template.
-- **run** — in-pod, the bootstrap `uname`s and execs the matching binary
-  with `--cargo-athena-template <name>`: deserialize inputs, run the real
-  function body, serialize outputs.
+Annotate ordinary functions. A `#[workflow]` is a DAG; a `#[container]`
+is a step that runs real Rust in a pod; a `#[fragment]` is a plain
+helper that carries pod resources.
 
 ```rust
-use cargo_athena::{workflow, container, fragment};   // `host!` used path-qualified
+use cargo_athena::{workflow, container, fragment};
 
-#[workflow]                                   // -> a WorkflowTemplate (dag)
+#[workflow]
 fn run_foo() {
     let a = some_other_workflow("asdf".to_string());
     run_a_container(a);                       // data dep -> DAG edge + param wiring
 }
 
-#[container(image = "ghcr.io/acme/app:latest")]   // -> a WorkflowTemplate (container)
+#[container(image = "ghcr.io/acme/app:latest")]
 fn run_a_container(a: String) {
-    let cfg = cargo_athena::host!("/etc/myapp");   // hostPath; error outside #[container]/#[fragment]
+    let cfg = cargo_athena::host!("/etc/myapp");   // hostPath mount
     load_extra();
     println!("regular code, got: {a}");
 }
 
-#[fragment]                                   // plain helper that carries decls
+#[fragment]
 fn load_extra() { let _ = cargo_athena::host!("/var/lib/extra"); }
 
 fn main() { cargo_athena::entrypoint::<run_foo>(); }   // entrypoint = a type
 ```
 
-Also supported: `#[container(image=…, node_selector={…}, service_account="…")]`;
-`#[workflow(steps)]` for sequential Argo `steps:` instead of the default
-data-dependency `dag:`; and inside `#[container]`/`#[fragment]`,
-`host!("/path")` (hostPath) and `load_artifact!`/`save_artifact!("s3-key", …)`
-(S3 by literal key, decoupled through the bucket). `athena.toml` (S3 repo
-+ target matrix) is required by `cargo athena`.
-
-## Workspace
-
-| Crate | Role |
-|---|---|
-| `cargo-athena-api` | Hand-owned `serde` subset of the Argo API (no protobuf); conformance guarded by the kind e2e. |
-| `cargo-athena-core` | Runtime: `Template` trait, closure walk, multi-doc emit, `BuildCtx`, `host!`. |
-| `cargo-athena-macros` | `#[workflow]`/`#[container]`/`#[fragment]` proc macros. |
-| `cargo-athena` | Facade users depend on; `tests/` = in-process module/smoke + trybuild compile-fail contracts. |
-| `cargo-athena-cli` | The `cargo athena` subcommand. |
-| `examples/` | `basic` (minimal), `smoke` (all-features golden fixture), `importing` (cross-module + cross-crate), `e2e` (the kind-e2e crate GHA submits). |
-
-## Getting started
+Each `#[workflow]`/`#[container]` compiles to its own Argo
+`WorkflowTemplate`, cross-referenced by `templateRef` (referencing a
+template's type force-links its crate, so workflows compose across
+modules and crates with no registry). `cargo athena build`
+cross-compiles one static-musl binary into the S3 `ArtifactRepository`
+from `athena.toml`; `emit` injects that binary plus a tiny `sh`
+bootstrap into every container template, so in-pod each step pulls the
+binary, picks its arch, and runs the right function — deserialize
+inputs, run the body, serialize outputs.
 
 ```sh
 nix develop
@@ -86,17 +64,20 @@ cargo run -q -p cargo-athena-cli -- athena build --package cargo-athena-example-
 cargo run -q -p cargo-athena-cli -- athena run \
   --package cargo-athena-example-basic \
   --template cargo-athena-example-basic-run-a-container --input '{"a":"hi"}'
-
-cargo test --workspace
 ```
+
+**Full feature reference:** [`WORKFLOW.md`](WORKFLOW.md) (every
+`#[workflow]` arg + call form) and [`CONTAINER.md`](CONTAINER.md) (every
+`#[container]` arg, `#[fragment]`, and in-pod macro). The same content is
+on the macros in `cargo doc`.
 
 ## Testing
 
-Golden tests run the compiled binary in-process and pin emit + run output:
+In-process tests run the compiled binary and pin emit + run output:
 
 ```sh
-cargo test -p cargo-athena-example-e2e                   # vs goldens
-UPDATE_EXPECT=1 cargo test -p cargo-athena-example-e2e   # refresh goldens
+cargo test -p cargo-athena-example-e2e                   # check
+UPDATE_EXPECT=1 cargo test -p cargo-athena-example-e2e   # refresh expected output
 ```
 
 Full e2e against real Argo + MinIO (needs a host Docker/Podman daemon):
