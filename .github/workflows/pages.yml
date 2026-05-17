@@ -3,10 +3,15 @@ name: pages
 # Build the mdBook docs site (docs/) with the nix-pinned mdbook and
 # publish it to GitHub Pages. One-time repo setup: Settings -> Pages ->
 # "Build and deployment" -> Source: GitHub Actions.
+#
+# Gated on `v*` tags (like publish.yml), NOT every push to main: the
+# published site documents the *released* crate, so it must not run
+# ahead of what's on crates.io. `workflow_dispatch` is kept for a
+# manual rebuild of the current docs when needed.
 
 on:
   push:
-    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
