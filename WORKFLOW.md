@@ -25,7 +25,7 @@ runtime surprises.
 |---|---|
 | `name = "my-name"` | Override the Argo template name. Default is `<crate>-<fn>` (kebab-case). |
 | `steps` | Emit an Argo `steps:` template (one sequential group per statement, refs via `{{steps.X…}}`, no `dependencies`) instead of the default data-dependency `dag:`. |
-| `on_exit = t` | Whole-workflow exit handler. Wired onto the **runnable** `Workflow` as `spec.hooks.exit.templateRef` — so it only takes effect on the emit-root workflow (matching Argo's workflow scope); a non-root `on_exit` is inert. |
+| `on_exit = t` | Whole-workflow exit handler, carried on the **root `WorkflowTemplate`'s** `spec.hooks.exit.templateRef`, so it fires whichever way the root is run — `argo submit --from workflowtemplate/<root>` *or* a `workflowTemplateRef` Workflow (`--with-workflow`). Emit-root only; a non-root `on_exit` is inert (matches Argo's workflow scope). |
 
 All are optional. A parameter *name* (i.e. a function argument) or a
 `name = "…"` value that a YAML 1.1 parser reads as a boolean/null

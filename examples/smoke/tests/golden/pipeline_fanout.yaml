@@ -217,12 +217,3 @@ spec:
     - name: athena-work
       emptyDir: {}
     serviceAccountName: default
----
-apiVersion: argoproj.io/v1alpha1
-kind: Workflow
-metadata:
-  generateName: cargo-athena-example-smoke-pipeline-fanout-
-spec:
-  workflowTemplateRef:
-    name: cargo-athena-example-smoke-pipeline-fanout
-  serviceAccountName: default

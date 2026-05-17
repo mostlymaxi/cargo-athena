@@ -313,12 +313,3 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-note
           template: cargo-athena-example-smoke-note
----
-apiVersion: argoproj.io/v1alpha1
-kind: Workflow
-metadata:
-  generateName: cargo-athena-example-smoke-pipeline-nested-
-spec:
-  workflowTemplateRef:
-    name: cargo-athena-example-smoke-pipeline-nested
-  serviceAccountName: default

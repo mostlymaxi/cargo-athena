@@ -1,24 +1,22 @@
 # Getting Started
 
-## Prerequisites
+From nothing to a running workflow in ~5 minutes (assuming you have an
+S3-compatible bucket and Argo reachable somewhere).
 
-- **Rust** (the repo pins a toolchain via `rust-toolchain.toml`; the nix
-  dev shell provides it).
-- For `emit`: an [`athena.toml`](configuration.md) (it bakes the
-  artifact source into the YAML) — but no cluster, S3, or cross-build.
-- For `build` / running on a cluster: also an **S3-compatible bucket**
-  (real S3, MinIO, …) and a **musl cross toolchain** — both provided by
-  the nix dev shell (`cargo-zigbuild` + `zig`).
-
-The quickest way to get a correct environment is the dev shell:
+## Install
 
 ```sh
-nix develop
+cargo install cargo-athena      # the `cargo athena` subcommand
+cargo add cargo-athena          # the library, in your workflow crate
 ```
 
-## Your first workflow
+`emit` needs nothing but an `athena.toml`. `build` additionally needs
+the Zig cross toolchain — `cargo install cargo-zigbuild` plus
+[`zig`](https://ziglang.org/download/) (`cargo athena build` checks for
+both and tells you exactly what to install if either is missing). The
+repo's `nix develop` shell provides everything.
 
-Add the facade crate and annotate ordinary functions:
+## Your first workflow
 
 ```rust,ignore
 use cargo_athena::{workflow, container, fragment};
@@ -31,7 +29,7 @@ fn run_foo() {
 
 #[container(image = "ghcr.io/acme/app:latest")]
 fn run_a_container(a: String) {
-    let cfg = cargo_athena::host!("/etc/myapp");   // hostPath mount
+    let _cfg = cargo_athena::host!("/etc/myapp");  // hostPath mount
     load_extra();
     println!("regular code, got: {a}");
 }
@@ -42,56 +40,106 @@ fn load_extra() { let _ = cargo_athena::host!("/var/lib/extra"); }
 fn main() { cargo_athena::entrypoint::<run_foo>(); }   // entrypoint = a type
 ```
 
-Two things to notice:
+- The **entrypoint is a type** (`run_foo`), not a string — referencing
+  it force-links the whole reachable closure of templates.
+- `run_a_container`'s body is **real code** that runs in the pod;
+  `host!` / `load_artifact!` / `save_artifact!` declare its pod
+  resources.
 
-- The **entrypoint is a type** (`run_foo`), not a string. Referencing it
-  is what force-links the whole reachable closure of templates.
-- `run_a_container`'s body is **real code**. It runs in the pod;
-  `host!` (and `load_artifact!`/`save_artifact!`) declare the pod
-  resources it needs.
+Add an [`athena.toml`](configuration.md) somewhere at or above your
+crate (it is found by walking up, like `Cargo.toml`; or pass
+`cargo athena -c path/to/athena.toml …`). Minimal:
 
-## See the YAML (`emit`)
+```toml
+[artifact_repository.s3]
+endpoint = "s3.amazonaws.com"
+bucket   = "my-bucket"
+region   = "us-east-1"
+access_key_secret = { name = "my-s3", key = "accessKey" }
+secret_key_secret = { name = "my-s3", key = "secretKey" }
 
-`emit` runs your binary in emit-mode and relays the multi-document
-`WorkflowTemplate` stream plus a runnable `Workflow`:
+[artifact]
+key = "athena/{crate}/{version}/{bin}.tar.gz"
 
-```sh
-cargo run -q -p cargo-athena-cli -- athena emit --package cargo-athena-example-basic
+[bootstrap]
+targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]
 ```
 
-No cluster, no S3, no cross-build — just an
-[`athena.toml`](configuration.md). The fastest feedback loop while you
-shape a workflow.
-
-## Run one step locally (`run`)
-
-You can execute a single container's body in-process, exactly as it
-would run in-pod, by feeding it JSON input:
+## 1. Check the YAML — no infra needed
 
 ```sh
-cargo run -q -p cargo-athena-cli -- athena run \
-  --package cargo-athena-example-basic \
-  --template cargo-athena-example-basic-run-a-container \
-  --input '{"a":"hi"}'
+cargo athena emit --package my-workflows
 ```
 
-`--template` is the Argo name, `<crate>-<fn>` in kebab-case (override
-with `#[container(name = "…")]`).
+Relays one `WorkflowTemplate` per reachable template — stable,
+deterministic names, the artifact you register and version. No cluster,
+no S3, no cross-build — the fast inner loop while you shape the DAG.
 
-## Ship it (`build`)
+## 2. (optional) Run one step locally
 
-`build` cross-compiles a static-musl binary per target in
-[`athena.toml`](configuration.md), packages them into one `.tar.gz`, and
-prints the upload key (use `--print` for a dry run / CI):
+Execute a single container's real body in-process with JSON input:
 
 ```sh
-cargo run -q -p cargo-athena-cli -- athena build \
-  --package cargo-athena-example-basic --print
+cargo athena run --package my-workflows \
+  --template my-workflows-run-a-container --input '{"a":"hi"}'
 ```
 
-`emit` then injects that tarball — plus a tiny `sh` bootstrap — into
-every container template, so each pod pulls the binary, selects its
-architecture, and runs your function.
+`--template` is the Argo name: `<crate>-<fn>` kebab-case (override with
+`#[container(name = "…")]`).
+
+## 3. Build & upload the binary
+
+`build` cross-compiles a static-musl binary per `athena.toml` target,
+packages them into one tarball, and **prints the exact upload
+destination**:
+
+```sh
+cargo athena build --package my-workflows
+# …
+# tarball: target/athena/my-workflows.tar.gz
+# upload key: athena/my-workflows/0.1.0/my-workflows.tar.gz
+# destination: s3://my-bucket/athena/my-workflows/0.1.0/my-workflows.tar.gz (endpoint s3.amazonaws.com)
+```
+
+Upload that tarball to exactly that key — pick whichever client you
+have (the `s3://…` path is what `build` printed):
+
+```sh
+s3cmd put target/athena/my-workflows.tar.gz \
+  s3://my-bucket/athena/my-workflows/0.1.0/my-workflows.tar.gz
+
+# or:  aws s3 cp target/athena/my-workflows.tar.gz s3://my-bucket/athena/my-workflows/0.1.0/my-workflows.tar.gz
+# or:  mc cp      target/athena/my-workflows.tar.gz  myalias/my-bucket/athena/my-workflows/0.1.0/my-workflows.tar.gz
+```
+
+(`cargo athena build --print` does the dry run — resolve + print the
+key without building or uploading.)
+
+## 4. Register the templates and run it
+
+`emit` injects that tarball + a tiny `sh` bootstrap into every container
+template. Register the `WorkflowTemplate`s — they have stable,
+deterministic names, so this is plain idempotent `kubectl apply` (and
+exactly what you'd commit to a GitOps repo):
+
+```sh
+cargo athena emit --package my-workflows | kubectl apply -f -
+```
+
+Then trigger a run from the registered root template
+(`<crate>-<entrypoint>`); `--from` mints a fresh run each time, so you
+re-run with just this — no re-emit, no `generateName` object to manage:
+
+```sh
+argo submit --from workflowtemplate/my-workflows-run-foo --watch
+```
+
+> Demo shortcut: `cargo athena emit --with-workflow … | kubectl create -f -`
+> appends a convenience runnable `Workflow` and fires one run in a
+> single command. It's opt-in because that object uses `generateName`
+> (non-idempotent, not GitOps-friendly) — the deterministic templates
+> are what you keep.
 
 That is the whole loop: **write Rust → `emit` to iterate → `build` +
-submit to run.** Next: [Core Concepts](concepts.md).
+upload → `emit | kubectl apply` → `argo submit --from` to run/re-run.**
+Next: [Core Concepts](concepts.md).

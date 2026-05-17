@@ -55,7 +55,7 @@ All athena paths live under a pod-scoped `emptyDir` at `/athena`.
 | `name = "…"` | Override the Argo template name. Default `<crate>-<fn>` (kebab). |
 | `service_account = "…"` | Pod `ServiceAccount`. Default: `[defaults].service_account` from `athena.toml`. |
 | `node_selector = { "k" = "v", … }` | Template-level `nodeSelector` (the Argo controller cascades it onto this template's pods). Keys are literal; values may be injected (below). |
-| `on_exit = t` | Exit handler; like `#[workflow(on_exit)]` it reaches a runnable `Workflow` only as the emit root. |
+| `on_exit = t` | Exit handler; like `#[workflow(on_exit)]` it rides on the root `WorkflowTemplate`'s `spec.hooks.exit`, so it fires whether the root is run via `argo submit --from` or `--with-workflow`. Emit-root only. |
 
 All optional. As with `#[workflow]`, an argument *name* or a `name = "…"`
 value that a YAML 1.1 parser reads as a boolean/null is a compile error.

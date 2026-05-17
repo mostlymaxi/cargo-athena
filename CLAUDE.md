@@ -242,6 +242,28 @@ README is intentionally lean (user-facing); the *why* lives here.
 - **Each template = its own `WorkflowTemplate`**, emitted as a multi-doc
   stream; calls are `templateRef`. **Single multi-entrypoint binary**,
   dispatched by `--cargo-athena-template <crate>-<fn>`.
+- **emit default = templates only (2026-05-17, user-directed).**
+  `Collector::emit::<E>(with_workflow: bool)` emits just the
+  deterministic, stable-named `WorkflowTemplate`s by default
+  (`kubectl apply`-able, GitOps-clean, idempotent); the recommended run
+  path is `argo submit --from workflowtemplate/<root>`. `with_workflow`
+  appends the convenience runnable `Workflow` (`generateName`,
+  `workflowTemplateRef`→root) for `kubectl create -f -` demos.
+  `entrypoint()` reads `CARGO_ATHENA_WITH_WORKFLOW=1` (set by
+  `cargo athena emit --with-workflow` on the child); `scripts/e2e-test.sh`
+  passes `--with-workflow` (it splits + `argo submit`s that doc). All
+  emit goldens regenerated (no Workflow doc); smoke
+  `pipeline_with_workflow.yaml` + the in-process `smoke.rs` cover the
+  `with_workflow=true` shape. **`on_exit` works under templates-only:**
+  `emit()` now also injects `#[workflow/container(on_exit)]` onto the
+  **root WorkflowTemplate's** `spec.hooks.exit.templateRef` — proven on
+  real Argo v4.0.5 to fire via BOTH `argo submit --from
+  workflowtemplate/<root>` AND a `workflowTemplateRef` Workflow
+  (`pipeline_onexit.yaml` golden shows the root WT carrying it). The
+  runnable Workflow also keeps its own explicit hook (redundant but
+  zero-regression). Exit hooks are workflow-scoped (Argo): only the
+  emit-root's `on_exit` fires; a called sub-workflow's own `on_exit` is
+  inert.
 
 ## Binary delivery / runtime
 

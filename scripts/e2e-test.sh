@@ -74,8 +74,10 @@ mc cp "$TARBALL" \
   athena-e2e/athena-artifacts/athena/bin/e2e/0.1.0/e2e.tar.gz
 
 say "emit WorkflowTemplates + Workflow"
+# --with-workflow: this script splits out the runnable Workflow doc and
+# `argo submit`s it (the default emit is templates-only).
 ( cd "$ROOT" && cargo run -q -p cargo-athena --bin cargo-athena -- athena emit \
-    --package "$PKG" --bin "$BIN" ) > /tmp/athena-wf.yaml
+    --package "$PKG" --bin "$BIN" --with-workflow ) > /tmp/athena-wf.yaml
 
 rm -f /tmp/athena-doc-*.yaml
 awk 'BEGIN{n=1} /^---$/{n++; next} {print >> ("/tmp/athena-doc-" n ".yaml")}' \

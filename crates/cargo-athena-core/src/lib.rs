@@ -680,7 +680,14 @@ impl Collector {
     /// Emit the multi-document stream: one `WorkflowTemplate` per template
     /// plus a runnable `Workflow` for the entrypoint `E`. Builds the
     /// `BuildCtx` (and reads `athena.toml`) here — emit only.
-    pub fn emit<E: Template>(&self) -> String {
+    /// Emit the multi-doc YAML. `with_workflow` appends a convenience
+    /// runnable `Workflow` (`generateName`, `workflowTemplateRef` →
+    /// root) — off by default: the deterministic, stable-named
+    /// `WorkflowTemplate`s are the artifact you register/GitOps, and
+    /// runs are triggered with `argo submit --from
+    /// workflowtemplate/<root>`. The convenience Workflow is opt-in for
+    /// quick demos / `kubectl create -f -`.
+    pub fn emit<E: Template>(&self, with_workflow: bool) -> String {
         let ctx = BuildCtx::collect();
         let mut tpls: Vec<api::WorkflowTemplate> = self
             .builders
@@ -692,10 +699,38 @@ impl Collector {
             .collect();
         tpls.sort_by_key(name_of);
 
+        // Whole-workflow `on_exit`: carry the exit hook on the ROOT
+        // WorkflowTemplate's spec, so it fires whether the workflow is
+        // run via `argo submit --from workflowtemplate/<root>` or a
+        // `workflowTemplateRef` Workflow (both proven on real Argo
+        // v4.0.5). `templateRef` (not the legacy `spec.onExit`
+        // name-string) is what survives the one-WT-per-template model.
+        if let Some(n) = E::ON_EXIT
+            && let Some(root) =
+                tpls.iter_mut().find(|t| name_of(t) == E::ARGO_NAME)
+            && let Some(spec) = root.spec.as_mut()
+        {
+            spec.hooks.insert(
+                "exit".to_string(),
+                api::LifecycleHook {
+                    template_ref: Some(api::TemplateRef {
+                        name: n.to_string(),
+                        template: n.to_string(),
+                        cluster_scope: false,
+                    }),
+                    ..Default::default()
+                },
+            );
+        }
+
         let mut docs: Vec<String> = tpls
             .iter()
             .map(|t| serde_norway::to_string(t).expect("WorkflowTemplate is serializable"))
             .collect();
+
+        if !with_workflow {
+            return docs.join("---\n");
+        }
 
         let wf = api::Workflow {
             api_version: api::API_VERSION.to_string(),
@@ -869,7 +904,12 @@ pub fn entrypoint<E: Template>() {
         return;
     }
 
-    print!("{}", collector.emit::<E>());
+    // `cargo athena emit --with-workflow` sets this on the child so the
+    // convenience runnable Workflow is appended (default: templates
+    // only — deterministic, `kubectl apply`-able, GitOps-clean).
+    let with_workflow = std::env::var_os("CARGO_ATHENA_WITH_WORKFLOW")
+        .is_some_and(|v| v == "1");
+    print!("{}", collector.emit::<E>(with_workflow));
 }
 
 #[cfg(test)]

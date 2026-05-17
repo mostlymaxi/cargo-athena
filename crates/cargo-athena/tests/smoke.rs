@@ -53,7 +53,8 @@ fn seq() {
 fn emit<T: Template>() -> String {
     let mut c = Collector::new();
     <T as Template>::collect(&mut c);
-    c.emit::<T>()
+    // These assertions cover the runnable Workflow too, so emit it.
+    c.emit::<T>(true)
 }
 
 #[test]

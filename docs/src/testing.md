@@ -34,8 +34,8 @@ into an attribute" stay true.
 Run one container's real body with JSON input — no cluster:
 
 ```sh
-cargo run -q -p cargo-athena-cli -- athena run \
-  --template my-crate-transform --input '{"data":"hi","factor":2}'
+cargo athena run --template my-crate-transform \
+  --input '{"data":"hi","factor":2}'
 ```
 
 ## Full end-to-end against real Argo

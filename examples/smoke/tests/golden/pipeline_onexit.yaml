@@ -103,6 +103,11 @@ spec:
               parameters:
               - name: tag
                 value: '"done"'
+  hooks:
+    exit:
+      templateRef:
+        name: cargo-athena-example-smoke-teardown
+        template: cargo-athena-example-smoke-teardown
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -284,17 +289,3 @@ spec:
     - name: athena-work
       emptyDir: {}
     serviceAccountName: default
----
-apiVersion: argoproj.io/v1alpha1
-kind: Workflow
-metadata:
-  generateName: cargo-athena-example-smoke-pipeline-onexit-
-spec:
-  workflowTemplateRef:
-    name: cargo-athena-example-smoke-pipeline-onexit
-  serviceAccountName: default
-  hooks:
-    exit:
-      templateRef:
-        name: cargo-athena-example-smoke-teardown
-        template: cargo-athena-example-smoke-teardown

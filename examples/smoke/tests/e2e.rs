@@ -60,10 +60,21 @@ fn run_bin(bin: &str, envs: &[(&str, &str)]) -> String {
     String::from_utf8(out.stdout).expect("binary stdout was not UTF-8")
 }
 
-/// Emit mode: the multi-doc WorkflowTemplate stream for `pipeline`.
+/// Emit mode: the multi-doc WorkflowTemplate stream for `pipeline`
+/// (templates only — the default).
 #[test]
 fn emit_pipeline() {
     assert_golden("pipeline.yaml", &run_bin(BIN_PIPELINE, &[]));
+}
+
+/// `--with-workflow`: the same stream **plus** the convenience runnable
+/// `Workflow` (generateName, workflowTemplateRef → root).
+#[test]
+fn emit_pipeline_with_workflow() {
+    assert_golden(
+        "pipeline_with_workflow.yaml",
+        &run_bin(BIN_PIPELINE, &[("CARGO_ATHENA_WITH_WORKFLOW", "1")]),
+    );
 }
 
 /// `#[workflow]` return values: `sub_pipeline` (returns its tail call's

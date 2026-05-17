@@ -9,7 +9,7 @@
 
 use cargo_athena::{AthenaConfig, serde_json};
 use clap::{Parser, Subcommand};
-use std::process::{Command, exit};
+use std::process::{Command, Stdio, exit};
 
 /// Cargo plugin shim: invoked as `cargo athena <cmd>` → argv
 /// `cargo-athena athena <cmd>`, so `athena` is the wrapper subcommand.
@@ -23,6 +23,10 @@ enum Cargo {
 #[derive(clap::Args)]
 #[command(version, about, long_about = None)]
 struct Athena {
+    /// Path to `athena.toml`. Default: the nearest one found walking up
+    /// from the cwd (like `Cargo.toml`), or `$ATHENA_CONFIG`.
+    #[arg(short = 'c', long = "config", global = true, value_name = "FILE")]
+    config: Option<std::path::PathBuf>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -38,6 +42,11 @@ enum Cmd {
         /// Write the YAML here instead of stdout.
         #[arg(long)]
         out: Option<String>,
+        /// Also append a convenience runnable `Workflow` (generateName)
+        /// for `kubectl create -f -`. Default: templates only — register
+        /// them and run with `argo submit --from workflowtemplate/<root>`.
+        #[arg(long)]
+        with_workflow: bool,
     },
     /// Run one container's body locally, in-process.
     Run {
@@ -78,10 +87,29 @@ enum Cmd {
 
 fn main() {
     let Cargo::Athena(a) = Cargo::parse();
+    if let Some(cfg) = &a.config {
+        let abs = std::fs::canonicalize(cfg).unwrap_or_else(|e| {
+            eprintln!("--config {}: {e}", cfg.display());
+            exit(2);
+        });
+        // One unified mechanism: `AthenaConfig::load()` (in core) reads
+        // `ATHENA_CONFIG`, and the `cargo run` child we spawn for
+        // emit/run inherits it. SAFETY: single-threaded, set before any
+        // thread or child process exists.
+        unsafe { std::env::set_var("ATHENA_CONFIG", &abs) };
+    }
     match a.cmd {
-        Cmd::Emit { package, bin, out } => {
-            emit(package.as_deref(), bin.as_deref(), out.as_deref())
-        }
+        Cmd::Emit {
+            package,
+            bin,
+            out,
+            with_workflow,
+        } => emit(
+            package.as_deref(),
+            bin.as_deref(),
+            out.as_deref(),
+            with_workflow,
+        ),
         Cmd::Run {
             template,
             package,
@@ -119,10 +147,17 @@ fn cargo_run(package: Option<&str>, bin: Option<&str>) -> Command {
 
 // ---- emit -----------------------------------------------------------------
 
-fn emit(package: Option<&str>, bin: Option<&str>, out: Option<&str>) {
-    let o = cargo_run(package, bin)
-        .output()
-        .expect("failed to run user binary");
+fn emit(
+    package: Option<&str>,
+    bin: Option<&str>,
+    out: Option<&str>,
+    with_workflow: bool,
+) {
+    let mut cmd = cargo_run(package, bin);
+    if with_workflow {
+        cmd.env("CARGO_ATHENA_WITH_WORKFLOW", "1");
+    }
+    let o = cmd.output().expect("failed to run user binary");
     if !o.status.success() {
         eprint!("{}", String::from_utf8_lossy(&o.stderr));
         exit(o.status.code().unwrap_or(1));
@@ -184,6 +219,49 @@ fn render_key(template: &str, krate: &str, version: &str, bin: &str) -> String {
         .replace("{bin}", bin)
 }
 
+/// `cmd args…` exits 0 (tool is present + runnable).
+fn tool_ok(cmd: &str, args: &[&str]) -> bool {
+    Command::new(cmd)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// `build` cross-links with `cargo-zigbuild`, which uses `zig cc` as the
+/// linker — so BOTH are required. Fail explicitly with the fix instead
+/// of a cryptic mid-link error. (Not called for `--print` dry runs.)
+fn preflight_zig() {
+    let no_zigbuild = !tool_ok("cargo-zigbuild", &["--version"]);
+    let no_zig = !tool_ok("zig", &["version"]);
+    if !no_zigbuild && !no_zig {
+        return;
+    }
+    let mut msg = String::from(
+        "`cargo athena build` cross-compiles with the Zig toolchain, \
+         which is missing:\n",
+    );
+    if no_zigbuild {
+        msg.push_str(
+            "  - cargo-zigbuild  ->  cargo install cargo-zigbuild\n",
+        );
+    }
+    if no_zig {
+        msg.push_str(
+            "  - zig             ->  https://ziglang.org/download/  \
+             (or `pip install ziglang`, or your package manager)\n",
+        );
+    }
+    msg.push_str(
+        "(the repo's `nix develop` shell provides both. `cargo athena \
+         emit` and `--print` need neither.)",
+    );
+    eprintln!("{msg}");
+    exit(1);
+}
+
 fn build(
     package: Option<&str>,
     bin: Option<&str>,
@@ -219,6 +297,8 @@ fn build(
     if print {
         return;
     }
+
+    preflight_zig();
 
     std::fs::create_dir_all("target/athena").expect("mkdir target/athena");
     let stage = std::path::Path::new("target/athena/stage");

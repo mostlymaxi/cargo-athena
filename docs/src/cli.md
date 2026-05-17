@@ -17,15 +17,24 @@ the right mode. In this workspace, invoke it via
 
 ## `emit`
 
-Runs the user binary in emit-mode and relays the multi-document YAML: one
-`WorkflowTemplate` per reachable template (cross-referenced by
-`templateRef`) plus a runnable `Workflow`.
+Runs the user binary in emit-mode and relays the multi-document YAML:
+one `WorkflowTemplate` per reachable template, cross-referenced by
+`templateRef`. These have **stable, deterministic names**
+(`<crate>-<fn>`) — register them and trigger runs with
+`argo submit --from workflowtemplate/<root>`.
 
 ```sh
-cargo run -q -p cargo-athena --bin cargo-athena -- athena emit --package my-crate
-# or write it out:
-cargo run -q -p cargo-athena --bin cargo-athena -- athena emit --package my-crate --out wf.yaml
+cargo athena emit --package my-crate                    # to stdout
+cargo athena emit --package my-crate --out wf.yaml      # to a file
+cargo athena emit --package my-crate | kubectl apply -f -   # register
 ```
+
+`--with-workflow` additionally appends a convenience runnable
+`Workflow` (`generateName`, `workflowTemplateRef` → root) so
+`cargo athena emit --with-workflow … | kubectl create -f -` registers
+*and* fires one run — handy for demos. It's off by default because a
+`generateName` object isn't idempotent and isn't something you'd
+GitOps; the deterministic templates are.
 
 Needs an [`athena.toml`](configuration.md) (it bakes the artifact
 source into the YAML); no cluster, S3, or cross-build — the fast
