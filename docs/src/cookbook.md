@@ -92,15 +92,36 @@ fn consume() {
 
 ## Per-task hooks & resilience
 
+`.continue_on` / `.on_success` / `.on_failure` / `.on_error` /
+`.on_exit` are *per-task* builders — they fire for that one task,
+always:
+
 ```rust,ignore
 #[workflow]
 fn resilient() {
     let raw = fetch("u".to_string()).continue_on(failed, error);
     transform(raw, 9)
         .on_failure(alarm)
-        .on_exit(cleanup);
+        .on_exit(cleanup);     // runs when *this task* finishes
 }
 ```
+
+## Whole-workflow cleanup
+
+`on_exit_if_root` is the *workflow-level* exit handler — distinct from
+the per-task `.on_exit(t)` above. It runs once, when the workflow
+finishes, but only for the workflow you actually submit:
+
+```rust,ignore
+#[workflow(on_exit_if_root = teardown)]
+fn pipeline() { /* … */ }
+```
+
+Every `#[workflow]`/`#[container]` that sets it carries the hook on its
+*own* template, so `argo submit --from workflowtemplate/pipeline` runs
+`teardown`. When `pipeline` is instead a `templateRef`'d sub-step of a
+bigger run, *its* `on_exit_if_root` stays inert (Argo fires only the
+submitted workflow's) — submit it directly to get it.
 
 ## Pinning a pod (image / SA / node)
 

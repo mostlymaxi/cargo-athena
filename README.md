@@ -68,44 +68,30 @@ binary, picks its arch, and runs the right function — deserialize
 inputs, run the body, serialize outputs.
 
 ```sh
-nix develop
-
-cargo run -q -p cargo-athena --bin cargo-athena -- athena emit  --package cargo-athena-example-basic
-cargo run -q -p cargo-athena --bin cargo-athena -- athena build --package cargo-athena-example-basic --print
-cargo run -q -p cargo-athena --bin cargo-athena -- athena run \
-  --package cargo-athena-example-basic \
-  --template cargo-athena-example-basic-run-a-container --input '{"a":"hi"}'
+cargo athena emit  --package my-workflows                         # check the YAML (no infra)
+cargo athena build --package my-workflows                         # cross-compile + package the binary
+cargo athena emit  --package my-workflows | kubectl apply -f -    # register the templates
+argo submit --from workflowtemplate/my-workflows-run-foo --watch  # run it
 ```
+
+The full zero→running walkthrough (including uploading the binary to
+your bucket) is in the [docs](https://mostlymaxi.github.io/cargo-athena/).
 
 **Full feature reference:** [`WORKFLOW.md`](WORKFLOW.md) (every
 `#[workflow]` arg + call form) and [`CONTAINER.md`](CONTAINER.md) (every
 `#[container]` arg, `#[fragment]`, and in-pod macro). The same content is
 on the macros in `cargo doc`.
 
-## Testing
-
-In-process tests run the compiled binary and pin emit + run output:
+## Contributing
 
 ```sh
-cargo test -p cargo-athena-example-smoke                 # check
-UPDATE_EXPECT=1 cargo test -p cargo-athena-example-smoke # refresh expected output
-```
+nix develop            # toolchain + zig/cargo-zigbuild + kubectl/argo/mc (easiest; optional)
+cargo test --workspace # unit + golden + trybuild compile-fail contracts
+nix build              # -> ./result/bin/cargo-athena
 
-Full e2e against real Argo + MinIO (needs a host Docker/Podman daemon):
-
-```sh
-nix develop -c scripts/deploy.sh     # kind + Argo + MinIO + bucket + RBAC
-nix develop -c scripts/e2e-test.sh   # build -> upload -> emit -> submit -> assert
-nix develop -c scripts/teardown.sh
-```
-
-On hosts that block kind cross-node pod networking (e.g. NixOS
-default-drop `FORWARD`), set `ATHENA_E2E_SINGLE=1` for a 1-node cluster.
-
-## Build
-
-```sh
-nix build       # ./result/bin/cargo-athena
+# full e2e on real kind + Argo + MinIO (needs a Docker/Podman daemon):
+scripts/deploy.sh && scripts/e2e-test.sh && scripts/teardown.sh
+# ATHENA_E2E_SINGLE=1 for a 1-node cluster (hosts blocking kind cross-node networking)
 ```
 
 ## License

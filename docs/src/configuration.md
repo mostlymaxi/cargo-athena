@@ -3,7 +3,9 @@
 `athena.toml` describes where the binary and artifacts live and a few
 pod defaults. It is required by `cargo athena` for `build`/`emit` and is
 **never read in-pod** (everything it controls is baked into the emitted
-YAML). Point at a different file with the `ATHENA_CONFIG` env var.
+YAML). The nearest one walking up from the cwd is used (like
+`Cargo.toml`); point at a specific file with `cargo athena -c FILE …`
+or the `ATHENA_CONFIG` env var.
 
 A complete example (the one the kind e2e uses):
 

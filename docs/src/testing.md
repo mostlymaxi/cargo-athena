@@ -1,58 +1,46 @@
 # Testing
 
-cargo-athena is designed to be tested at three levels — all just
-`cargo test`.
+Three levels, from fastest to most thorough.
 
-## In-process: pin emit + run output
+## 1. A single step's real logic
 
-The compiled binary is run in-process and its emitted YAML / run output
-is compared to a checked-in expected file. Refresh on intentional
-changes:
-
-```sh
-cargo test -p cargo-athena-example-smoke                 # check
-UPDATE_EXPECT=1 cargo test -p cargo-athena-example-smoke # refresh expected
-```
-
-`examples/smoke` is the broad "all features" fixture; its checked-in
-expected YAML catches *any* change to the generated workflow before it
-reaches a cluster — a precise, fast regression net. (`examples/e2e` is
-the separate crate the live-cluster CI submits; it has no in-process
-tests.)
-
-## Compile-fail contracts
-
-The strict `#[workflow]` body contract and the macro guards are pinned
-by `trybuild` compile-fail tests: a fixture that *should not* compile,
-plus its exact expected error. This is how invariants like "calling a
-`#[fragment]` from a `#[workflow]` is an error", "an `if` used as a
-value needs an `else`", or "only `String`/number args can be injected
-into an attribute" stay true.
-
-## Single step, locally
-
-Run one container's real body with JSON input — no cluster:
+A `#[container]` body is ordinary Rust — `cargo athena run` executes it
+in-process with JSON input, exactly as it would in-pod, no cluster:
 
 ```sh
 cargo athena run --template my-crate-transform \
   --input '{"data":"hi","factor":2}'
 ```
 
-## Full end-to-end against real Argo
+This is the fast unit test for the *code* inside a step. (You can also
+just `#[test]` the plain function directly — it's normal Rust.)
 
-Spin a real kind + Argo + MinIO and submit (needs a host Docker/Podman
-daemon):
+## 2. Guard the generated workflow
+
+`cargo athena emit` is deterministic, so snapshot it and fail CI on an
+unintended change — catching DAG/wiring regressions before a cluster
+ever sees them:
 
 ```sh
-nix develop -c scripts/deploy.sh     # kind + Argo + MinIO + bucket + RBAC
-nix develop -c scripts/e2e-test.sh   # build -> upload -> emit -> submit -> assert Succeeded
-nix develop -c scripts/teardown.sh
+cargo athena emit --package my-workflows > expected.yaml   # commit this
+# in CI:
+diff <(cargo athena emit --package my-workflows) expected.yaml
 ```
 
-On hosts that block kind cross-node pod networking (e.g. NixOS
-default-drop `FORWARD`), set `ATHENA_E2E_SINGLE=1` for a single-node
-cluster.
+(cargo-athena's own test suite does exactly this with checked-in
+expected YAML across a broad "all features" fixture, plus `trybuild`
+compile-fail tests pinning the strict `#[workflow]` contract and the
+macro guards — `cargo test` in the repo.)
 
-> Conformance to real Argo is guarded **empirically** by this e2e on
-> every push to `main`, across the supported Argo matrix — see
-> [Supported Argo Versions](argo-versions.md).
+## 3. End-to-end on real Argo
+
+Register the templates and submit on any real Argo + S3 (see
+[Getting Started](getting-started.md) step 4) and assert the run
+`Succeeded`.
+
+Conformance is not a claim: every push to `main` runs the project's
+example workflow against a live Argo + MinIO **per supported version**
+and asserts success — see [Supported Argo Versions](argo-versions.md).
+The repo's `scripts/{deploy,e2e-test,teardown}.sh` reproduce that
+locally (a Docker/Podman daemon required; `nix develop` provides
+kind/argo/mc if you use Nix).

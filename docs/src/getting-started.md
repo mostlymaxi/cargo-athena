@@ -13,8 +13,11 @@ cargo add cargo-athena          # the library, in your workflow crate
 `emit` needs nothing but an `athena.toml`. `build` additionally needs
 the Zig cross toolchain — `cargo install cargo-zigbuild` plus
 [`zig`](https://ziglang.org/download/) (`cargo athena build` checks for
-both and tells you exactly what to install if either is missing). The
-repo's `nix develop` shell provides everything.
+both and tells you exactly what to install if either is missing).
+
+> Nix users: `nix develop` in the repo provides all of the above
+> (toolchain, zig/cargo-zigbuild, kubectl/argo/mc). It's a convenience,
+> not a requirement — none of the commands below assume it.
 
 ## Your first workflow
 
