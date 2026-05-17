@@ -2797,6 +2797,7 @@ fn emit_synth(s: &SynthWf) -> TokenStream2 {
         impl ::cargo_athena::Template for #ident {
             const ARGO_NAME: &'static str = #argo;
             const INPUTS: &'static [&'static str] = #inputs_slice;
+            const SYNTHETIC: bool = true;
             const KIND: ::cargo_athena::TemplateKind =
                 ::cargo_athena::TemplateKind::Workflow;
 
@@ -2928,6 +2929,13 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|(i, _)| i.to_string())
         .collect();
     let inputs_slice = str_slice(&arg_names);
+    // Stringified arg types, parallel to INPUTS — `workflow ls` shows
+    // them (same as `container ls`).
+    let arg_type_strs: Vec<String> = fn_args(&func)
+        .iter()
+        .map(|(_, t)| quote!(#t).to_string())
+        .collect();
+    let input_types_slice = str_slice(&arg_type_strs);
     let inputs_tokens = if arg_names.is_empty() {
         quote! { ::core::option::Option::None }
     } else {
@@ -3026,6 +3034,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         impl ::cargo_athena::Template for #ident {
             const ARGO_NAME: &'static str = #argo_name;
             const INPUTS: &'static [&'static str] = #inputs_slice;
+            const INPUT_TYPES: &'static [&'static str] = #input_types_slice;
             const KIND: ::cargo_athena::TemplateKind =
                 ::cargo_athena::TemplateKind::Workflow;
             #on_exit_const

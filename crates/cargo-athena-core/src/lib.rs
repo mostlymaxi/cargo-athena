@@ -241,11 +241,15 @@ pub trait Template {
     const ARGO_NAME: &'static str;
     /// Declared input parameter names, in order.
     const INPUTS: &'static [&'static str];
-    /// Stringified Rust types of [`Self::INPUTS`], same order (for
-    /// `cargo athena container emulate`'s pre-launch arg checking).
-    /// Defaulted empty: synthetic/hand impls and `#[workflow]`s don't
-    /// emit it — only `#[container]` does (it's what gets emulated).
+    /// Stringified Rust types of [`Self::INPUTS`], same order — for
+    /// `container emulate`'s pre-launch arg checking and the `ls`
+    /// listings. Emitted by `#[container]` and `#[workflow]`; defaulted
+    /// empty for synthetic/hand impls.
     const INPUT_TYPES: &'static [&'static str] = &[];
+    /// `true` for athena-synthesized templates (the `if`/`else`
+    /// wrapper + per-arm sub-workflows). They're an implementation
+    /// detail, so `workflow ls` hides them unless `--include-synthetic`.
+    const SYNTHETIC: bool = false;
     const KIND: TemplateKind;
     /// Whole-workflow exit-handler template name, from
     /// `#[workflow(on_exit_if_root=…)]` / `#[container(on_exit_if_root=…)]`.
@@ -469,8 +473,11 @@ pub struct ParamRef {
 pub struct ContainerRunMeta {
     /// Argo template name (`<crate>-<fn>`).
     pub name: String,
-    /// `"container"`, `"workflow"`, or `"other"` (synthetic).
+    /// `"container"`, `"workflow"`, or `"other"`.
     pub kind: String,
+    /// athena-synthesized template (an `if`/`else` wrapper or arm) —
+    /// `workflow ls` hides these unless `--include-synthetic`.
+    pub synthetic: bool,
     /// Resolved container image.
     pub image: String,
     /// The injected bootstrap command + args, verbatim — run as-is so
@@ -532,6 +539,9 @@ impl ContainerRunMeta {
         ContainerRunMeta {
             name: t.name.clone(),
             kind: kind.to_string(),
+            // set by the caller from the Collector (Template::SYNTHETIC
+            // isn't visible through the type-erased builder fn here).
+            synthetic: false,
             image: c.map(|c| c.image.clone()).unwrap_or_default(),
             command: c.map(|c| c.command.clone()).unwrap_or_default(),
             args: c.map(|c| c.args.clone()).unwrap_or_default(),
@@ -826,6 +836,9 @@ pub struct Collector {
     /// `<argo name> -> stringified input types` (parallel to the
     /// template's INPUTS), for `container emulate` arg type-checking.
     types: HashMap<String, &'static [&'static str]>,
+    /// Argo names of athena-synthesized templates (`Template::SYNTHETIC`)
+    /// so `workflow ls` can hide them by default.
+    synthetic: HashSet<String>,
 }
 
 impl Default for Collector {
@@ -842,6 +855,7 @@ impl Collector {
             runners: HashMap::new(),
             exits: HashMap::new(),
             types: HashMap::new(),
+            synthetic: HashSet::new(),
         }
     }
 
@@ -866,6 +880,9 @@ impl Collector {
         }
         if !T::INPUT_TYPES.is_empty() {
             self.types.insert(T::ARGO_NAME.to_string(), T::INPUT_TYPES);
+        }
+        if T::SYNTHETIC {
+            self.synthetic.insert(T::ARGO_NAME.to_string());
         }
     }
 
@@ -1118,7 +1135,9 @@ pub fn entrypoint<E: Template>() {
             .map(|b| {
                 let t = b(&ctx);
                 let it = collector.types.get(&t.name).copied().unwrap_or(&[]);
-                ContainerRunMeta::from_template(&t, it)
+                let mut m = ContainerRunMeta::from_template(&t, it);
+                m.synthetic = collector.synthetic.contains(&t.name);
+                m
             })
             .collect();
         println!(
@@ -1142,7 +1161,8 @@ pub fn entrypoint<E: Template>() {
             .find(|t| t.name == name)
             .unwrap_or_else(|| panic!("no template named {name:?}"));
         let input_types = collector.types.get(&name).copied().unwrap_or(&[]);
-        let meta = ContainerRunMeta::from_template(&tpl, input_types);
+        let mut meta = ContainerRunMeta::from_template(&tpl, input_types);
+        meta.synthetic = collector.synthetic.contains(&name);
         println!(
             "{}",
             serde_json::to_string(&meta).expect("ContainerRunMeta is serializable")

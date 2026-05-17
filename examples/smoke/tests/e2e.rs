@@ -165,13 +165,21 @@ fn describe_fetch() {
 }
 
 /// `CARGO_ATHENA_LIST`: every reachable template's metadata as a JSON
-/// array — what `cargo athena container ls` renders as a table.
+/// array — what `container ls` / `workflow ls` render as a table.
 #[test]
 fn list_all() {
     assert_golden(
         "list_all.json",
         &run_bin(BIN_NS, &[("CARGO_ATHENA_LIST", "1")]),
     );
+}
+
+/// Same, rooted at `pipeline_if` — pins `synthetic: true` on the
+/// athena-generated `if`/`else` wrapper + arm sub-workflows (what
+/// `workflow ls` hides unless `--include-synthetic`).
+#[test]
+fn list_if() {
+    assert_golden("list_if.json", &run_bin(BIN_IF, &[("CARGO_ATHENA_LIST", "1")]));
 }
 
 /// Run mode: a container that returns a value (JSON to stdout).

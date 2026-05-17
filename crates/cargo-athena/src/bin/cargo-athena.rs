@@ -59,6 +59,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ContainerCmd,
     },
+    /// `#[workflow]` operations.
+    Workflow {
+        #[command(subcommand)]
+        cmd: WorkflowCmd,
+    },
     /// Cross-compile static-musl binaries, package the tarball, print
     /// the upload key.
     Build {
@@ -102,6 +107,17 @@ enum ContainerCmd {
     Ls(emulate::LsArgs),
 }
 
+#[derive(Subcommand)]
+enum WorkflowCmd {
+    /// List the `#[workflow]`s in the package (name + typed args).
+    /// Synthetic `if`/`else` wrappers + arms are hidden unless
+    /// `--include-synthetic`.
+    Ls(emulate::WorkflowLsArgs),
+    /// Print one workflow's metadata (same as `container describe`,
+    /// for any template).
+    Describe(emulate::DescribeArgs),
+}
+
 fn main() {
     let Cargo::Athena(a) = Cargo::parse();
     if let Some(cfg) = &a.config {
@@ -129,8 +145,12 @@ fn main() {
         ),
         Cmd::Container { cmd } => match cmd {
             ContainerCmd::Emulate(args) => emulate::container_emulate(args),
-            ContainerCmd::Describe(args) => emulate::container_describe(args),
+            ContainerCmd::Describe(args) => emulate::describe_print(args),
             ContainerCmd::Ls(args) => emulate::container_ls(args),
+        },
+        Cmd::Workflow { cmd } => match cmd {
+            WorkflowCmd::Ls(args) => emulate::workflow_ls(args),
+            WorkflowCmd::Describe(args) => emulate::describe_print(args),
         },
         Cmd::Build {
             package,
