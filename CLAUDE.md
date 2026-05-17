@@ -126,24 +126,43 @@ README is intentionally lean (user-facing); the *why* lives here.
   inside a `fan_out` closure (item scope) in v1. Ghost type-checks the
   nesting free (`Foo::__athena_sig(Bar::__athena_sig())`). Smoke
   `pipeline_nested` SUBMIT-OK on real Argo v4.0.5.
-- **YAML-1.1-ambiguous parameter *values* — hard `compile_error!`.**
-  serde_norway emits `Parameter.value` per YAML 1.2 and **already
-  auto-quotes** `true`/`false`/`null`/numbers (proven: `'true'`,
-  `'null'`, `'123'` → round-trip as strings, *safe*), but leaves the
-  YAML-1.1-only booleans `y/yes/n/no/on/off` (any case, incl. `NO`/`No`)
-  **plain** — Argo's Go YAML→JSON parser then mis-types them and CRD
-  validation rejects the workflow (`must be of type string: "boolean"`).
-  No serde hook controls per-field scalar style, and `!!str` tagging
-  emits a bogus `!str`. So a literal arg/hook value in
-  `{y,yes,n,no,on,off}` is a spanned `compile_error!` (`yaml_value_unsafe`
-  in `expr_to_arg`'s `Lit::Str`). Deliberately **error not warn**: a
-  muted warning just defers to a confusing Argo-submit rejection, and
-  stable proc-macros have no real `Diagnostic::warning`. Narrower than
-  the *name* guard (`yaml_ambiguous`, which keeps the broader
-  conservative set incl. `true/false/null`): values keep `true`/`false`
-  usable. Escape hatch — only **source literals** are banned; a `"no"`
-  produced by a `#[container]` return flows via `{{…}}` (never a bare
-  scalar) and works. trybuild `wf_yaml_bool_value`.
+- **Regime B — all param values consistently JSON-encoded.**
+  `expr_to_arg`'s `Lit` arm emits `serde_json::to_string(&lit)` (str →
+  `"v"`, int/float → `7`/`1.5`, bool → `true`); task-output refs were
+  already JSON (`Value::to_string`), so *every* Argo param value is now
+  uniform JSON. The run-side is unchanged (`from_str` else `String` →
+  `from_value::<T>`), so bodies are unaffected. Wins: (1) fixes a latent
+  bug — a `String` literal `"7"` used to emit raw `7` and deserialize
+  back as a *number* (`from_value::<String>` fails); (2) **retired** the
+  old `yaml_value_unsafe` literal ban + its trybuild — a JSON `"no"` is
+  the scalar `"no"` (quoted), not the YAML-1.1 bare bool, so the hazard
+  is gone by construction; (3) lets attribute injection always use
+  `{{=fromJSON(...)}}`. `serde_json` is a `cargo-athena-macros` dep
+  (encode at macro time). Ripple: every literal-arg golden regenerated.
+- **`#[container]` attribute param injection (concat).**
+  `image`/`service_account` and `node_selector` *values* are
+  `Option<syn::Expr>`/`BTreeMap<String, syn::Expr>` (deluxe has a
+  built-in `ParseMetaItem for syn::Expr`). `inject_lower` (before
+  `container`): a lone string literal is **verbatim** (a hand-written
+  `{{…}}` passes straight through — power-user escape hatch); a
+  `+`-concat of string literals and `arg` / `arg.named.field` operands
+  lowers each operand to `{{=fromJSON(inputs.parameters['arg'](['f'])*)}}`
+  (the *raw* value — **no** outer `toJSON`, since this injects into an
+  Argo-native string field, not athena's run-side). Empirically proven
+  on real Argo v4.0.5: `{{=fromJSON}}` is honored in `image`,
+  `serviceAccountName`, AND `nodeSelector` (value *and* key) and
+  unwraps a JSON string to its raw scalar; athena's emitted `pipeline`
+  (combine) + `pipeline_inject` SUBMIT-OK. **node_selector keys are
+  literal by design** (the `String` map-key type enforces it) — not an
+  Argo limitation (Argo *does* substitute keys), a deliberate choice.
+  `name` (static template id) and `on_exit` (a path) are non-string
+  targets, excluded by nature. **Type guard:** a hidden never-run
+  `__athena_inject_check_<fn>(<real args>)` asserts each injected
+  operand is `::cargo_athena::Injectable` — a `#[doc(hidden)]` marker
+  impl'd ONLY for `String`/`str`/the numeric primitives (NOT `Display`:
+  a type's `Display` ≠ its `serde_json`→`fromJSON` raw form). Non-arg
+  ident / non-`Injectable` / tuple-index field / non-concat expr =
+  targeted `compile_error!` (trybuild `ctr_inject_*`).
 - **Per-task builder chain.** A task call may be suffixed, in any order,
   with:
   - `.continue_on(failed|error|failed, error)` (≤1) → `DAGTask.continueOn`;

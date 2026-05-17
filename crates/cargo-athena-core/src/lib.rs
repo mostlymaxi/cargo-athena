@@ -49,6 +49,23 @@ pub trait AthenaList<T> {
 impl<T> AthenaList<T> for Vec<T> {}
 impl<T, const N: usize> AthenaList<T> for [T; N] {}
 
+/// Marker for types that may be injected into a `#[container]`
+/// attribute (`image = "repo:" + tag`). Restricted to `String`/`str`
+/// and the primitive numbers: their `serde_json` form, unwrapped at
+/// runtime by `{{=fromJSON(...)}}`, renders to the obvious raw scalar
+/// (`"v"`→`v`, `7`→`7`). A `Display` bound would wrongly admit types
+/// whose `Display` differs from their JSON round-trip. The macro emits
+/// a hidden `Injectable`-bounded assertion against the real arg type.
+#[doc(hidden)]
+pub trait Injectable {}
+macro_rules! __athena_injectable {
+    ($($t:ty),* $(,)?) => { $( impl Injectable for $t {} )* };
+}
+__athena_injectable!(
+    String, str, i8, i16, i32, i64, i128, isize, u8, u16, u32, u64,
+    u128, usize, f32, f64,
+);
+
 /// `host!("/lit/path")` — declare a hostPath volume for the enclosing
 /// container, evaluating to the (already-mounted) path at runtime.
 ///

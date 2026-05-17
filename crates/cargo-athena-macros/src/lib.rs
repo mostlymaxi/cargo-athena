@@ -202,20 +202,6 @@ fn yaml_ambiguous(s: &str) -> Option<&'static str> {
     }
 }
 
-/// Like `yaml_ambiguous`, but for emitted parameter *values*. Narrower:
-/// serde_norway already force-quotes `true`/`false`/`null`/numbers (they
-/// round-trip as strings — safe), so only the YAML-1.1-only booleans it
-/// emits *plain* (`y/yes/n/no/on/off`, any case) are dangerous. A value
-/// is data the user needs, so `true`/`false` stay usable (your call) and
-/// the only fix is at compile time — at runtime the value flows through
-/// `{{...}}`, never as a bare YAML scalar.
-fn yaml_value_unsafe(s: &str) -> bool {
-    matches!(
-        s.to_ascii_lowercase().as_str(),
-        "y" | "yes" | "n" | "no" | "on" | "off"
-    )
-}
-
 /// Reject argument names (→ Argo parameter names) and `name = "…"`
 /// overrides that a YAML 1.1 parser would silently mis-type. Spanned at
 /// the offending token so the fix is obvious. Synthetic `if`/`else`
@@ -264,13 +250,19 @@ fn check_yaml_safe_names(
 
 /// `#[container(image = "...", name = "...", service_account = "...",
 ///   node_selector = { "k" = "v", ... })]`
+///
+/// `image`/`service_account` and `node_selector` *values* are
+/// expressions: a string literal, or a `+`-concatenation of string
+/// literals and container args / their named fields (param injection —
+/// see `inject_lower`). `name` is the static Argo template name;
+/// `node_selector` *keys* are literal (the `String` type enforces it).
 #[derive(deluxe::ParseMetaItem, Default)]
 #[deluxe(default)]
 struct ContainerArgs {
-    image: Option<String>,
+    image: Option<syn::Expr>,
     name: Option<String>,
-    service_account: Option<String>,
-    node_selector: std::collections::BTreeMap<String, String>,
+    service_account: Option<syn::Expr>,
+    node_selector: std::collections::BTreeMap<String, syn::Expr>,
     /// `on_exit = path::to::template` — wired onto the runnable
     /// Workflow's `spec.onExit` when this is the emit root.
     on_exit: Option<syn::Path>,
@@ -385,6 +377,98 @@ fn ghost_fn(func: &ItemFn) -> TokenStream2 {
     }
 }
 
+const UNSUPPORTED_INJECT: &str = "unsupported #[container] attribute value. \
+Use a string literal, or a `+`-concatenation of string literals and \
+container arguments / their named fields — e.g. `\"repo:\" + tag` or \
+`\"repo:\" + meta.id + \"-x\"`. Method calls, other idents, tuple/index \
+fields, and other expressions aren't supported.";
+
+/// Lower a `#[container]` attribute value to an Argo string. A lone
+/// string literal is verbatim (so a hand-written `{{…}}` passes through
+/// untouched — the power-user escape hatch). A `+`-concatenation lowers
+/// each `arg` / `arg.named.field` operand to
+/// `{{=fromJSON(inputs.parameters['arg'](['f'])*)}}` (the raw value —
+/// no outer `toJSON`, since this injects into an Argo-native string
+/// field, not athena's run-side), literal segments verbatim. Injected
+/// operands are recorded for the `Display` type-guard.
+fn inject_lower(
+    e: &Expr,
+    args: &std::collections::HashSet<String>,
+    ops: &mut Vec<Expr>,
+) -> syn::Result<String> {
+    match unwrap_expr(e) {
+        Expr::Binary(b) if matches!(b.op, syn::BinOp::Add(_)) => {
+            let mut s = inject_lower(&b.left, args, ops)?;
+            s.push_str(&inject_lower(&b.right, args, ops)?);
+            Ok(s)
+        }
+        Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(s),
+            ..
+        }) => Ok(s.value()),
+        Expr::Path(p) if p.path.segments.len() == 1 => {
+            let id = p.path.segments[0].ident.to_string();
+            if !args.contains(&id) {
+                return Err(syn::Error::new_spanned(
+                    e,
+                    format!(
+                        "`{id}` is not a parameter of this #[container] — \
+                         only its arguments can be injected."
+                    ),
+                ));
+            }
+            ops.push(unwrap_expr(e).clone());
+            Ok(format!("{{{{=fromJSON(inputs.parameters['{id}'])}}}}"))
+        }
+        Expr::Field(_) => {
+            let mut path: Vec<String> = Vec::new();
+            let mut cur = unwrap_expr(e);
+            while let Expr::Field(fe) = cur {
+                match &fe.member {
+                    syn::Member::Named(n) => path.push(n.to_string()),
+                    syn::Member::Unnamed(_) => {
+                        return Err(syn::Error::new_spanned(
+                            fe,
+                            "tuple-field access (`a.0`) can't be injected \
+                             — named struct fields only.",
+                        ));
+                    }
+                }
+                cur = unwrap_expr(&fe.base);
+            }
+            path.reverse();
+            let Expr::Path(p) = cur else {
+                return Err(syn::Error::new_spanned(
+                    cur,
+                    UNSUPPORTED_INJECT,
+                ));
+            };
+            if p.path.segments.len() != 1 {
+                return Err(syn::Error::new_spanned(
+                    cur,
+                    UNSUPPORTED_INJECT,
+                ));
+            }
+            let root = p.path.segments[0].ident.to_string();
+            if !args.contains(&root) {
+                return Err(syn::Error::new_spanned(
+                    cur,
+                    format!(
+                        "`{root}` is not a parameter of this #[container]."
+                    ),
+                ));
+            }
+            ops.push(unwrap_expr(e).clone());
+            let acc: String =
+                path.iter().map(|f| format!("['{f}']")).collect();
+            Ok(format!(
+                "{{{{=fromJSON(inputs.parameters['{root}']){acc}}}}}"
+            ))
+        }
+        other => Err(syn::Error::new_spanned(other, UNSUPPORTED_INJECT)),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // #[container]
 // ---------------------------------------------------------------------------
@@ -429,16 +513,72 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let in_art_slice = str_slice(&scan.in_artifacts);
     let out_art_slice = str_slice(&scan.out_artifacts);
     let callee_slice = str_slice(&scan.callees);
-    let image_opt = match &cfg.image {
-        Some(img) => quote! { ::core::option::Option::Some(#img) },
-        None => quote! { ::core::option::Option::None },
+    // Lower the injectable attribute values (image / service_account /
+    // node_selector values) — a string literal stays verbatim; a
+    // `+`-concat injects args as `{{=fromJSON(inputs.parameters[..])}}`.
+    let argset: std::collections::HashSet<String> =
+        arg_names.iter().cloned().collect();
+    let mut inject_ops: Vec<Expr> = Vec::new();
+    let image_s = match cfg
+        .image
+        .as_ref()
+        .map(|e| inject_lower(e, &argset, &mut inject_ops))
+        .transpose()
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
     };
-    let sa_opt = match &cfg.service_account {
-        Some(sa) => quote! { ::core::option::Option::Some(#sa) },
-        None => quote! { ::core::option::Option::None },
+    let sa_s = match cfg
+        .service_account
+        .as_ref()
+        .map(|e| inject_lower(e, &argset, &mut inject_ops))
+        .transpose()
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
     };
     let ns_keys: Vec<&String> = cfg.node_selector.keys().collect();
-    let ns_vals: Vec<&String> = cfg.node_selector.values().collect();
+    let ns_vals: Vec<String> = match cfg
+        .node_selector
+        .values()
+        .map(|e| inject_lower(e, &argset, &mut inject_ops))
+        .collect::<syn::Result<Vec<_>>>()
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let image_opt = match &image_s {
+        Some(s) => quote! { ::core::option::Option::Some(#s) },
+        None => quote! { ::core::option::Option::None },
+    };
+    let sa_opt = match &sa_s {
+        Some(s) => quote! { ::core::option::Option::Some(#s) },
+        None => quote! { ::core::option::Option::None },
+    };
+    // Type-guard: every injected operand must be `Injectable`
+    // (String/str/number) in the container's real arg types — a type
+    // whose `serde_json` form round-trips to the obvious raw scalar.
+    // Hidden, never called.
+    let inject_check = if inject_ops.is_empty() {
+        quote! {}
+    } else {
+        let orig_inputs = &func.sig.inputs;
+        let chk = format_ident!("__athena_inject_check_{}", ident);
+        quote! {
+            #[doc(hidden)]
+            #[allow(dead_code, unused, clippy::all)]
+            fn #chk(#orig_inputs) {
+                fn __athena_assert<T>(_: &T)
+                where
+                    T: ?Sized + ::cargo_athena::Injectable,
+                {
+                }
+                #(
+                    __athena_assert(&#inject_ops);
+                )*
+            }
+        }
+    };
     let vis = &func.vis;
     let sig_block = sig_shim(&ident, &func);
 
@@ -460,6 +600,9 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let expanded = quote! {
         // Hidden real implementation — executed in-pod (Run mode).
         #impl_fn
+
+        // Never-run: each injected attribute operand must be `Display`.
+        #inject_check
 
         // The importable identity: a type, not a fn.
         #[allow(non_camel_case_types)]
@@ -709,31 +852,25 @@ fn expr_to_arg(
     inputs: &std::collections::HashSet<String>,
 ) -> syn::Result<Arg> {
     match unwrap_expr(e) {
+        // Regime B: every param value is emitted as valid JSON (string
+        // -> "v", int -> v, float -> v, bool -> true/false). The run
+        // side already does `from_str` else `String`, so bodies are
+        // unaffected; this makes the value unambiguous (fixes a `String`
+        // "7" round-tripping as a number) and lets attribute
+        // interpolation always use `{{=fromJSON(...)}}`.
         Expr::Lit(syn::ExprLit { lit, .. }) => Ok(match lit {
-            syn::Lit::Str(s) => {
-                let v = s.value();
-                if yaml_value_unsafe(&v) {
-                    return Err(syn::Error::new_spanned(
-                        s,
-                        format!(
-                            "the literal value `{v}` is a YAML 1.1 \
-                             boolean: emitted as a bare scalar it is \
-                             mis-typed by Argo's YAML→JSON parser \
-                             (`must be of type string`), so the workflow \
-                             is rejected at submit. `true`/`false` are \
-                             safe (auto-quoted); for an actual `{v}` \
-                             string compute it in a #[container] and pass \
-                             the result (runtime values flow through \
-                             `{{{{…}}}}`, never a bare scalar)."
-                        ),
-                    ));
-                }
-                Arg::Lit(v)
-            }
+            syn::Lit::Str(s) => Arg::Lit(
+                serde_json::to_string(&s.value())
+                    .expect("string is JSON-serializable"),
+            ),
+            // `base10_digits()` is already a valid JSON number.
             syn::Lit::Int(i) => Arg::Lit(i.base10_digits().to_string()),
             syn::Lit::Float(f) => Arg::Lit(f.base10_digits().to_string()),
             syn::Lit::Bool(b) => Arg::Lit(b.value.to_string()),
-            other => Arg::Lit(quote!(#other).to_string()),
+            other => Arg::Lit(
+                serde_json::to_string(&quote!(#other).to_string())
+                    .expect("token text is JSON-serializable"),
+            ),
         }),
         // Owned-value conversions, emitted identically to the receiver:
         //  * `.clone()`/`.to_owned()` are type-preserving → allowed on
