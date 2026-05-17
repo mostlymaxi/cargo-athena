@@ -17,12 +17,14 @@ required-features = ["cli"]
 # `cargo add cargo-athena`) opt out with `default-features = false` to
 # drop the clap dependency.
 default = ["cli"]
-cli = ["dep:clap"]
+cli = ["dep:clap", "dep:object_store", "dep:tokio"]
 
 [dependencies]
 cargo-athena-core = { workspace = true }
 cargo-athena-macros = { workspace = true }
 clap = { workspace = true, optional = true }
+object_store = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 # trybuild builds tests/ui/*.rs as crates that depend on this package, so

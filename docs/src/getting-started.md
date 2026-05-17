@@ -78,17 +78,19 @@ Relays one `WorkflowTemplate` per reachable template — stable,
 deterministic names, the artifact you register and version. No cluster,
 no S3, no cross-build — the fast inner loop while you shape the DAG.
 
-## 2. (optional) Run one step locally
+## 2. (optional) Emulate one step locally
 
-Execute a single container's real body in-process with JSON input:
+Run a single `#[container]` under docker/podman exactly as Argo would —
+its image, the injected bootstrap, `ATHENA_PARAM_*` env:
 
 ```sh
-cargo athena run --package my-workflows \
-  --template my-workflows-run-a-container --input '{"a":"hi"}'
+cargo athena container emulate my-workflows-run-a-container -p a=hi
 ```
 
-`--template` is the Argo name: `<crate>-<fn>` kebab-case (override with
-`#[container(name = "…")]`).
+The positional name is the Argo name: `<crate>-<fn>` kebab-case
+(override with `#[container(name = "…")]`). By default the *deployed*
+binary is pulled from S3; `--build` packages a local one instead. See
+[the CLI page](cli.md#container-emulate).
 
 ## 3. Build & upload the binary
 
