@@ -87,8 +87,8 @@ on the macros in `cargo doc`.
 In-process tests run the compiled binary and pin emit + run output:
 
 ```sh
-cargo test -p cargo-athena-example-e2e                   # check
-UPDATE_EXPECT=1 cargo test -p cargo-athena-example-e2e   # refresh expected output
+cargo test -p cargo-athena-example-smoke                 # check
+UPDATE_EXPECT=1 cargo test -p cargo-athena-example-smoke # refresh expected output
 ```
 
 Full e2e against real Argo + MinIO (needs a host Docker/Podman daemon):

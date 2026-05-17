@@ -2,11 +2,13 @@
 
 ## Prerequisites
 
-- **Rust** (the repo pins a toolchain via `rust-toolchain.toml`).
-- For `emit` only, nothing else.
-- For `build` / running on a cluster: an **S3-compatible bucket** (real
-  S3, MinIO, …) and a **musl cross toolchain** — both provided by the
-  nix dev shell (`cargo-zigbuild` + `zig`).
+- **Rust** (the repo pins a toolchain via `rust-toolchain.toml`; the nix
+  dev shell provides it).
+- For `emit`: an [`athena.toml`](configuration.md) (it bakes the
+  artifact source into the YAML) — but no cluster, S3, or cross-build.
+- For `build` / running on a cluster: also an **S3-compatible bucket**
+  (real S3, MinIO, …) and a **musl cross toolchain** — both provided by
+  the nix dev shell (`cargo-zigbuild` + `zig`).
 
 The quickest way to get a correct environment is the dev shell:
 
@@ -57,8 +59,9 @@ Two things to notice:
 cargo run -q -p cargo-athena-cli -- athena emit --package cargo-athena-example-basic
 ```
 
-No cluster, no S3, no build needed — this is the fastest feedback loop
-while you shape a workflow.
+No cluster, no S3, no cross-build — just an
+[`athena.toml`](configuration.md). The fastest feedback loop while you
+shape a workflow.
 
 ## Run one step locally (`run`)
 

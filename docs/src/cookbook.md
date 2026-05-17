@@ -104,22 +104,32 @@ fn resilient() {
 
 ## Pinning a pod (image / SA / node)
 
+Static, or with a container argument spliced in (`image` /
+`service_account` / `node_selector` *values* accept `"lit" + arg`):
+
 ```rust,ignore
 #[container(
-    image = "ghcr.io/acme/heavy:latest",
-    service_account = "athena-runner",
-    node_selector = { "kubernetes.io/arch" = "amd64", "disktype" = "ssd" },
+    image           = "ghcr.io/acme/heavy:" + tag,          // arg injected
+    service_account = "athena-" + tenant + "-runner",
+    node_selector   = { "kubernetes.io/arch" = "amd64",
+                        "disktype" = profile.disk },          // a struct field
 )]
-fn heavy(x: String) -> String { x }
+fn heavy(tag: String, tenant: String, profile: Profile) -> String { tag }
 ```
+
+Operands are an argument or a named struct field of one, and must be
+`String`/`&str`/number. See
+[`#[container]` → Parameter injection](container.md).
 
 ## Pitfalls
 
 - **Fan-out a value to two consumers → `.clone()`.** The body is
   faithful Rust; Argo copies the output into each consumer, so the
   explicit clone is correct, not boilerplate.
-- **No literal YAML-1.1 booleans as values.** `t("no")` is a compile
-  error (`no` would be mis-typed by Argo's YAML parser). `true`/`false`
-  are fine; for an actual `"no"` string, return it from a container.
-- **Workflow bodies are strict.** Loops, `match`, arbitrary expressions
-  are compile errors — by design, so nothing is silently dropped.
+- **Workflow bodies are strict.** Loops, `match`, and arbitrary
+  expressions are compile errors — by design, so a step is never
+  silently dropped. `if`/`else`/`else if`, nested calls, and the
+  builder/`fan_out` chain *are* supported.
+- **Parameter values are JSON.** Every value athena emits is JSON, so
+  any string is safe (`t("no")` works) and a `String` `"7"` stays a
+  string, not a number.

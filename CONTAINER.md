@@ -54,11 +54,52 @@ All athena paths live under a pod-scoped `emptyDir` at `/athena`.
 | `image = "…"` | Container image. Default: `[bootstrap].default_image` from `athena.toml`. Arbitrary per-container. |
 | `name = "…"` | Override the Argo template name. Default `<crate>-<fn>` (kebab). |
 | `service_account = "…"` | Pod `ServiceAccount`. Default: `[defaults].service_account` from `athena.toml`. |
-| `node_selector = { "k" = "v", … }` | Template-level `nodeSelector` (the Argo controller cascades it onto this template's pods). |
+| `node_selector = { "k" = "v", … }` | Template-level `nodeSelector` (the Argo controller cascades it onto this template's pods). Keys are literal; values may be injected (below). |
 | `on_exit = t` | Exit handler; like `#[workflow(on_exit)]` it reaches a runnable `Workflow` only as the emit root. |
 
 All optional. As with `#[workflow]`, an argument *name* or a `name = "…"`
 value that a YAML 1.1 parser reads as a boolean/null is a compile error.
+
+### Parameter injection
+
+`image`, `service_account`, and `node_selector` **values** can splice in
+the container's own arguments — Argo substitutes the real value into
+those fields when the pod is created:
+
+```rust,ignore
+#[container(
+    image           = "ghcr.io/acme/app:" + tag,            // arg
+    service_account = "athena-" + tenant + "-runner",        // literal + arg + literal
+    node_selector   = { "kubernetes.io/arch" = "amd64",      // literal value
+                        "disktype" = profile.disk },         // a named struct field
+)]
+fn run(tag: String, tenant: String, profile: Profile) { /* … */ }
+```
+
+Rules:
+
+- The value is a string literal, or a `+`-concatenation of string
+  literals and operands. An operand is an **argument** (`tag`) or a
+  **named struct field of one** (`profile.disk`, `a.b.c` — named fields
+  only, no `a.0`/`a[i]`).
+- **String-literal segments are emitted verbatim.** A hand-written
+  `{{workflow.parameters.x}}` inside a literal passes through untouched
+  — the escape hatch if you know Argo's templating and want it raw.
+- Operands must be `String`/`&str` or a number (`i64`, `f64`, …).
+  That's enforced at compile time: anything else (a struct, `Vec`,
+  `bool`, …) is an error, because only those round-trip to the obvious
+  raw scalar. A non-argument identifier, a tuple/index field, or any
+  other expression is also a targeted error.
+- **`node_selector` keys are always literal.** (Argo *can* substitute
+  them, but a dynamic label key is a foot-gun, so athena forbids it by
+  design.)
+- `name` is the static Argo template identity and `on_exit` is a
+  template path — neither is an injection target.
+
+Under the hood an operand lowers to
+`{{=fromJSON(inputs.parameters['arg']['field'…])}}` — Argo evaluates it
+to the raw scalar at pod creation. You don't need to know that; the
+point is `image = "repo:" + tag` just works.
 
 ## `#[fragment]`
 

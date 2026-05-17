@@ -37,6 +37,11 @@ parameters, deserialized (serde) at pod start; the return value is
 serialized to `outputs.parameters.return` for the next step. Container
 I/O is compile-time bound to `serde` — take and return owned types.
 
+Those same arguments can also be **spliced into the pod spec**:
+`image = "repo:" + tag` injects an argument into the image (likewise
+`service_account` and `node_selector` values). See
+[`#[container]` → Parameter injection](container.md).
+
 ## 4. `#[fragment]` carries pod resources
 
 Pod resources (`host!` mounts, S3 artifact ports) are declared with

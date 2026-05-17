@@ -68,13 +68,8 @@ Notes:
 - **`.to_string()` / `.into()` are literal-only.** On a binding/input
   they would change the Rust type while emit still passes the raw
   serialized parameter — a silent mismatch — so they are rejected there.
-- **Literal value restriction.** A literal whose value is a YAML 1.1
-  boolean (`y`, `yes`, `n`, `no`, `on`, `off`, any case) is a compile
-  error: emitted as a bare YAML scalar Argo's parser mis-types it and
-  rejects the workflow at submit. `true`/`false`/numbers are safe
-  (auto-quoted). To pass an actual `"no"` string, return it from a
-  `#[container]` (runtime values flow through `{{…}}`, never a bare
-  scalar).
+  Any literal value is fine (every parameter value is emitted as JSON,
+  so a string like `"no"` is unambiguous).
 
 ### Return values
 

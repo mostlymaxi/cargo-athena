@@ -27,7 +27,9 @@ cargo run -q -p cargo-athena-cli -- athena emit --package my-crate
 cargo run -q -p cargo-athena-cli -- athena emit --package my-crate --out wf.yaml
 ```
 
-No cluster, S3, or cross-build required — the fast iteration loop.
+Needs an [`athena.toml`](configuration.md) (it bakes the artifact
+source into the YAML); no cluster, S3, or cross-build — the fast
+iteration loop.
 
 ## `run`
 
