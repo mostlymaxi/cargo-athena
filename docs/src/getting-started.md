@@ -6,9 +6,17 @@ S3-compatible bucket and Argo reachable somewhere).
 ## Install
 
 ```sh
-cargo install cargo-athena      # the `cargo athena` subcommand
-cargo add cargo-athena          # the library, in your workflow crate
+cargo install cargo-athena                     # the `cargo athena` subcommand
+cargo add cargo-athena --no-default-features    # the library, in your workflow crate
 ```
+
+> ⚠️ **Library: `--no-default-features`.** Your workflow crate needs
+> only the macros + runtime. The default `cli` feature (shipped by
+> `cargo install`) drags in the whole CLI tree — `kube`/`k8s-openapi`,
+> `reqwest`, `object_store`, `tokio`, `clap`. Disabling default
+> features keeps your dependency graph (and build) lean; the
+> `cargo athena` *binary* keeps `cli` on, so nothing about the
+> subcommand changes.
 
 `emit` needs nothing but an `athena.toml`. `build` additionally needs
 the Zig cross toolchain — `cargo install cargo-zigbuild` plus

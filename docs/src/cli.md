@@ -12,6 +12,8 @@ cargo athena [-c F] container emulate  <name> [-a k=v].. [--input-file F] [-p PK
 cargo athena [-c F] container describe <name> [-p PKG] [--bin B]
 cargo athena [-c F] workflow  ls       [-p PKG] [--bin B] [--include-synthetic]
 cargo athena [-c F] workflow  describe <name> [-p PKG] [--bin B]
+cargo athena [-c F] submit <name> [-a k=v].. [-n NS] [--service-account SA]
+                          [--node-selector k=v].. [--argo-server URL] [-y] [--update]
 cargo athena [-c F] build [-p PKG] [--bin B] [--target T].. [--print]
 cargo athena        publish [-p PKG] [--bin B]                  (not yet)
 ```
@@ -139,6 +141,43 @@ any template — handy on a `#[workflow]` to see its resolved inputs:
 ```sh
 cargo athena workflow describe my-crate-pipeline
 ```
+
+## `submit`
+
+Run a `#[workflow]` (or a single `#[container]`) on a real cluster —
+`argo submit --from workflowtemplate/<name>` with the safety rails you'd
+otherwise do by hand:
+
+```sh
+cargo athena submit my-crate-pipeline -a seed=hello
+W=$(cargo athena submit my-crate-pipeline -a seed=hello -y)   # scriptable
+```
+
+Before anything is created it:
+
+1. **type-checks** `-a`/`--input-file` against the template's real
+   signature (same report as `emulate`);
+2. confirms the **binary tarball is uploaded** (so pods can bootstrap;
+   `--skip-binary-check` to bypass);
+3. **registers + drift-checks** every reachable `WorkflowTemplate`:
+   missing ones are *created*, ones that differ from `emit` are
+   *updated* — after a **y/N prompt** (the change list is shown;
+   `--update` re-applies all, `-y/--yes` skips every prompt);
+4. creates the `Workflow` (a second **y/N**), then prints its **name to
+   stdout** (everything else is on stderr, so `W=$(… -y)` works).
+
+Transport mirrors the `argo` CLI: with **`--argo-server`/`$ARGO_SERVER`**
+set it uses the **Argo Server REST API** (`$ARGO_TOKEN` for auth,
+`--insecure-skip-tls-verify` if needed); otherwise it creates the CR
+through the **Kubernetes API** via your kubeconfig / in-cluster config
+(client-certs, tokens, and EKS/GKE/AKS exec-credential plugins all work
+— it's `kube-rs`).
+
+Overrides: `-n/--namespace` (`$ARGO_NAMESPACE` →
+[`[defaults].namespace`](configuration.md) → `default`),
+`--service-account` (→ `[defaults].service_account`), and
+`--node-selector k=v` (repeatable; set root-scoped on the submitted
+Workflow — Argo applies it to every pod).
 
 ## `build`
 

@@ -301,6 +301,10 @@ pub struct Defaults {
     /// it). The `--bin` flag wins.
     #[serde(default)]
     pub bin: Option<String>,
+    /// Default Kubernetes namespace for `cargo athena submit`. Precedence:
+    /// `-n/--namespace` → `$ARGO_NAMESPACE` → this → `"default"`.
+    #[serde(default)]
+    pub namespace: Option<String>,
 }
 
 impl Default for Defaults {
@@ -309,6 +313,7 @@ impl Default for Defaults {
             service_account: default_service_account(),
             package: None,
             bin: None,
+            namespace: None,
         }
     }
 }
@@ -904,7 +909,12 @@ impl Collector {
     /// runs are triggered with `argo submit --from
     /// workflowtemplate/<root>`. The convenience Workflow is opt-in for
     /// quick demos / `kubectl create -f -`.
-    pub fn emit<E: Template>(&self, with_workflow: bool) -> String {
+    /// The deterministic `WorkflowTemplate` set `emit` serializes —
+    /// every reachable template, sorted, with each `on_exit_if_root`
+    /// hook stamped on its own template. Shared by YAML emit and the
+    /// `CARGO_ATHENA_EMIT_JSON` mode `cargo athena submit` consumes for
+    /// its register/drift checks.
+    pub fn build_templates(&self) -> Vec<api::WorkflowTemplate> {
         let ctx = BuildCtx::collect();
         let mut tpls: Vec<api::WorkflowTemplate> = self
             .builders
@@ -942,7 +952,11 @@ impl Collector {
                 );
             }
         }
+        tpls
+    }
 
+    pub fn emit<E: Template>(&self, with_workflow: bool) -> String {
+        let tpls = self.build_templates();
         let mut docs: Vec<String> = tpls
             .iter()
             .map(|t| serde_norway::to_string(t).expect("WorkflowTemplate is serializable"))
@@ -952,6 +966,7 @@ impl Collector {
             return docs.join("---\n");
         }
 
+        let ctx = BuildCtx::collect();
         let wf = api::Workflow {
             api_version: api::API_VERSION.to_string(),
             kind: api::KIND_WORKFLOW.to_string(),
@@ -1166,6 +1181,19 @@ pub fn entrypoint<E: Template>() {
         println!(
             "{}",
             serde_json::to_string(&meta).expect("ContainerRunMeta is serializable")
+        );
+        return;
+    }
+
+    // `cargo athena submit` sets this to get the deterministic
+    // `WorkflowTemplate` set as a JSON array (structured — for its
+    // register-if-missing / drift-detect / apply checks), instead of
+    // re-parsing the YAML `emit` prints.
+    if std::env::var_os("CARGO_ATHENA_EMIT_JSON").is_some() {
+        println!(
+            "{}",
+            serde_json::to_string(&collector.build_templates())
+                .expect("WorkflowTemplate is serializable")
         );
         return;
     }

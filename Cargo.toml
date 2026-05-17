@@ -46,3 +46,12 @@ clap = { version = "4", features = ["derive"] }
 # async driver for it (CLI tool — no multi-thread runtime needed).
 object_store = { version = "0.11", features = ["aws"] }
 tokio = { version = "1", features = ["rt", "net", "time"] }
+# `cargo athena submit` only: kube-rs (kubeconfig/in-cluster + exec-auth,
+# the universal path) and reqwest (the Argo Server REST path). rustls so
+# there's no system OpenSSL requirement. NO k8s-openapi (DynamicObject).
+kube = { version = "0.99", default-features = false, features = ["client", "rustls-tls"] }
+# kube's client pulls k8s-openapi, whose build script requires the
+# top binary crate to pick a k8s version. We only use DynamicObject
+# (untyped), so `latest` is fine — the version is immaterial.
+k8s-openapi = { version = "0.24", features = ["latest"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

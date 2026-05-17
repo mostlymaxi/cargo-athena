@@ -13,11 +13,23 @@ required-features = ["cli"]
 
 [features]
 # On by default so `cargo install cargo-athena` ships the `cargo athena`
-# subcommand out of the box. Library-only users (a workflow crate doing
-# `cargo add cargo-athena`) opt out with `default-features = false` to
-# drop the clap dependency.
+# subcommand out of the box.
+#
+# IMPORTANT — library consumers should turn this OFF. A workflow crate
+# only needs the proc macros + runtime; `cargo add cargo-athena
+# --no-default-features` (or `default-features = false` in Cargo.toml)
+# drops the entire CLI dependency tree: clap, object_store, tokio,
+# **kube**, and reqwest. The bin (`cargo install cargo-athena`) keeps
+# `cli` on by default; only the *library* dependency should disable it.
 default = ["cli"]
-cli = ["dep:clap", "dep:object_store", "dep:tokio"]
+cli = [
+    "dep:clap",
+    "dep:object_store",
+    "dep:tokio",
+    "dep:kube",
+    "dep:k8s-openapi",
+    "dep:reqwest",
+]
 
 [dependencies]
 cargo-athena-core = { workspace = true }
@@ -25,6 +37,9 @@ cargo-athena-macros = { workspace = true }
 clap = { workspace = true, optional = true }
 object_store = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
+kube = { workspace = true, optional = true }
+k8s-openapi = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
 
 [dev-dependencies]
 # trybuild builds tests/ui/*.rs as crates that depend on this package, so

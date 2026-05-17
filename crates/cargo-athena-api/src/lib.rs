@@ -122,6 +122,11 @@ argo! {
         /// Set on a runnable Workflow that just invokes a WorkflowTemplate.
         pub workflow_template_ref: Option<WorkflowTemplateRef>,
         pub service_account_name: String,
+        /// Root-scoped pod scheduling for the *submitted* Workflow
+        /// (Argo applies it to every pod). Only `cargo athena submit
+        /// --node-selector` sets this; emit never does (skip-empty ⇒
+        /// existing goldens unaffected).
+        pub node_selector: BTreeMap<String, String>,
         /// Whole-workflow lifecycle hooks. Key `exit` is the exit handler
         /// (runs once when the Workflow finishes). We use this (with a
         /// `templateRef`) rather than the legacy `spec.onExit` string,
