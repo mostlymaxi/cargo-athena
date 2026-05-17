@@ -300,8 +300,22 @@ adding a field.
 ## CI / badges
 
 - `.github/workflows/e2e.yml`: on push to `main`, build tarball ONCE
-  (cached) → parallel Argo matrix (`fail-fast:false`). `publish.yml` is a
-  deliberate stub (crates.io public-only + path-dep versioning blockers).
+  (cached) → parallel Argo matrix (`fail-fast:false`).
+- `.github/workflows/publish.yml` (LIVE since repo went public): on a
+  `v*` tag (or manual dispatch) `cargo publish` in dependency order
+  **api → macros → core → cargo-athena → cargo-athena-cli**. The old
+  "path-dep versioning" blocker was already moot — `version.workspace =
+  true` + `[workspace.dependencies]` give every internal dep
+  `{ path, version = "0.1.0" }`, which `cargo publish` accepts. Needs
+  repo secret `CARGO_REGISTRY_TOKEN`; a `v<tag>` must equal
+  `[workspace.package].version`. **Load-bearing: `WORKFLOW.md`/
+  `CONTAINER.md` are symlinked into `crates/cargo-athena-macros/`**
+  (`include_str!("../WORKFLOW.md")`) — the canonical files stay at repo
+  root (README links + doc website unaffected), and `cargo package`
+  dereferences the symlinks so the published crate carries the content
+  (proven via `cargo publish --dry-run`). Do NOT delete those symlinks
+  or repoint the include_str at `../../../` (that breaks publish — the
+  file would be outside the package).
 - Per-version badges: GitHub has no per-matrix-job badge, so each job
   publishes pass/fail via `schneegans/dynamic-badges-action` to gist
   `6c34ed5be0444407c50ccf4597acba1f` (owner `mostlymaxi`); README uses

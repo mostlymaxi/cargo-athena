@@ -1,37 +1,68 @@
-name: publish (stub)
+name: publish
 
-# STUB — not wired up yet. Manual-only.
+# Publish the library + the `cargo athena` bin to crates.io on a
+# version tag (`vX.Y.Z`). Manual `workflow_dispatch` is also allowed
+# (publishes whatever version is in Cargo.toml).
 #
-# Intent: publish the library (`cargo-athena`) + the `cargo-athena` bin to
-# crates.io on tagged releases. Not active because:
-#   * crates.io is public-only — a private repo can't publish there; we'd
-#     need a public mirror or a private registry first;
-#   * workspace path-deps (core/macros/api) need real semver versions and
-#     a publish order before `cargo publish` works.
-# Kept so the release pipeline has a home once those are sorted.
+# Requires repo secret CARGO_REGISTRY_TOKEN (a crates.io API token with
+# publish-new + publish-update scope).
 
 on:
+  push:
+    tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      really:
-        description: "Type 'yes' to actually attempt (still a no-op stub)"
-        required: false
-        default: "no"
+
+concurrency:
+  group: publish
+  cancel-in-progress: false   # never cancel a release mid-flight
+
+permissions:
+  contents: read
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-      - name: stub
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: require crates.io token
         run: |
-          echo "::notice::cargo-athena publish is a stub — nothing published."
-          echo "Future steps (in dependency order):"
-          echo "  cargo publish -p cargo-athena-api"
-          echo "  cargo publish -p cargo-athena-macros"
-          echo "  cargo publish -p cargo-athena-core"
-          echo "  cargo publish -p cargo-athena       # facade lib"
-          echo "  cargo publish -p cargo-athena-cli   # the \`cargo athena\` bin"
-          echo "Blocked on: public registry availability + versioned"
-          echo "workspace deps + release tagging. input.really='${{ inputs.really }}'"
-          exit 0
+          if [ -z "${CARGO_REGISTRY_TOKEN}" ]; then
+            echo "::error::CARGO_REGISTRY_TOKEN secret is not set — cannot publish."
+            exit 1
+          fi
+
+      - name: tag must match workspace version
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          v=$(awk '/^\[workspace.package\]/{f=1} f && /^version =/{gsub(/[" ]/,"",$3);print $3;exit}' Cargo.toml)
+          tag="${GITHUB_REF_NAME#v}"
+          echo "workspace version: $v   tag: $tag"
+          if [ "$v" != "$tag" ]; then
+            echo "::error::tag v$tag does not match [workspace.package] version $v"
+            exit 1
+          fi
+
+      # Dependency order: api -> macros -> core -> facade -> cli.
+      # `cargo publish` waits for each crate to land in the index before
+      # returning, so the next crate resolves it from crates.io.
+      - name: cargo publish (dependency order)
+        run: |
+          set -euo pipefail
+          for c in cargo-athena-api cargo-athena-macros cargo-athena-core cargo-athena cargo-athena-cli; do
+            echo "::group::cargo publish -p $c"
+            nix develop -c cargo publish -p "$c" --locked
+            echo "::endgroup::"
+          done

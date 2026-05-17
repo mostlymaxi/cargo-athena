@@ -389,7 +389,7 @@ fn ghost_fn(func: &ItemFn) -> TokenStream2 {
 // #[container]
 // ---------------------------------------------------------------------------
 
-#[doc = include_str!("../../../CONTAINER.md")]
+#[doc = include_str!("../CONTAINER.md")]
 #[proc_macro_attribute]
 pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = syn::parse_macro_input!(item as ItemFn);
@@ -2673,7 +2673,7 @@ fn emit_synth(s: &SynthWf) -> TokenStream2 {
     }
 }
 
-#[doc = include_str!("../../../WORKFLOW.md")]
+#[doc = include_str!("../WORKFLOW.md")]
 #[proc_macro_attribute]
 pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = syn::parse_macro_input!(item as ItemFn);
