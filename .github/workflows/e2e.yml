@@ -98,9 +98,13 @@ jobs:
       # that shields.io endpoint badges read. Skipped entirely (not just
       # non-fatal) until BADGE_GIST_ID + GIST_TOKEN secrets exist —
       # otherwise it PATCHes an empty gist id and 404s every run.
+      # `!cancelled()` (not `always()`): a concurrency-superseded run is
+      # `cancelled`, where `job.status != 'success'` would wrongly write
+      # `failing` and clobber the badge until the next run fixes it
+      # (caches then keep showing red). Still runs on real pass/fail.
       - name: publish status badge
         if: >-
-          ${{ always() && github.ref == 'refs/heads/main'
+          ${{ !cancelled() && github.ref == 'refs/heads/main'
               && env.BADGE_ENABLED == 'true' }}
         continue-on-error: true
         uses: schneegans/dynamic-badges-action@v1.7.0

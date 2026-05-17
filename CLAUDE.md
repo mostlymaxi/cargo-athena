@@ -385,7 +385,15 @@ adding a field.
   shields.io endpoint badges. Secrets `GIST_TOKEN` (PAT, `gist` scope) +
   `BADGE_GIST_ID`. Badge step is `if:`-gated on **both secrets non-empty**
   so it's fully **skipped** (not just continue-on-error) until set — else
-  it 404s PATCHing an empty gist id.
+  it 404s PATCHing an empty gist id. Gate uses **`!cancelled()`, NOT
+  `always()`** (do not change back): a concurrency-superseded run is
+  `cancelled`, and with `always()` its badge step ran with
+  `job.status=='cancelled'` → wrote `failing` for every version,
+  clobbering the badge (then CDN/camo cached red) until the next run.
+  `!cancelled()` still publishes on genuine pass/fail. (2026-05-17: this
+  is why the v4 badge showed red right after the v0.2.0 commit+tag
+  double-push — the cancelled `main` run, not a real failure; e2e
+  v4.0.5 passed.)
 
 ## Conventions
 
