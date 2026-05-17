@@ -315,7 +315,17 @@ adding a field.
   dereferences the symlinks so the published crate carries the content
   (proven via `cargo publish --dry-run`). Do NOT delete those symlinks
   or repoint the include_str at `../../../` (that breaks publish — the
-  file would be outside the package).
+  file would be outside the package). After `cargo publish` it also
+  cuts a **GitHub Release** (`softprops/action-gh-release@v2`,
+  `generate_release_notes: true` — GitHub diffs commits since the prev
+  tag), so the job has `permissions: contents: write`; release step is
+  `if: github.ref_type == 'tag'` and after publish (skipped if publish
+  failed). **0.1.0 shipped to crates.io 2026-05-17.**
+- Each crate has its own `README.md` (auto-detected by cargo →
+  crates.io page); the facade `cargo-athena` one is the fuller landing
+  page, the rest are short stubs pointing at it. README has crates.io +
+  docs.rs badges. NOTE: crate-README/metadata changes only show on
+  crates.io at the **next** version — 0.1.0 is immutable.
 - Per-version badges: GitHub has no per-matrix-job badge, so each job
   publishes pass/fail via `schneegans/dynamic-badges-action` to gist
   `6c34ed5be0444407c50ccf4597acba1f` (owner `mostlymaxi`); README uses

@@ -3,8 +3,15 @@
 [![clippy](https://github.com/mostlymaxi/cargo-athena/actions/workflows/clippy.yml/badge.svg?branch=main)](https://github.com/mostlymaxi/cargo-athena/actions/workflows/clippy.yml)
 [![test](https://github.com/mostlymaxi/cargo-athena/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/mostlymaxi/cargo-athena/actions/workflows/test.yml)
 [![e2e](https://github.com/mostlymaxi/cargo-athena/actions/workflows/e2e.yml/badge.svg?branch=main)](https://github.com/mostlymaxi/cargo-athena/actions/workflows/e2e.yml)
+[![crates.io](https://img.shields.io/crates/v/cargo-athena.svg)](https://crates.io/crates/cargo-athena)
+[![docs.rs](https://img.shields.io/docsrs/cargo-athena)](https://docs.rs/cargo-athena)
 
 Compile regular Rust into [Argo Workflow](https://argoproj.github.io/workflows/) YAML.
+
+```sh
+cargo add cargo-athena              # the library
+cargo install cargo-athena-cli      # the `cargo athena` subcommand
+```
 
 📖 **[Documentation](https://mostlymaxi.github.io/cargo-athena/)** — from
 zero to adept (the same `#[workflow]`/`#[container]` reference is also in

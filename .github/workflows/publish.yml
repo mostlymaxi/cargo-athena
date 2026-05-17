@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false   # never cancel a release mid-flight
 
 permissions:
-  contents: read
+  contents: write   # create the GitHub Release
 
 jobs:
   publish:
@@ -66,3 +66,12 @@ jobs:
             nix develop -c cargo publish -p "$c" --locked
             echo "::endgroup::"
           done
+
+      # Only on a tag, and only after a successful publish (sequential
+      # steps — skipped if the publish above failed). GitHub auto-builds
+      # the notes by diffing commits since the previous release tag.
+      - name: GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
