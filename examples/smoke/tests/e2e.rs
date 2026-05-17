@@ -13,6 +13,7 @@ const BIN_ONEXIT: &str = env!("CARGO_BIN_EXE_smoke-onexit");
 const BIN_FIELDS: &str = env!("CARGO_BIN_EXE_smoke-fields");
 const BIN_FANOUT: &str = env!("CARGO_BIN_EXE_smoke-fanout");
 const BIN_IF: &str = env!("CARGO_BIN_EXE_smoke-if");
+const BIN_NESTED: &str = env!("CARGO_BIN_EXE_smoke-nested");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -106,6 +107,14 @@ fn emit_pipeline_fanout() {
 #[test]
 fn emit_pipeline_if() {
     assert_golden("pipeline_if.yaml", &run_bin(BIN_IF, &[]));
+}
+
+/// Nested-call lowering: a template call in argument position
+/// (recursive → output ref + dep) and a call hoisted out of an `if`
+/// condition to a parent task.
+#[test]
+fn emit_pipeline_nested() {
+    assert_golden("pipeline_nested.yaml", &run_bin(BIN_NESTED, &[]));
 }
 
 /// Run mode: a container that returns a value (JSON to stdout).

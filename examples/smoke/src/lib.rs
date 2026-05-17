@@ -270,3 +270,22 @@ pub fn pipeline_if() {
         note("other".to_string());
     }
 }
+
+/// Nested template calls — a call in argument position and a call in a
+/// condition:
+///
+/// * `note(left(decide("x")))` → `decide`, then `left` (dep `decide`),
+///   then `note` (dep `left`) — recursive, the inner result wired as a
+///   normal output ref.
+/// * `if decide("y") > 1 { … }` → `decide` is hoisted to a parent task
+///   (the condition is evaluated unconditionally, like Rust) and the
+///   `if` wrapper gates on its output.
+#[workflow]
+pub fn pipeline_nested() {
+    note(left(decide("xx".to_string())));
+    if decide("yy".to_string()) > 1 {
+        note("big".to_string());
+    } else {
+        note("small".to_string());
+    }
+}
