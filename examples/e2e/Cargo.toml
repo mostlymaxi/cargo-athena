@@ -6,12 +6,12 @@ license.workspace = true
 publish = false
 
 # The ONLY crate the kind e2e (GitHub Actions) builds + submits to a real
-# Argo + MinIO (scripts/e2e-test.sh, .github/workflows/e2e.yml). Scoped to
-# features PROVEN end-to-end on real Argo: workflow / nested-workflow /
-# container / fragment / host! / save_artifact! / container->container AND
-# workflow->container param data-deps (outputs.parameters.return resolved
-# across the templateRef wormhole) / default+override image / multi-arch
-# bootstrap.
+# Argo + MinIO (scripts/e2e-test.sh, .github/workflows/e2e.yml). One mega
+# #[workflow] exercising the FULL feature matrix end-to-end so real-Argo
+# bugs surface in CI: data-deps / nested-wf return / fan_out / if-else /
+# nested call / struct-field / save+load_artifact / image injection /
+# per-task hooks / node_selector / on_exit_if_root / host! + fragment /
+# multi-arch bootstrap.
 [lib]
 name = "cargo_athena_example_e2e"
 path = "src/lib.rs"
@@ -22,3 +22,4 @@ path = "src/main.rs"
 
 [dependencies]
 cargo-athena = { workspace = true }
+serde = { version = "1", features = ["derive"] }
