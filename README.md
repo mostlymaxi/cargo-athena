@@ -11,6 +11,10 @@ Compile regular Rust into [Argo Workflow](https://argoproj.github.io/workflows/)
 ```sh
 cargo add cargo-athena --no-default-features   # the library (lean — no CLI deps)
 cargo install cargo-athena                     # the `cargo athena` subcommand
+
+# …or get the CLI via Nix (flake):
+nix profile install github:mostlymaxi/cargo-athena   # install
+nix run github:mostlymaxi/cargo-athena -- athena …   # one-off, no install
 ```
 
 > [!IMPORTANT]

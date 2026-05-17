@@ -8,6 +8,10 @@ S3-compatible bucket and Argo reachable somewhere).
 ```sh
 cargo install cargo-athena                     # the `cargo athena` subcommand
 cargo add cargo-athena --no-default-features    # the library, in your workflow crate
+
+# …or get the CLI via the Nix flake:
+nix profile install github:mostlymaxi/cargo-athena   # install
+nix run github:mostlymaxi/cargo-athena -- athena …   # one-off
 ```
 
 > ⚠️ **Library: `--no-default-features`.** Your workflow crate needs
