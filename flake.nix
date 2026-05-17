@@ -31,17 +31,44 @@
           cargo = rustToolchain;
           rustc = rustToolchain;
         };
+
+        # Single source of truth for the version (workspace Cargo.toml).
+        version =
+          (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
       in
       {
+        # `nix build` / `nix profile install github:mostlymaxi/cargo-athena`
+        # / `nix run github:mostlymaxi/cargo-athena -- athena …`
         packages.default = rustPlatform.buildRustPackage {
           pname = "cargo-athena";
-          version = "0.1.0";
+          inherit version;
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
+          # Just the CLI binary — the workspace also has the library
+          # crates + examples we don't want in the install closure.
+          cargoBuildFlags = [
+            "--package"
+            "cargo-athena"
+            "--bin"
+            "cargo-athena"
+          ];
+          # The workspace test suite needs docker/kind/trybuild and is
+          # not a packaging concern; CI covers it.
+          doCheck = false;
           meta = {
             description = "Compile regular Rust into Argo Workflow YAML";
+            homepage = "https://github.com/mostlymaxi/cargo-athena";
+            license = with pkgs.lib.licenses; [
+              mit
+              asl20
+            ];
             mainProgram = "cargo-athena";
           };
+        };
+
+        apps.default = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/cargo-athena";
         };
 
         devShells.default = pkgs.mkShell {
