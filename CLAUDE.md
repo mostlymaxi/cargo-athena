@@ -324,7 +324,8 @@ README is intentionally lean (user-facing); the *why* lives here.
   `Template::build()` `emit` uses, via a new entrypoint mode
   `CARGO_ATHENA_DESCRIBE=<name>` → that one template's meta as JSON (not
   the Argo `api::Template` — a purpose-built runner struct so the CLI
-  never parses Argo-isms; also backs a future `container describe`).
+  never parses Argo-isms; also backs `cargo athena container describe`,
+  which just pretty-prints that metadata JSON).
   Binary source: **default `--pull`** the deployed tarball from the
   `athena.toml` S3 repo (smoke-test what's live, no source on node) via
   `object_store`+lean current-thread `tokio` (both behind the `cli`

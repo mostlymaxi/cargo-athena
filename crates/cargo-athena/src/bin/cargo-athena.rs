@@ -91,6 +91,11 @@ enum ContainerCmd {
     /// the deployed S3 tarball, so you can smoke-test what's live with
     /// no source on the node.
     Emulate(emulate::EmulateArgs),
+    /// Print the runner metadata one template reports — image,
+    /// parameters + their types, the binary/`host!`/artifact ports, the
+    /// scratch + result paths. Exactly what `emulate` consumes (derived
+    /// from the same `Template::build()` as `emit`).
+    Describe(emulate::DescribeArgs),
 }
 
 fn main() {
@@ -120,6 +125,7 @@ fn main() {
         ),
         Cmd::Container { cmd } => match cmd {
             ContainerCmd::Emulate(args) => emulate::container_emulate(args),
+            ContainerCmd::Describe(args) => emulate::container_describe(args),
         },
         Cmd::Build {
             package,

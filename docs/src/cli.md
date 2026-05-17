@@ -6,8 +6,9 @@ subcommand. It drives *your* workflow crate's binary (the one whose
 
 ```text
 cargo athena [-c FILE] emit  [--package P] [--bin B] [--out FILE] [--with-workflow]
-cargo athena [-c FILE] container emulate <argo-name> [-p k=v].. [--input-file F]
-                                         [--build|--tarball F] [--runtime R] [--skip-artifacts]
+cargo athena [-c FILE] container emulate  <argo-name> [-p k=v].. [--input-file F]
+                                          [--build|--tarball F] [--runtime R] [--skip-artifacts]
+cargo athena [-c FILE] container describe <argo-name> [--package P] [--bin B]
 cargo athena [-c FILE] build [--package P] [--bin B] [--target T].. [--print]
 cargo athena            publish [--package P] [--bin B]            (not yet)
 ```
@@ -79,6 +80,19 @@ pod's Kubernetes context.** `docker run` has no notion of a
 `ServiceAccount`, so `#[container(service_account=…)]` and any
 podSpec-level concerns (RBAC, `nodeSelector`, podSpecPatch) are **not**
 emulated. For those, exercise the real Argo path (`emit` + submit).
+
+## `container describe`
+
+Prints, as JSON, the exact runner metadata one template reports — its
+image, parameters **and their Rust types**, the binary/`host!`/artifact
+S3 ports, and the scratch + result paths. It's *the same* metadata
+`emulate` consumes (derived from the same `Template::build()` as
+`emit`), so it's the way to see what *would* run, or to script around
+it:
+
+```sh
+cargo athena container describe my-crate-transform --package my-crate --bin app
+```
 
 ## `build`
 

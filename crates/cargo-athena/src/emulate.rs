@@ -54,6 +54,29 @@ pub struct EmulateArgs {
     skip_artifacts: bool,
 }
 
+#[derive(clap::Args)]
+pub struct DescribeArgs {
+    /// Template name (`<crate>-<fn>` kebab, or the
+    /// `#[container(name = "…")]` override).
+    template: String,
+    #[arg(long)]
+    package: Option<String>,
+    #[arg(long)]
+    bin: Option<String>,
+}
+
+/// `cargo athena container describe` — print the runner metadata one
+/// template reports (image, params+types, the binary/host!/artifact
+/// ports, the scratch + result paths). This is exactly what
+/// `container emulate` consumes; useful to see what *would* run.
+pub fn container_describe(a: DescribeArgs) {
+    let meta = describe(&a.template, a.package.as_deref(), a.bin.as_deref());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&meta).expect("ContainerRunMeta is serializable")
+    );
+}
+
 fn die(msg: &str) -> ! {
     eprintln!("cargo athena container emulate: {msg}");
     exit(2);
@@ -62,7 +85,7 @@ fn die(msg: &str) -> ! {
 pub fn container_emulate(a: EmulateArgs) {
     // 1. Introspect — the binary builds the *same* template `emit` does
     //    and reports it in the runner's vocabulary.
-    let meta = describe(&a);
+    let meta = describe(&a.template, a.package.as_deref(), a.bin.as_deref());
     if meta.kind != "container" {
         die(&format!(
             "{:?} is a #[{}]; `container emulate` targets a single #[container]. \
@@ -181,22 +204,50 @@ pub fn container_emulate(a: EmulateArgs) {
 }
 
 /// Spawn the user binary in describe-mode and parse its metadata.
-fn describe(a: &EmulateArgs) -> ContainerRunMeta {
-    let mut cmd = crate::cargo_run(a.package.as_deref(), a.bin.as_deref());
-    cmd.env("CARGO_ATHENA_DESCRIBE", &a.template);
+///
+/// The binary is *your workflow crate's* (the one whose `main` calls
+/// `cargo_athena::entrypoint::<Root>()`). Run from that crate, or pass
+/// `--package`/`--bin`. A common gotcha: running inside the
+/// `cargo-athena` crate itself makes `cargo run` build the CLI, not a
+/// workflow — hence the explicit guidance below instead of dumping its
+/// clap usage.
+fn describe(template: &str, package: Option<&str>, bin: Option<&str>) -> ContainerRunMeta {
+    let hint = || -> String {
+        let where_ = match (package, bin) {
+            (Some(p), Some(b)) => format!("--package {p} --bin {b}"),
+            (Some(p), None) => format!("--package {p}"),
+            (None, Some(b)) => format!("--bin {b}"),
+            (None, None) => "this directory".to_string(),
+        };
+        format!(
+            "could not get container metadata from your workflow binary ({where_}).\n\
+             \x20 - run this from your workflow crate, or pass --package/--bin;\n\
+             \x20 - its `main` must call `cargo_athena::entrypoint::<Root>()`;\n\
+             \x20 - {template:?} must be a template reachable from that root \
+             (`<crate>-<fn>` kebab, or the #[container(name=…)] override)."
+        )
+    };
+    let mut cmd = crate::cargo_run(package, bin);
+    cmd.env("CARGO_ATHENA_DESCRIBE", template);
     let out = cmd
         .output()
-        .unwrap_or_else(|e| die(&format!("failed to run the user binary: {e}")));
-    if !out.status.success() {
-        eprint!("{}", String::from_utf8_lossy(&out.stderr));
-        die("the user binary failed in describe-mode");
+        .unwrap_or_else(|e| die(&format!("failed to spawn `cargo run`: {e}\n{}", hint())));
+    if !out.status.success() || out.stdout.is_empty() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        let tail: String = err
+            .lines()
+            .rev()
+            .take(8)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .map(|l| format!("    {l}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        die(&format!("{}\n\n  binary output (tail):\n{tail}", hint()));
     }
-    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
-        die(&format!(
-            "could not parse container metadata ({e}); is {:?} a #[container]?",
-            a.template
-        ))
-    })
+    serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|e| die(&format!("could not parse container metadata ({e}).\n{}", hint())))
 }
 
 fn detect_runtime(over: Option<&str>) -> String {
