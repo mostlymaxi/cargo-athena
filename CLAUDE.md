@@ -352,6 +352,23 @@ README is intentionally lean (user-facing); the *why* lives here.
   Empirically rechecked on live kind+MinIO+docker after the rename
   (emulate `-a`/`-p`/`--tarball` → `"hey*9"`; `ls`/`--all`/`[defaults]`
   resolution all OK).
+- **`workflow` group (2026-05-17, user-directed, follow-up PR).**
+  `cargo athena workflow ls [--include-synthetic]` +
+  `workflow describe <name>` (the latter shares `describe_print` with
+  `container describe` — works on any template). New trait const
+  `Template::SYNTHETIC` (default `false`; `emit_synth` emits `true`),
+  recorded in `Collector.synthetic`, surfaced as `ContainerRunMeta
+  .synthetic` (set in the LIST/DESCRIBE entrypoint paths — not visible
+  through the type-erased builder fn, so set by the caller). `workflow
+  ls` = kind==workflow && (`--include-synthetic` || !synthetic); the
+  `if`/`else` wrapper+arm sub-workflows are synthetic and hidden by
+  default (user: implementation detail; chose a real marker over a
+  name heuristic). `#[workflow]` now ALSO emits `INPUT_TYPES` (was
+  container-only) so `workflow ls` shows typed args, mirroring
+  `container ls`. Shared CLI helpers `fetch_list`/`print_table`.
+  Goldens: `describe_fetch.json`/`list_all.json` regen (+`synthetic`);
+  new `list_if.json` pins 7 `synthetic:true` (the if0/arm wrappers)
+  vs 6 real on the `pipeline_if` fixture.
 
 ## Artifact ports
 

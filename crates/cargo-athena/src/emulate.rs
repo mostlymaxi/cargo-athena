@@ -97,11 +97,20 @@ pub struct LsArgs {
     all: bool,
 }
 
-/// `cargo athena container describe` — print the runner metadata one
-/// template reports (image, params+types, the binary/host!/artifact
-/// ports, the scratch + result paths). This is exactly what
-/// `container emulate` consumes; useful to see what *would* run.
-pub fn container_describe(a: DescribeArgs) {
+#[derive(clap::Args)]
+pub struct WorkflowLsArgs {
+    #[command(flatten)]
+    pkg: PkgSel,
+    /// Also list athena-synthesized `if`/`else` wrapper + arm
+    /// sub-workflows (an implementation detail, hidden by default).
+    #[arg(long)]
+    include_synthetic: bool,
+}
+
+/// `container describe` / `workflow describe` — print the metadata one
+/// template reports (image, params+types, the binary/`host!`/artifact
+/// ports, scratch + result paths). Exactly what `emulate` consumes.
+pub fn describe_print(a: DescribeArgs) {
     let (pkg, bin) = a.pkg.resolve();
     let meta = describe(&a.template, pkg.as_deref(), bin.as_deref());
     println!(
@@ -110,12 +119,10 @@ pub fn container_describe(a: DescribeArgs) {
     );
 }
 
-/// `cargo athena container ls` — list the templates a workflow binary
-/// reports, so the (full) names are discoverable for copy-paste into
-/// `emulate`/`describe`. Containers only unless `--all`.
-pub fn container_ls(a: LsArgs) {
-    let (pkg, bin) = a.pkg.resolve();
-    let mut cmd = crate::cargo_run(pkg.as_deref(), bin.as_deref());
+/// Spawn the workflow binary in list-mode and parse every template's
+/// metadata (shared by `container ls` and `workflow ls`).
+fn fetch_list(pkg: Option<&str>, bin: Option<&str>) -> Vec<ContainerRunMeta> {
+    let mut cmd = crate::cargo_run(pkg, bin);
     cmd.env("CARGO_ATHENA_LIST", "1");
     let out = cmd
         .output()
@@ -124,15 +131,15 @@ pub fn container_ls(a: LsArgs) {
         eprint!("{}", String::from_utf8_lossy(&out.stderr));
         die("could not list templates (run from your workflow crate, or pass --package/--bin)");
     }
-    let all: Vec<ContainerRunMeta> = serde_json::from_slice(&out.stdout)
-        .unwrap_or_else(|e| die(&format!("could not parse template list ({e})")));
-    let mut rows: Vec<&ContainerRunMeta> = all
-        .iter()
-        .filter(|m| a.all || m.kind == "container")
-        .collect();
+    serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|e| die(&format!("could not parse template list ({e})")))
+}
+
+/// Render a `NAME  KIND  ARGS` table (rows pre-filtered + sorted).
+fn print_table(mut rows: Vec<&ContainerRunMeta>) {
     rows.sort_by(|x, y| x.name.cmp(&y.name));
     if rows.is_empty() {
-        eprintln!("(no templates)");
+        eprintln!("(no matching templates)");
         return;
     }
     let w = rows.iter().map(|m| m.name.len()).max().unwrap_or(4).max(4);
@@ -152,6 +159,30 @@ pub fn container_ls(a: LsArgs) {
             .join(", ");
         println!("{:<w$}  {:<9}  {sig}", m.name, m.kind, w = w);
     }
+}
+
+/// `cargo athena container ls` — discoverable names for
+/// `emulate`/`describe`. Containers only unless `--all`.
+pub fn container_ls(a: LsArgs) {
+    let (pkg, bin) = a.pkg.resolve();
+    let all = fetch_list(pkg.as_deref(), bin.as_deref());
+    print_table(
+        all.iter()
+            .filter(|m| a.all || m.kind == "container")
+            .collect(),
+    );
+}
+
+/// `cargo athena workflow ls` — the `#[workflow]`s in the package
+/// (synthetic `if` wrappers/arms hidden unless `--include-synthetic`).
+pub fn workflow_ls(a: WorkflowLsArgs) {
+    let (pkg, bin) = a.pkg.resolve();
+    let all = fetch_list(pkg.as_deref(), bin.as_deref());
+    print_table(
+        all.iter()
+            .filter(|m| m.kind == "workflow" && (a.include_synthetic || !m.synthetic))
+            .collect(),
+    );
 }
 
 fn die(msg: &str) -> ! {

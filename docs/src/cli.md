@@ -10,6 +10,8 @@ cargo athena [-c F] container ls       [-p PKG] [--bin B] [--all]
 cargo athena [-c F] container emulate  <name> [-a k=v].. [--input-file F] [-p PKG] [--bin B]
                                        [--build|--tarball F] [--runtime R] [--skip-artifacts]
 cargo athena [-c F] container describe <name> [-p PKG] [--bin B]
+cargo athena [-c F] workflow  ls       [-p PKG] [--bin B] [--include-synthetic]
+cargo athena [-c F] workflow  describe <name> [-p PKG] [--bin B]
 cargo athena [-c F] build [-p PKG] [--bin B] [--target T].. [--print]
 cargo athena        publish [-p PKG] [--bin B]                  (not yet)
 ```
@@ -115,6 +117,27 @@ cargo athena container ls --all      # + #[workflow]s and synthetic templates
 NAME                                  KIND       ARGS
 my-crate-fetch                        container  url: String
 my-crate-transform                    container  data: String, factor: i64
+```
+
+## `workflow ls`
+
+The `#[workflow]`s in the package (name + typed inputs). athena's
+synthesized `if`/`else` wrapper + arm sub-workflows are an
+implementation detail, so they're **hidden unless
+`--include-synthetic`**:
+
+```sh
+cargo athena workflow ls                      # your #[workflow]s
+cargo athena workflow ls --include-synthetic  # + the if/else machinery
+```
+
+## `workflow describe`
+
+Same metadata dump as [`container describe`](#container-describe), for
+any template — handy on a `#[workflow]` to see its resolved inputs:
+
+```sh
+cargo athena workflow describe my-crate-pipeline
 ```
 
 ## `build`
