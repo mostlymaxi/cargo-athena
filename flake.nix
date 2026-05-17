@@ -60,6 +60,8 @@
             pkgs.argo-workflows
             pkgs.minio-client
             pkgs.jq
+            # Documentation site (docs/, published to GitHub Pages).
+            pkgs.mdbook
           ];
 
           # Lets rust-analyzer find the standard library sources.

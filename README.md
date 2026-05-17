@@ -6,6 +6,10 @@
 
 Compile regular Rust into [Argo Workflow](https://argoproj.github.io/workflows/) YAML.
 
+📖 **[Documentation](https://mostlymaxi.github.io/cargo-athena/)** — from
+zero to adept (the same `#[workflow]`/`#[container]` reference is also in
+`cargo doc`).
+
 **Supported Argo Workflows** — every push to `main` submits the
 `examples/e2e` workflow to a real Argo + MinIO per version and
 asserts it `Succeeded`; these badges are that live result:

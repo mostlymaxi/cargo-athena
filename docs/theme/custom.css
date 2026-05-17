@@ -1,0 +1,153 @@
+/* cargo-athena docs — dark, modern, Argo-orange.
+   Loaded after the mdBook theme, so variable overrides win. */
+
+:root {
+  --athena-orange: #ff8c42;
+  --athena-orange-strong: #ff7733;
+  --athena-orange-dim: rgba(255, 140, 66, 0.22);
+}
+
+/* Recolor the accent in every built-in theme so the look is
+   consistent whether the reader picks ayu / coal / navy / light. */
+html.ayu,
+html.coal,
+html.navy,
+html.light,
+html.rust {
+  --links: var(--athena-orange);
+  --sidebar-active: var(--athena-orange);
+  --inline-code-color: var(--athena-orange-strong);
+  --search-mark-bg: var(--athena-orange-strong);
+}
+
+/* Dark base tuning (ayu = default): a touch deeper + warmer. */
+html.ayu {
+  --bg: #0e1116;
+  --sidebar-bg: #0b0e12;
+  --scrollbar: #2a2f3a;
+}
+
+/* --- Typography & layout ------------------------------------------------ */
+
+.content {
+  font-size: 1.02rem;
+  line-height: 1.7;
+}
+
+main {
+  max-width: 56rem;
+}
+
+.content h1,
+.content h2 {
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--athena-orange-dim);
+}
+
+.content h1 {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.content h2,
+.content h3 {
+  margin-top: 2.2rem;
+}
+
+.content a {
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.content a:hover {
+  color: var(--athena-orange-strong);
+  border-bottom-color: var(--athena-orange-strong);
+}
+
+/* --- Code -------------------------------------------------------------- */
+
+pre,
+pre > code {
+  border-radius: 10px;
+}
+
+pre {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+:not(pre) > code {
+  padding: 0.12em 0.4em;
+  border-radius: 5px;
+  background: rgba(255, 140, 66, 0.10);
+}
+
+/* --- Blockquotes / callouts ------------------------------------------- */
+
+blockquote {
+  border-inline-start: 4px solid var(--athena-orange) !important;
+  background: rgba(255, 140, 66, 0.06);
+  border-radius: 0 8px 8px 0;
+}
+
+/* --- Tables ------------------------------------------------------------ */
+
+.content table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.content table thead th {
+  border-bottom: 2px solid var(--athena-orange-dim);
+}
+
+.content table td,
+.content table th {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* --- Sidebar ----------------------------------------------------------- */
+
+.sidebar .sidebar-scrollbox {
+  padding-top: 0.5rem;
+}
+
+.chapter li.chapter-item a {
+  border-radius: 6px;
+  padding: 0.28em 0.5em;
+}
+
+.chapter li.chapter-item a.active {
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 var(--athena-orange);
+  background: rgba(255, 140, 66, 0.08);
+}
+
+.chapter li.chapter-item a:hover {
+  background: rgba(255, 140, 66, 0.10);
+}
+
+/* Part titles ("Reference", "Going Further"). */
+.chapter .part-title {
+  color: var(--athena-orange);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  opacity: 0.85;
+}
+
+/* --- Top bar ----------------------------------------------------------- */
+
+.menu-title {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+#menu-bar .icon-button:hover {
+  color: var(--athena-orange);
+}
+
+/* Selection. */
+::selection {
+  background: rgba(255, 140, 66, 0.30);
+}

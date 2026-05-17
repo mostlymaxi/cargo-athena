@@ -1,0 +1,26 @@
+[book]
+title = "cargo-athena"
+authors = ["Maxi Saparov"]
+description = "Compile regular Rust into Argo Workflow YAML."
+src = "src"
+language = "en"
+
+[output.html]
+default-theme = "ayu"
+preferred-dark-theme = "ayu"
+additional-css = ["theme/custom.css"]
+git-repository-url = "https://github.com/mostlymaxi/cargo-athena"
+edit-url-template = "https://github.com/mostlymaxi/cargo-athena/edit/main/docs/{path}"
+no-section-label = true
+
+[output.html.playground]
+runnable = false
+
+[output.html.search]
+enable = true
+limit-results = 20
+use-boolean-and = true
+
+[output.html.fold]
+enable = true
+level = 1

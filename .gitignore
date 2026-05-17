@@ -9,3 +9,6 @@
 .direnv/
 result
 result-*
+
+# mdBook render output (docs/ source is tracked; the build is not)
+docs/book/
