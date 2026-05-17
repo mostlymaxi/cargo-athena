@@ -164,6 +164,16 @@ fn describe_fetch() {
     );
 }
 
+/// `CARGO_ATHENA_LIST`: every reachable template's metadata as a JSON
+/// array — what `cargo athena container ls` renders as a table.
+#[test]
+fn list_all() {
+    assert_golden(
+        "list_all.json",
+        &run_bin(BIN_NS, &[("CARGO_ATHENA_LIST", "1")]),
+    );
+}
+
 /// Run mode: a container that returns a value (JSON to stdout).
 #[test]
 fn run_mode_transform() {

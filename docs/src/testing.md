@@ -13,7 +13,7 @@ bootstrap, `ATHENA_PARAM_*` env, `host!`/artifact ports), use
 Argo would, with the deployed binary pulled from S3:
 
 ```sh
-cargo athena container emulate my-crate-transform -p data=hi -p factor=2
+cargo athena container emulate my-crate-transform -a data=hi -a factor=2
 ```
 
 See [the CLI page](cli.md#container-emulate) for `--build` (local

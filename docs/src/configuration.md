@@ -26,6 +26,8 @@ targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]
 
 [defaults]
 service_account = "default"
+# package = "my-workflows"   # so `cargo athena` needs no --package/-p
+# bin     = "app"            # …or --bin, in a multi-bin crate
 ```
 
 ## `[artifact_repository.s3]`
@@ -60,6 +62,8 @@ template as an Argo `s3{}` artifact source.
 | Key | Meaning |
 |---|---|
 | `service_account` | Pod `ServiceAccount` for every container, unless overridden by `#[container(service_account = "…")]`. |
+| `package` | (optional) Default cargo package the `cargo athena` subcommands drive, so you don't repeat `-p`/`--package`. The flag wins. |
+| `bin` | (optional) Default cargo bin within it (multi-bin crates need this). The `--bin` flag wins. |
 
 > The artifact bucket is the *only* coupling between an artifact's
 > producer and consumer (see [`#[container]` → macro calls](container.md)):

@@ -289,12 +289,22 @@ pub struct Defaults {
     /// their own RBAC). Per-`#[container(service_account=...)]` overrides.
     #[serde(default = "default_service_account")]
     pub service_account: String,
+    /// Default cargo package the `cargo athena` subcommands drive (so
+    /// you don't repeat `--package`). The `--package`/`-p` flag wins.
+    #[serde(default)]
+    pub package: Option<String>,
+    /// Default cargo bin within that package (multi-bin crates need
+    /// it). The `--bin` flag wins.
+    #[serde(default)]
+    pub bin: Option<String>,
 }
 
 impl Default for Defaults {
     fn default() -> Self {
         Self {
             service_account: default_service_account(),
+            package: None,
+            bin: None,
         }
     }
 }
@@ -1097,11 +1107,32 @@ pub fn entrypoint<E: Template>() {
         return;
     }
 
-    // `cargo athena container run` sets this on the child to fetch ONE
-    // template's built `api::Template` as JSON (it then realizes that
-    // exact spec locally via docker/podman). Reusing `Template::build`
-    // here is what makes the local run identical to Argo by construction
-    // — same image, bootstrap, env, volumes, and artifacts as `emit`.
+    // `cargo athena container ls` sets this to enumerate every reachable
+    // template's metadata as a JSON array (same per-template derivation
+    // as describe — so names/params shown are exactly what runs).
+    if std::env::var_os("CARGO_ATHENA_LIST").is_some() {
+        let ctx = BuildCtx::collect();
+        let all: Vec<ContainerRunMeta> = collector
+            .builders
+            .iter()
+            .map(|b| {
+                let t = b(&ctx);
+                let it = collector.types.get(&t.name).copied().unwrap_or(&[]);
+                ContainerRunMeta::from_template(&t, it)
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string(&all).expect("ContainerRunMeta is serializable")
+        );
+        return;
+    }
+
+    // `cargo athena container emulate/describe` sets this to fetch ONE
+    // template's metadata as JSON (it then realizes that exact spec
+    // locally via docker/podman). Reusing `Template::build` here is what
+    // makes the local run identical to Argo by construction — same
+    // image, bootstrap, env, volumes, and artifacts as `emit`.
     if let Ok(name) = std::env::var("CARGO_ATHENA_DESCRIBE") {
         let ctx = BuildCtx::collect();
         let tpl = collector
