@@ -92,8 +92,9 @@ fn emit_pipeline_hooks() {
     assert_golden("pipeline_hooks.yaml", &run_bin(BIN_HOOKS, &[]));
 }
 
-/// `#[workflow(on_exit=…)]` -> runnable Workflow `spec.onExit`, plus an
-/// `.on_exit(record("done"))` exit hook carrying arguments.
+/// `#[workflow(on_exit_if_root=…)]` -> the template's own
+/// `spec.hooks.exit`, plus a per-task `.on_exit(record("done"))` hook
+/// carrying arguments.
 #[test]
 fn emit_pipeline_onexit() {
     assert_golden("pipeline_onexit.yaml", &run_bin(BIN_ONEXIT, &[]));

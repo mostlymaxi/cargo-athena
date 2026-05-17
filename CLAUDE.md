@@ -155,8 +155,9 @@ README is intentionally lean (user-facing); the *why* lives here.
   (combine) + `pipeline_inject` SUBMIT-OK. **node_selector keys are
   literal by design** (the `String` map-key type enforces it) — not an
   Argo limitation (Argo *does* substitute keys), a deliberate choice.
-  `name` (static template id) and `on_exit` (a path) are non-string
-  targets, excluded by nature. **Type guard:** a hidden never-run
+  `name` (static template id) and `on_exit_if_root` (a path) are
+  non-string targets, excluded by nature. **Type guard:** a hidden
+  never-run
   `__athena_inject_check_<fn>(<real args>)` asserts each injected
   operand is `::cargo_athena::Injectable` — a `#[doc(hidden)]` marker
   impl'd ONLY for `String`/`str`/the numeric primitives (NOT `Display`:
@@ -185,20 +186,29 @@ README is intentionally lean (user-facing); the *why* lives here.
   Hook templates are force-linked/emitted via the wormhole (in
   `collect()`). Argo-validated: smoke `pipeline_hooks`/`pipeline_onexit`
   SUBMIT-OK + `.on_failure` fires on real v4.0.5.
-- **Whole-workflow exit handler: `#[workflow(on_exit=t)]` /
-  `#[container(on_exit=t)]` → `Template::ON_EXIT` (default `None`).**
-  `emit::<E>()` wires it onto the runnable Workflow as
-  **`spec.hooks.exit.templateRef`** — NOT the legacy `spec.onExit`
-  string. EMPIRICAL (kind v4.0.5): `spec.onExit: <name>` is REJECTED
-  (`template reference … not found`) because it resolves only a *local*
-  `templates[]` name and the runnable Workflow is just a
-  `workflowTemplateRef`; `spec.hooks.exit.templateRef` is SUBMIT-OK and
-  the handler pod runs (proven, `EXITRAN`). Same wormhole lesson as
-  `outputs.result`→`outputs.parameters.return`: structured `templateRef`
-  survives, name-strings don't. Only the **emit root**'s `ON_EXIT`
-  reaches a runnable Workflow, so non-root `on_exit` is naturally inert
-  (matches Argo's entrypoint/workflow scope) — no static entrypoint
-  detection needed. Handler template force-linked via `collect()`.
+- **Whole-workflow exit handler: `#[workflow(on_exit_if_root=t)]` /
+  `#[container(on_exit_if_root=t)]` → `Template::ON_EXIT` (default
+  `None`).** Renamed from `on_exit` 2026-05-17 (user) to (a) say the
+  semantic — it only fires when this workflow is the submitted run's
+  root — and (b) not be visually confused with the per-task
+  `.on_exit(t)` builder (a *different*, always-fires task hook, peeled
+  by `peel_builders`; that one keeps the name `on_exit`). **emit puts
+  it on EACH template's own `spec.hooks.exit.templateRef`** (every
+  template with `on_exit_if_root`, not just root): `Collector::add::<T>()`
+  records `ARGO_NAME→ON_EXIT` in `exits`; `emit()` injects per-WT.
+  `templateRef` form — NOT the legacy `spec.onExit` string (EMPIRICAL
+  kind v4.0.5: `spec.onExit:<name>` REJECTED — resolves only a *local*
+  `templates[]` name; `spec.hooks.exit.templateRef` SUBMIT-OK + handler
+  pod runs `EXITRAN`; structured templateRef survives the wormhole,
+  name-strings don't). Argo runs exit hooks **workflow-scoped**: only
+  the *submitted* workflow's hook fires (proven on v4.0.5 via BOTH
+  `argo submit --from workflowtemplate/<X>` AND a `workflowTemplateRef`
+  Workflow). A templateRef'd sub-workflow's own hook stays inert when
+  nested (probed: root OUTER_EXIT + SUBRAN, no INNER_EXIT) — but submit
+  that sub-WT directly and its own hook fires (the point of putting it
+  on every WT). The `--with-workflow` runnable Workflow also keeps its
+  own explicit `hooks` for the root (redundant, zero-regression).
+  Handler templates force-linked via `collect()`.
 - **`nodeSelector` DOES cascade (empirical, real Argo v4.0.5,
   2026-05-16).** A parent DAG/steps template's `nodeSelector` is merged
   by the Argo controller onto the pods of templates it calls via
@@ -254,16 +264,12 @@ README is intentionally lean (user-facing); the *why* lives here.
   passes `--with-workflow` (it splits + `argo submit`s that doc). All
   emit goldens regenerated (no Workflow doc); smoke
   `pipeline_with_workflow.yaml` + the in-process `smoke.rs` cover the
-  `with_workflow=true` shape. **`on_exit` works under templates-only:**
-  `emit()` now also injects `#[workflow/container(on_exit)]` onto the
-  **root WorkflowTemplate's** `spec.hooks.exit.templateRef` — proven on
-  real Argo v4.0.5 to fire via BOTH `argo submit --from
-  workflowtemplate/<root>` AND a `workflowTemplateRef` Workflow
-  (`pipeline_onexit.yaml` golden shows the root WT carrying it). The
-  runnable Workflow also keeps its own explicit hook (redundant but
-  zero-regression). Exit hooks are workflow-scoped (Argo): only the
-  emit-root's `on_exit` fires; a called sub-workflow's own `on_exit` is
-  inert.
+  `with_workflow=true` shape. **`on_exit_if_root` under templates-only:**
+  see the dedicated exit-handler bullet above — every template with
+  `on_exit_if_root` carries `spec.hooks.exit` on its OWN WorkflowTemplate
+  (`pipeline_onexit.yaml` shows it); Argo fires only the submitted
+  workflow's hook (workflow-scoped, proven via `--from` and
+  `workflowTemplateRef`).
 
 ## Binary delivery / runtime
 

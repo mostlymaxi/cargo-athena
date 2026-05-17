@@ -243,10 +243,10 @@ pub trait Template {
     const INPUTS: &'static [&'static str];
     const KIND: TemplateKind;
     /// Whole-workflow exit-handler template name, from
-    /// `#[workflow(on_exit=…)]`/`#[container(on_exit=…)]`. Only the emit
-    /// root becomes a runnable `Workflow`, so only the root's takes
-    /// effect (Argo `spec.onExit` is entrypoint/workflow-scoped) —
-    /// non-root values are naturally inert.
+    /// `#[workflow(on_exit_if_root=…)]` / `#[container(on_exit_if_root=…)]`.
+    /// `emit` puts it on this template's own `spec.hooks.exit`; Argo
+    /// fires exit hooks workflow-scoped, so it runs only when this
+    /// workflow is the one submitted (inert as a nested templateRef).
     const ON_EXIT: Option<&'static str> = None;
 
     /// Build this template's inner Argo `template` object.
@@ -641,6 +641,12 @@ pub struct Collector {
     /// Deferred so `athena.toml` is read only at emit, never run-mode.
     builders: Vec<fn(&BuildCtx) -> api::Template>,
     runners: HashMap<String, fn(serde_json::Value) -> serde_json::Value>,
+    /// `<argo name> -> <on_exit handler argo name>` for *every* template
+    /// with an `on_exit` (not just the root). Each WorkflowTemplate
+    /// carries its own `spec.hooks.exit`; Argo only fires the hook of
+    /// the workflow that is actually submitted (workflow-scoped), so
+    /// submitting a sub-workflow's template directly runs its own hook.
+    exits: HashMap<String, &'static str>,
 }
 
 impl Default for Collector {
@@ -655,6 +661,7 @@ impl Collector {
             seen: HashSet::new(),
             builders: Vec::new(),
             runners: HashMap::new(),
+            exits: HashMap::new(),
         }
     }
 
@@ -667,6 +674,16 @@ impl Collector {
     /// Register a template's `build` fn (invoked lazily at emit).
     pub fn add_builder(&mut self, build: fn(&BuildCtx) -> api::Template) {
         self.builders.push(build);
+    }
+
+    /// Register a template by type: its `build` fn plus, if it sets
+    /// `on_exit_if_root`, its exit handler keyed by Argo name (so
+    /// `emit` can put `spec.hooks.exit` on *that* WorkflowTemplate).
+    pub fn add<T: Template>(&mut self) {
+        self.builders.push(T::build);
+        if let Some(handler) = T::ON_EXIT {
+            self.exits.insert(T::ARGO_NAME.to_string(), handler);
+        }
     }
 
     pub fn add_runner(
@@ -699,28 +716,31 @@ impl Collector {
             .collect();
         tpls.sort_by_key(name_of);
 
-        // Whole-workflow `on_exit`: carry the exit hook on the ROOT
-        // WorkflowTemplate's spec, so it fires whether the workflow is
-        // run via `argo submit --from workflowtemplate/<root>` or a
-        // `workflowTemplateRef` Workflow (both proven on real Argo
-        // v4.0.5). `templateRef` (not the legacy `spec.onExit`
-        // name-string) is what survives the one-WT-per-template model.
-        if let Some(n) = E::ON_EXIT
-            && let Some(root) =
-                tpls.iter_mut().find(|t| name_of(t) == E::ARGO_NAME)
-            && let Some(spec) = root.spec.as_mut()
-        {
-            spec.hooks.insert(
-                "exit".to_string(),
-                api::LifecycleHook {
-                    template_ref: Some(api::TemplateRef {
-                        name: n.to_string(),
-                        template: n.to_string(),
-                        cluster_scope: false,
-                    }),
-                    ..Default::default()
-                },
-            );
+        // `on_exit_if_root`: EVERY template that declares it carries the
+        // exit hook on its OWN WorkflowTemplate's `spec.hooks.exit`
+        // (`templateRef` — the legacy `spec.onExit` name-string can't
+        // cross the one-WT-per-template model). Argo only fires the hook
+        // of the workflow actually submitted (workflow-scoped, proven on
+        // real Argo v4.0.5 via both `argo submit --from` and a
+        // `workflowTemplateRef` Workflow); a templateRef'd sub-workflow's
+        // own hook stays inert when nested — but submit that sub-WT
+        // directly and its own hook fires.
+        for t in tpls.iter_mut() {
+            if let Some(handler) = self.exits.get(&name_of(t))
+                && let Some(spec) = t.spec.as_mut()
+            {
+                spec.hooks.insert(
+                    "exit".to_string(),
+                    api::LifecycleHook {
+                        template_ref: Some(api::TemplateRef {
+                            name: handler.to_string(),
+                            template: handler.to_string(),
+                            cluster_scope: false,
+                        }),
+                        ..Default::default()
+                    },
+                );
+            }
         }
 
         let mut docs: Vec<String> = tpls

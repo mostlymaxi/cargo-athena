@@ -18,14 +18,14 @@ runtime surprises.
 ## Attribute arguments
 
 ```rust,ignore
-#[workflow(name = "...", steps, on_exit = path::to::template)]
+#[workflow(name = "...", steps, on_exit_if_root = path::to::template)]
 ```
 
 | Arg | Effect |
 |---|---|
 | `name = "my-name"` | Override the Argo template name. Default is `<crate>-<fn>` (kebab-case). |
 | `steps` | Emit an Argo `steps:` template (one sequential group per statement, refs via `{{steps.X…}}`, no `dependencies`) instead of the default data-dependency `dag:`. |
-| `on_exit = t` | Whole-workflow exit handler, carried on the **root `WorkflowTemplate`'s** `spec.hooks.exit.templateRef`, so it fires whichever way the root is run — `argo submit --from workflowtemplate/<root>` *or* a `workflowTemplateRef` Workflow (`--with-workflow`). Emit-root only; a non-root `on_exit` is inert (matches Argo's workflow scope). |
+| `on_exit_if_root = t` | Whole-workflow exit handler. Every workflow that sets it carries it on **its own** `WorkflowTemplate`'s `spec.hooks.exit.templateRef`. Argo runs exit hooks workflow-scoped: only the workflow you actually **submit** fires its handler — so `argo submit --from workflowtemplate/X` runs *X*'s handler; *X*'s handler stays inert when *X* is just a `templateRef`'d sub-step of a bigger run (submit it directly to get it). Distinct from the per-task `.on_exit(t)` builder, which is a different, always-fires task hook. |
 
 All are optional. A parameter *name* (i.e. a function argument) or a
 `name = "…"` value that a YAML 1.1 parser reads as a boolean/null

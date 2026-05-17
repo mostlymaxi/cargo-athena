@@ -263,19 +263,22 @@ struct ContainerArgs {
     name: Option<String>,
     service_account: Option<syn::Expr>,
     node_selector: std::collections::BTreeMap<String, syn::Expr>,
-    /// `on_exit = path::to::template` — wired onto the runnable
-    /// Workflow's `spec.onExit` when this is the emit root.
-    on_exit: Option<syn::Path>,
+    /// `on_exit_if_root = path::to::template` — whole-workflow exit
+    /// handler on this template's own `spec.hooks.exit`; Argo fires it
+    /// only when this workflow is the one submitted (the run's root).
+    /// Named distinctly from the per-task `.on_exit(t)` builder.
+    on_exit_if_root: Option<syn::Path>,
 }
 
-/// `#[workflow(name = "...", steps, on_exit = teardown)]` — bare `steps`
-/// opts into Argo `steps:` (sequential) instead of the default `dag:`.
+/// `#[workflow(name = "...", steps, on_exit_if_root = teardown)]` —
+/// bare `steps` opts into Argo `steps:` (sequential) vs the default
+/// `dag:`.
 #[derive(deluxe::ParseMetaItem, Default)]
 #[deluxe(default)]
 struct WorkflowArgs {
     name: Option<String>,
     steps: deluxe::Flag,
-    on_exit: Option<syn::Path>,
+    on_exit_if_root: Option<syn::Path>,
 }
 
 /// Parse attribute args into `T`, or return a `compile_error!`.
@@ -582,9 +585,9 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let vis = &func.vis;
     let sig_block = sig_shim(&ident, &func);
 
-    // `#[container(on_exit = t)]`: Template::ON_EXIT (root-only effect) +
-    // force-link/emit the handler template.
-    let (on_exit_const, on_exit_collect) = match &cfg.on_exit {
+    // `#[container(on_exit_if_root = t)]`: Template::ON_EXIT (fires when
+    // this template is the submitted workflow) + force-link the handler.
+    let (on_exit_const, on_exit_collect) = match &cfg.on_exit_if_root {
         Some(p) => (
             quote! {
                 const ON_EXIT: ::core::option::Option<&'static str> =
@@ -719,7 +722,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                 if !__out.enter(<Self as ::cargo_athena::Template>::ARGO_NAME) {
                     return;
                 }
-                __out.add_builder(<Self as ::cargo_athena::Template>::build);
+                __out.add::<Self>();
                 __out.add_runner(
                     <Self as ::cargo_athena::Template>::ARGO_NAME,
                     <Self as ::cargo_athena::Template>::run,
@@ -2799,9 +2802,7 @@ fn emit_synth(s: &SynthWf) -> TokenStream2 {
                 ) {
                     return;
                 }
-                __out.add_builder(
-                    <Self as ::cargo_athena::Template>::build,
-                );
+                __out.add::<Self>();
                 #(
                     <#callees as ::cargo_athena::Template>::collect(__out);
                 )*
@@ -2896,7 +2897,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
             std::iter::once(&n.callee)
                 .chain(n.hooks.iter().map(|h| &h.template))
         })
-        .chain(cfg.on_exit.iter())
+        .chain(cfg.on_exit_if_root.iter())
         .filter(|p| seen_callees.insert(quote!(#p).to_string()))
         .collect();
 
@@ -2953,9 +2954,10 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    // `#[workflow(on_exit = t)]` -> Template::ON_EXIT (only the emit
-    // root's reaches a runnable Workflow's spec.onExit).
-    let on_exit_const = match &cfg.on_exit {
+    // `#[workflow(on_exit_if_root = t)]` -> Template::ON_EXIT (emit
+    // puts it on this template's own spec.hooks.exit; Argo fires it
+    // only for the submitted workflow).
+    let on_exit_const = match &cfg.on_exit_if_root {
         Some(p) => quote! {
             const ON_EXIT: ::core::option::Option<&'static str> =
                 ::core::option::Option::Some(
@@ -3000,7 +3002,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
                 if !__out.enter(<Self as ::cargo_athena::Template>::ARGO_NAME) {
                     return;
                 }
-                __out.add_builder(<Self as ::cargo_athena::Template>::build);
+                __out.add::<Self>();
                 #(
                     <#callee_paths as ::cargo_athena::Template>::collect(__out);
                 )*

@@ -158,10 +158,11 @@ pub fn record(tag: String) {
     println!("record {tag}");
 }
 
-/// `#[workflow(on_exit = t)]` → the runnable Workflow's `spec.onExit`
-/// (only when this is the emit root). `.on_exit(record("done"))` → an
-/// exit hook *with arguments* (resolved like task args).
-#[workflow(on_exit = teardown)]
+/// `#[workflow(on_exit_if_root = t)]` → this workflow's own
+/// `spec.hooks.exit` (Argo fires it only when this workflow is the one
+/// submitted). The per-task `.on_exit(record("done"))` is a different,
+/// always-fires task hook (here *with arguments*).
+#[workflow(on_exit_if_root = teardown)]
 pub fn pipeline_onexit() {
     let raw = fetch("https://example.com".to_string());
     transform(raw, 2).on_exit(record("done"));

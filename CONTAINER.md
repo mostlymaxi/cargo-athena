@@ -45,7 +45,7 @@ All athena paths live under a pod-scoped `emptyDir` at `/athena`.
     name = "...",
     service_account = "athena-runner",
     node_selector = { "kubernetes.io/arch" = "amd64", "disktype" = "ssd" },
-    on_exit = path::to::template,
+    on_exit_if_root = path::to::template,
 )]
 ```
 
@@ -55,7 +55,7 @@ All athena paths live under a pod-scoped `emptyDir` at `/athena`.
 | `name = "…"` | Override the Argo template name. Default `<crate>-<fn>` (kebab). |
 | `service_account = "…"` | Pod `ServiceAccount`. Default: `[defaults].service_account` from `athena.toml`. |
 | `node_selector = { "k" = "v", … }` | Template-level `nodeSelector` (the Argo controller cascades it onto this template's pods). Keys are literal; values may be injected (below). |
-| `on_exit = t` | Exit handler; like `#[workflow(on_exit)]` it rides on the root `WorkflowTemplate`'s `spec.hooks.exit`, so it fires whether the root is run via `argo submit --from` or `--with-workflow`. Emit-root only. |
+| `on_exit_if_root = t` | Whole-workflow exit handler on this template's own `spec.hooks.exit` — Argo fires it only for the workflow you actually submit (workflow-scoped). Same semantics as `#[workflow(on_exit_if_root)]`; distinct from the per-task `.on_exit(t)` builder. |
 
 All optional. As with `#[workflow]`, an argument *name* or a `name = "…"`
 value that a YAML 1.1 parser reads as a boolean/null is a compile error.
@@ -93,8 +93,8 @@ Rules:
 - **`node_selector` keys are always literal.** (Argo *can* substitute
   them, but a dynamic label key is a foot-gun, so athena forbids it by
   design.)
-- `name` is the static Argo template identity and `on_exit` is a
-  template path — neither is an injection target.
+- `name` is the static Argo template identity and `on_exit_if_root` is
+  a template path — neither is an injection target.
 
 Under the hood an operand lowers to
 `{{=fromJSON(inputs.parameters['arg']['field'…])}}` — Argo evaluates it
