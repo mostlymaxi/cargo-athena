@@ -1,0 +1,5 @@
+error: unsupported #[container] attribute value. Use a string literal, or a `+`-concatenation of string literals and container arguments / their named fields — e.g. `"repo:" + tag` or `"repo:" + meta.id + "-x"`. Method calls, other idents, tuple/index fields, and other expressions aren't supported.
+ --> tests/ui/ctr_inject_bad_expr.rs:3:45
+  |
+3 | #[cargo_athena::container(image = "repo:" + tag.len())]
+  |                                             ^^^^^^^^^

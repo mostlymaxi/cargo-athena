@@ -1,0 +1,5 @@
+error: `nope` is not a parameter of this #[container] — only its arguments can be injected.
+ --> tests/ui/ctr_inject_unknown_ident.rs:2:45
+  |
+2 | #[cargo_athena::container(image = "repo:" + nope)]
+  |                                             ^^^^

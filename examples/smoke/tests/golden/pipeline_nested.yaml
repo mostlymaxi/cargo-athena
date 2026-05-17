@@ -195,7 +195,7 @@ spec:
         arguments:
           parameters:
           - name: seed
-            value: xx
+            value: '"xx"'
         templateRef:
           name: cargo-athena-example-smoke-decide
           template: cargo-athena-example-smoke-decide
@@ -223,7 +223,7 @@ spec:
         arguments:
           parameters:
           - name: seed
-            value: yy
+            value: '"yy"'
         templateRef:
           name: cargo-athena-example-smoke-decide
           template: cargo-athena-example-smoke-decide
@@ -287,7 +287,7 @@ spec:
         arguments:
           parameters:
           - name: msg
-            value: big
+            value: '"big"'
         templateRef:
           name: cargo-athena-example-smoke-note
           template: cargo-athena-example-smoke-note
@@ -309,7 +309,7 @@ spec:
         arguments:
           parameters:
           - name: msg
-            value: small
+            value: '"small"'
         templateRef:
           name: cargo-athena-example-smoke-note
           template: cargo-athena-example-smoke-note

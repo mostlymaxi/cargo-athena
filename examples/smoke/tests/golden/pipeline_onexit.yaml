@@ -78,7 +78,7 @@ spec:
         arguments:
           parameters:
           - name: url
-            value: https://example.com
+            value: '"https://example.com"'
         templateRef:
           name: cargo-athena-example-smoke-fetch
           template: cargo-athena-example-smoke-fetch
@@ -102,7 +102,7 @@ spec:
             arguments:
               parameters:
               - name: tag
-                value: done
+                value: '"done"'
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate

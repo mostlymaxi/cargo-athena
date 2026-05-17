@@ -190,7 +190,7 @@ spec:
         arguments:
           parameters:
           - name: url
-            value: https://example.com
+            value: '"https://example.com"'
         templateRef:
           name: cargo-athena-example-smoke-fetch
           template: cargo-athena-example-smoke-fetch

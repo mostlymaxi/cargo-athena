@@ -134,7 +134,7 @@ spec:
         arguments:
           parameters:
           - name: note
-            value: hello
+            value: '"hello"'
         templateRef:
           name: cargo-athena-example-importing-consumer-step
           template: cargo-athena-example-importing-consumer-step
@@ -239,7 +239,7 @@ spec:
         arguments:
           parameters:
           - name: tag
-            value: m
+            value: '"m"'
         templateRef:
           name: cargo-athena-example-importing-local-step
           template: cargo-athena-example-importing-local-step
@@ -379,7 +379,7 @@ spec:
         valueFrom:
           path: /athena/result
     container:
-      image: ghcr.io/acme/combine:latest
+      image: ghcr.io/acme/combine:{{=fromJSON(inputs.parameters['rhs'])}}
       command:
       - /bin/sh
       - -c
@@ -407,9 +407,9 @@ spec:
     volumes:
     - name: athena-work
       emptyDir: {}
-    serviceAccountName: athena-runner
+    serviceAccountName: athena-{{=fromJSON(inputs.parameters['lhs'])}}-runner
     nodeSelector:
-      disktype: ssd
+      disktype: '{{=fromJSON(inputs.parameters[''rhs''])}}'
       kubernetes.io/arch: amd64
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -541,7 +541,7 @@ spec:
         arguments:
           parameters:
           - name: source
-            value: https://example.com/data
+            value: '"https://example.com/data"'
         templateRef:
           name: cargo-athena-example-smoke-ingest
           template: cargo-athena-example-smoke-ingest
@@ -549,7 +549,7 @@ spec:
         arguments:
           parameters:
           - name: mode
-            value: fast
+            value: '"fast"'
         templateRef:
           name: cargo-athena-example-smoke-branchy
           template: cargo-athena-example-smoke-branchy
@@ -557,7 +557,7 @@ spec:
         arguments:
           parameters:
           - name: data
-            value: seed
+            value: '"seed"'
           - name: factor
             value: '3'
         templateRef:

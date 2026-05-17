@@ -141,7 +141,7 @@ spec:
           - name: s
             value: '{{item}}'
           - name: suffix
-            value: '!'
+            value: '"!"'
         templateRef:
           name: cargo-athena-example-smoke-caps
           template: cargo-athena-example-smoke-caps

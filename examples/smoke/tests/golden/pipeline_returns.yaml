@@ -78,7 +78,7 @@ spec:
         arguments:
           parameters:
           - name: seed
-            value: seed
+            value: '"seed"'
         templateRef:
           name: cargo-athena-example-smoke-sub-pipeline
           template: cargo-athena-example-smoke-sub-pipeline

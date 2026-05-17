@@ -69,10 +69,12 @@ pub fn branchy(mode: String) {
     println!("branchy mode={mode}");
 }
 
+// Param injection: literal `+` arg in `image` / `service_account`, and
+// a literal node_selector key with an injected value. Keys stay literal.
 #[container(
-    image = "ghcr.io/acme/combine:latest",
-    service_account = "athena-runner",
-    node_selector = { "kubernetes.io/arch" = "amd64", "disktype" = "ssd" }
+    image = "ghcr.io/acme/combine:" + rhs,
+    service_account = "athena-" + lhs + "-runner",
+    node_selector = { "kubernetes.io/arch" = "amd64", "disktype" = rhs }
 )]
 pub fn combine(lhs: String, rhs: String) -> String {
     format!("{lhs}+{rhs}")
@@ -288,4 +290,20 @@ pub fn pipeline_nested() {
     } else {
         note("small".to_string());
     }
+}
+
+// --- attribute param injection of a struct field ---------------------------
+
+/// `image = "..." + m.id` injects a *named struct field* of an arg
+/// (`m.id` is `String`, so `Injectable`); lowered to
+/// `{{=fromJSON(inputs.parameters['m'])['id']}}`.
+#[container(image = "ghcr.io/acme/m:" + m.id)]
+pub fn tag_meta(m: Meta) {
+    println!("tagged {}", m.id);
+}
+
+#[workflow]
+pub fn pipeline_inject() {
+    let m = make_meta();
+    tag_meta(m);
 }

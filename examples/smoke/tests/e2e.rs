@@ -14,6 +14,7 @@ const BIN_FIELDS: &str = env!("CARGO_BIN_EXE_smoke-fields");
 const BIN_FANOUT: &str = env!("CARGO_BIN_EXE_smoke-fanout");
 const BIN_IF: &str = env!("CARGO_BIN_EXE_smoke-if");
 const BIN_NESTED: &str = env!("CARGO_BIN_EXE_smoke-nested");
+const BIN_INJECT: &str = env!("CARGO_BIN_EXE_smoke-inject");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -115,6 +116,14 @@ fn emit_pipeline_if() {
 #[test]
 fn emit_pipeline_nested() {
     assert_golden("pipeline_nested.yaml", &run_bin(BIN_NESTED, &[]));
+}
+
+/// Attribute param injection: a struct field lowered into `image`
+/// (`{{=fromJSON(inputs.parameters['m'])['id']}}`) + (via `pipeline`)
+/// `combine`'s injected image/service_account/node_selector.
+#[test]
+fn emit_pipeline_inject() {
+    assert_golden("pipeline_inject.yaml", &run_bin(BIN_INJECT, &[]));
 }
 
 /// Run mode: a container that returns a value (JSON to stdout).
