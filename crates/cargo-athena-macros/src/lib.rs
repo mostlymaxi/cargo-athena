@@ -202,6 +202,20 @@ fn yaml_ambiguous(s: &str) -> Option<&'static str> {
     }
 }
 
+/// Like `yaml_ambiguous`, but for emitted parameter *values*. Narrower:
+/// serde_norway already force-quotes `true`/`false`/`null`/numbers (they
+/// round-trip as strings — safe), so only the YAML-1.1-only booleans it
+/// emits *plain* (`y/yes/n/no/on/off`, any case) are dangerous. A value
+/// is data the user needs, so `true`/`false` stay usable (your call) and
+/// the only fix is at compile time — at runtime the value flows through
+/// `{{...}}`, never as a bare YAML scalar.
+fn yaml_value_unsafe(s: &str) -> bool {
+    matches!(
+        s.to_ascii_lowercase().as_str(),
+        "y" | "yes" | "n" | "no" | "on" | "off"
+    )
+}
+
 /// Reject argument names (→ Argo parameter names) and `name = "…"`
 /// overrides that a YAML 1.1 parser would silently mis-type. Spanned at
 /// the offending token so the fix is obvious. Synthetic `if`/`else`
@@ -695,7 +709,26 @@ fn expr_to_arg(
 ) -> syn::Result<Arg> {
     match unwrap_expr(e) {
         Expr::Lit(syn::ExprLit { lit, .. }) => Ok(match lit {
-            syn::Lit::Str(s) => Arg::Lit(s.value()),
+            syn::Lit::Str(s) => {
+                let v = s.value();
+                if yaml_value_unsafe(&v) {
+                    return Err(syn::Error::new_spanned(
+                        s,
+                        format!(
+                            "the literal value `{v}` is a YAML 1.1 \
+                             boolean: emitted as a bare scalar it is \
+                             mis-typed by Argo's YAML→JSON parser \
+                             (`must be of type string`), so the workflow \
+                             is rejected at submit. `true`/`false` are \
+                             safe (auto-quoted); for an actual `{v}` \
+                             string compute it in a #[container] and pass \
+                             the result (runtime values flow through \
+                             `{{{{…}}}}`, never a bare scalar)."
+                        ),
+                    ));
+                }
+                Arg::Lit(v)
+            }
             syn::Lit::Int(i) => Arg::Lit(i.base10_digits().to_string()),
             syn::Lit::Float(f) => Arg::Lit(f.base10_digits().to_string()),
             syn::Lit::Bool(b) => Arg::Lit(b.value.to_string()),

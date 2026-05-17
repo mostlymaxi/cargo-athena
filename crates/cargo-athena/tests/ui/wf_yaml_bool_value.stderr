@@ -1,0 +1,5 @@
+error: the literal value `no` is a YAML 1.1 boolean: emitted as a bare scalar it is mis-typed by Argo's YAML→JSON parser (`must be of type string`), so the workflow is rejected at submit. `true`/`false` are safe (auto-quoted); for an actual `no` string compute it in a #[container] and pass the result (runtime values flow through `{{…}}`, never a bare scalar).
+  --> tests/ui/wf_yaml_bool_value.rs:12:9
+   |
+12 |     act("no".to_string());
+   |         ^^^^

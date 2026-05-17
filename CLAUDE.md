@@ -126,17 +126,24 @@ README is intentionally lean (user-facing); the *why* lives here.
   inside a `fan_out` closure (item scope) in v1. Ghost type-checks the
   nesting free (`Foo::__athena_sig(Bar::__athena_sig())`). Smoke
   `pipeline_nested` SUBMIT-OK on real Argo v4.0.5.
-- **KNOWN latent bug — YAML-1.1-ambiguous parameter *values*.** athena
-  emits `Parameter.value` via serde_norway (YAML 1.2: bare `y`/`no`/`on`
-  = string) but Argo parses YAML 1.1 (those = booleans). A *literal* arg
-  whose value is in the YAML-1.1 set (`y/n/yes/no/on/off/true/false`,
-  `null`, `~`) emits unquoted and Argo's CRD validation rejects it
-  (`must be of type string: "boolean"`). The compile-time guard
-  deliberately covers only param *names* (a value like `"no"` is
-  legitimate data — must be emitted correctly, not rejected). Fix is an
-  emit-layer force-quote of ambiguous scalars (serde_norway has no
-  YAML-1.1 plain-scalar mode); tracked separately, NOT a nested-call
-  regression (any `t("no")` hits it).
+- **YAML-1.1-ambiguous parameter *values* — hard `compile_error!`.**
+  serde_norway emits `Parameter.value` per YAML 1.2 and **already
+  auto-quotes** `true`/`false`/`null`/numbers (proven: `'true'`,
+  `'null'`, `'123'` → round-trip as strings, *safe*), but leaves the
+  YAML-1.1-only booleans `y/yes/n/no/on/off` (any case, incl. `NO`/`No`)
+  **plain** — Argo's Go YAML→JSON parser then mis-types them and CRD
+  validation rejects the workflow (`must be of type string: "boolean"`).
+  No serde hook controls per-field scalar style, and `!!str` tagging
+  emits a bogus `!str`. So a literal arg/hook value in
+  `{y,yes,n,no,on,off}` is a spanned `compile_error!` (`yaml_value_unsafe`
+  in `expr_to_arg`'s `Lit::Str`). Deliberately **error not warn**: a
+  muted warning just defers to a confusing Argo-submit rejection, and
+  stable proc-macros have no real `Diagnostic::warning`. Narrower than
+  the *name* guard (`yaml_ambiguous`, which keeps the broader
+  conservative set incl. `true/false/null`): values keep `true`/`false`
+  usable. Escape hatch — only **source literals** are banned; a `"no"`
+  produced by a `#[container]` return flows via `{{…}}` (never a bare
+  scalar) and works. trybuild `wf_yaml_bool_value`.
 - **Per-task builder chain.** A task call may be suffixed, in any order,
   with:
   - `.continue_on(failed|error|failed, error)` (≤1) → `DAGTask.continueOn`;
