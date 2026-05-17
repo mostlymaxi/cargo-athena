@@ -29,13 +29,15 @@ html.ayu {
 
 /* --- Typography & layout ------------------------------------------------ */
 
+/* mdBook uses the 62.5% root trick: 1rem = 10px, default body = 1.6rem
+   (16px). Bump a little past that for comfortable long-form reading. */
 .content {
-  font-size: 1.02rem;
-  line-height: 1.7;
+  font-size: 1.75rem;
+  line-height: 1.75;
 }
 
 main {
-  max-width: 56rem;
+  max-width: 82rem;
 }
 
 .content h1,
@@ -132,8 +134,8 @@ blockquote {
   color: var(--athena-orange);
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  font-size: 0.72rem;
-  opacity: 0.85;
+  font-size: 1.25rem;
+  opacity: 0.9;
 }
 
 /* --- Top bar ----------------------------------------------------------- */
