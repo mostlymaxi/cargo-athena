@@ -38,7 +38,7 @@ pub struct PkgSel {
 
 impl PkgSel {
     /// flag → `athena.toml` `[defaults]` → None (cargo autodetect).
-    fn resolve(&self) -> (Option<String>, Option<String>) {
+    pub(crate) fn resolve(&self) -> (Option<String>, Option<String>) {
         let d = AthenaConfig::load().defaults;
         (
             self.package.clone().or(d.package),
@@ -320,7 +320,7 @@ pub fn container_emulate(a: EmulateArgs) {
 /// `cargo-athena` crate itself makes `cargo run` build the CLI, not a
 /// workflow — hence the explicit guidance below instead of dumping its
 /// clap usage.
-fn describe(template: &str, package: Option<&str>, bin: Option<&str>) -> ContainerRunMeta {
+pub(crate) fn describe(template: &str, package: Option<&str>, bin: Option<&str>) -> ContainerRunMeta {
     let hint = || -> String {
         let where_ = match (package, bin) {
             (Some(p), Some(b)) => format!("--package {p} --bin {b}"),
@@ -394,8 +394,32 @@ fn mkparent(p: &Path) {
 /// On success, returns the params JSON-encoded per Regime B (string →
 /// `"v"`, number → `7`) into the env each is delivered through.
 fn check_params(meta: &ContainerRunMeta, a: &EmulateArgs) -> Vec<(String, String)> {
+    let vals = parse_args(a.input_file.as_deref(), &a.args);
+    if let Err(report) = validate_args(meta, &vals) {
+        die(&report);
+    }
+    // emulate delivers each param through its env var.
+    meta.params
+        .iter()
+        .filter_map(|p| {
+            vals.get(&p.name).map(|v| {
+                (
+                    p.env.clone(),
+                    serde_json::to_string(v).expect("JSON-encodable param"),
+                )
+            })
+        })
+        .collect()
+}
+
+/// `-a name=value` (JSON-else-string) merged over a `--input-file`
+/// JSON object. Shared by `emulate` and `submit`.
+pub(crate) fn parse_args(
+    input_file: Option<&Path>,
+    kvs: &[String],
+) -> BTreeMap<String, serde_json::Value> {
     let mut vals: BTreeMap<String, serde_json::Value> = BTreeMap::new();
-    if let Some(f) = &a.input_file {
+    if let Some(f) = input_file {
         let txt = std::fs::read_to_string(f)
             .unwrap_or_else(|e| die(&format!("--input-file {}: {e}", f.display())));
         match serde_json::from_str::<serde_json::Value>(&txt) {
@@ -403,7 +427,7 @@ fn check_params(meta: &ContainerRunMeta, a: &EmulateArgs) -> Vec<(String, String
             _ => die("--input-file must be a JSON object"),
         }
     }
-    for kv in &a.args {
+    for kv in kvs {
         let (k, v) = kv
             .split_once('=')
             .unwrap_or_else(|| die(&format!("-a expects name=value, got {kv:?}")));
@@ -411,12 +435,22 @@ fn check_params(meta: &ContainerRunMeta, a: &EmulateArgs) -> Vec<(String, String
             .unwrap_or_else(|_| serde_json::Value::String(v.to_string()));
         vals.insert(k.to_string(), val);
     }
+    vals
+}
 
+/// Type-check supplied values against a template's real signature:
+/// missing required, unknown (with did-you-mean), and wrong
+/// scalar/array kinds. `Ok` if clean; `Err` is a ready-to-print
+/// CLI-style report (the caller prefixes + exits). Shared by `emulate`
+/// and `submit`.
+pub(crate) fn validate_args(
+    meta: &ContainerRunMeta,
+    vals: &BTreeMap<String, serde_json::Value>,
+) -> Result<(), String> {
     let declared: std::collections::BTreeSet<&str> =
         meta.params.iter().map(|p| p.name.as_str()).collect();
     let mut missing = Vec::new();
     let mut mism = Vec::new();
-    let mut env = Vec::new();
     for p in &meta.params {
         let norm: String = p.ty.split_whitespace().collect();
         let (inner, optional) = match norm
@@ -446,10 +480,6 @@ fn check_params(meta: &ContainerRunMeta, a: &EmulateArgs) -> Vec<(String, String
                         preview(v),
                     ));
                 }
-                env.push((
-                    p.env.clone(),
-                    serde_json::to_string(v).expect("JSON-encodable param"),
-                ));
             }
         }
     }
@@ -463,7 +493,7 @@ fn check_params(meta: &ContainerRunMeta, a: &EmulateArgs) -> Vec<(String, String
         .collect();
 
     if missing.is_empty() && mism.is_empty() && unknown.is_empty() {
-        return env;
+        return Ok(());
     }
     let mut m = format!("error: invalid arguments for `{}`\n", meta.name);
     if !missing.is_empty() {
@@ -477,7 +507,10 @@ fn check_params(meta: &ContainerRunMeta, a: &EmulateArgs) -> Vec<(String, String
         m.push('\n');
     }
     if !unknown.is_empty() {
-        m.push_str("\n  unknown parameter(s) (not an input of this container):\n");
+        m.push_str(&format!(
+            "\n  unknown parameter(s) (not an input of `{}`):\n",
+            meta.name
+        ));
         m.push_str(&unknown.join("\n"));
         m.push('\n');
     }
@@ -494,7 +527,7 @@ fn check_params(meta: &ContainerRunMeta, a: &EmulateArgs) -> Vec<(String, String
         .collect();
     m.push_str(&format!("\n  expected inputs: {}\n", sig.join(", ")));
     m.push_str("  pass with -a <name>=<value> (JSON value, else string) or --input-file");
-    die(&m)
+    Err(m)
 }
 
 /// The JSON shape a scalar/array Rust type round-trips from.
@@ -599,7 +632,7 @@ fn edit_distance(a: &str, b: &str) -> usize {
 
 // ---- S3 (object_store, lean current-thread runtime) -----------------------
 
-fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
+pub(crate) fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
     use object_store::aws::AmazonS3Builder;
     let mut b = AmazonS3Builder::new()
         .with_bucket_name(&s3.bucket)
@@ -633,11 +666,21 @@ fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
         .unwrap_or_else(|e| die(&format!("S3 client for bucket {:?}: {e}", s3.bucket)))
 }
 
-fn rt() -> tokio::runtime::Runtime {
+pub(crate) fn rt() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap_or_else(|e| die(&format!("async runtime: {e}")))
+}
+
+/// Does the S3 object exist? (`cargo athena submit` pre-flights the
+/// binary tarball so it doesn't submit a workflow whose pods can't
+/// bootstrap.)
+pub(crate) fn s3_exists(s3: &S3Ref) -> bool {
+    let store = s3_store(s3);
+    let key = object_store::path::Path::from(s3.key.as_str());
+    rt().block_on(async { object_store::ObjectStore::head(&store, &key).await })
+        .is_ok()
 }
 
 fn s3_get(s3: &S3Ref, dst: &Path) {

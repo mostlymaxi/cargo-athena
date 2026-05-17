@@ -369,6 +369,44 @@ README is intentionally lean (user-facing); the *why* lives here.
   Goldens: `describe_fetch.json`/`list_all.json` regen (+`synthetic`);
   new `list_if.json` pins 7 `synthetic:true` (the if0/arm wrappers)
   vs 6 real on the `pipeline_if` fixture.
+- **`cargo athena submit <name>` (2026-05-17, user-directed, separate
+  PR, post-v0.3.0).** Wrapper for `argo submit --from
+  workflowtemplate/<root>` using our OWN api types + a real client (NOT
+  shelling out to `argo`). Pre-flight: (1) type-check args (reuses the
+  refactored `emulate::{parse_args,validate_args}` — `check_params`
+  split so the validate+report half is shared, returns `Result<(),
+  String>` so each cmd prefixes its own `die`); (2) S3 HEAD the binary
+  tarball (`emulate::s3_exists`, object_store); (3) register +
+  **drift-detect** every reachable WT (new `CARGO_ATHENA_EMIT_JSON`
+  entrypoint mode → `Vec<api::WorkflowTemplate>`; `emit()` refactored to
+  `build_templates()`), compare live `.spec` parsed into
+  `api::WorkflowSpec` vs emitted via the `argo!`-derived `PartialEq`
+  (unknown cluster fields dropped on deserialize = free normalization,
+  no false-positive drift — proven on live Argo) → batched y/N
+  create/update, `--update` forces all, `-y/--yes` skips all prompts;
+  (4) build `api::Workflow{workflowTemplateRef→root, arguments
+  (Regime-B JSON), serviceAccountName, nodeSelector}` → y/N → print
+  created name on **stdout** (everything else stderr; scriptable).
+  **Transport `trait Cluster` auto-selects** (mirrors argo CLI): if
+  `--argo-server`/`$ARGO_SERVER` → `ArgoServer` (reqwest to
+  `/api/v1/{workflow-templates,workflows}`, `$ARGO_TOKEN` auth) else
+  `KubeApi` (kube-rs `DynamicObject`, kubeconfig/in-cluster + exec-auth;
+  uses kubeconfig **current-context** like kubectl). Deps (all
+  cli-gated): `kube` (default-features=false, client+rustls-tls),
+  `k8s-openapi` (features=["latest"] — its build script needs a version
+  even though we only use DynamicObject), `reqwest`
+  (default-features=false, json+rustls-tls). New `api::WorkflowSpec
+  .node_selector` (skip-empty ⇒ emit goldens byte-identical; only
+  submit sets it) + `core::Defaults.namespace`. **Module
+  `src/submit.rs` via `#[path]`** (not `src/bin/`). Kube path
+  live-proven on kind (binary-check gate, type-check, unknown-template,
+  create+drift `all N up to date`, prompt-abort, `--node-selector` +
+  args land on `.spec`, printed name); **Argo Server REST path
+  implemented + code-reviewed but NOT live-exercised** (no argo-server
+  on the e2e kind — honest gap). **LOUD docs** (README `[!IMPORTANT]` +
+  getting-started ⚠ + cli.md) tell library users
+  `--no-default-features` (cli now also pulls kube/k8s-openapi/reqwest)
+  — explicit user instruction.
 
 ## Artifact ports
 

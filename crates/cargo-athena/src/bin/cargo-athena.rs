@@ -16,6 +16,8 @@ use std::process::{Command, Stdio, exit};
 // helpers below (`cargo_run`, `tool_ok`, `package_meta`, …).
 #[path = "../emulate.rs"]
 mod emulate;
+#[path = "../submit.rs"]
+mod submit;
 
 /// Cargo plugin shim: invoked as `cargo athena <cmd>` → argv
 /// `cargo-athena athena <cmd>`, so `athena` is the wrapper subcommand.
@@ -64,6 +66,12 @@ enum Cmd {
         #[command(subcommand)]
         cmd: WorkflowCmd,
     },
+    /// Submit a `#[workflow]`/`#[container]` to a cluster: type-checks
+    /// args, confirms the binary is uploaded, registers/drift-checks the
+    /// `WorkflowTemplate`s (y/N), then creates the run and prints its
+    /// name. Talks to the Argo Server (`--argo-server`/`$ARGO_SERVER`)
+    /// or the kube API (kubeconfig/in-cluster).
+    Submit(submit::SubmitArgs),
     /// Cross-compile static-musl binaries, package the tarball, print
     /// the upload key.
     Build {
@@ -152,6 +160,7 @@ fn main() {
             WorkflowCmd::Ls(args) => emulate::workflow_ls(args),
             WorkflowCmd::Describe(args) => emulate::describe_print(args),
         },
+        Cmd::Submit(args) => submit::submit(args),
         Cmd::Build {
             package,
             bin,
