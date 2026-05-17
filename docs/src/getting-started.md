@@ -84,7 +84,7 @@ Run a single `#[container]` under docker/podman exactly as Argo would —
 its image, the injected bootstrap, `ATHENA_PARAM_*` env:
 
 ```sh
-cargo athena container emulate my-workflows-run-a-container -p a=hi
+cargo athena container emulate my-workflows-run-a-container -a a=hi
 ```
 
 The positional name is the Argo name: `<crate>-<fn>` kebab-case

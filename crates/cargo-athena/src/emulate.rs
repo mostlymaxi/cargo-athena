@@ -16,26 +16,50 @@
 //! are **not** emulated — `docker run` has no notion of them. This runs
 //! the container body faithfully, not the pod's k8s context.
 
-use cargo_athena::{ContainerRunMeta, S3Ref, serde_json};
+use cargo_athena::{AthenaConfig, ContainerRunMeta, S3Ref, serde_json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, exit};
 
+/// Cargo `--package`/`--bin` selection, shared by every `container`
+/// subcommand. Each falls back to `athena.toml` `[defaults]`, then to
+/// cargo's single-package autodetect.
 #[derive(clap::Args)]
-pub struct EmulateArgs {
-    /// Argo template name (`<crate>-<fn>` kebab, or the
-    /// `#[container(name = "…")]` override).
-    template: String,
-    #[arg(long)]
+pub struct PkgSel {
+    /// Cargo package to drive. Default: `[defaults].package` in
+    /// athena.toml, else the sole workspace package.
+    #[arg(short = 'p', long)]
     package: Option<String>,
+    /// Cargo bin within it. Default: `[defaults].bin`, else the
+    /// package's default bin.
     #[arg(long)]
     bin: Option<String>,
-    /// Set one input parameter: `-p name=value`. `value` is parsed as
-    /// JSON if it parses (so `-p n=4` is the number 4, `-p b=true` a
+}
+
+impl PkgSel {
+    /// flag → `athena.toml` `[defaults]` → None (cargo autodetect).
+    fn resolve(&self) -> (Option<String>, Option<String>) {
+        let d = AthenaConfig::load().defaults;
+        (
+            self.package.clone().or(d.package),
+            self.bin.clone().or(d.bin),
+        )
+    }
+}
+
+#[derive(clap::Args)]
+pub struct EmulateArgs {
+    /// Template name (`<crate>-<fn>` kebab, or the
+    /// `#[container(name = "…")]` override). `container ls` lists them.
+    template: String,
+    #[command(flatten)]
+    pkg: PkgSel,
+    /// Set one input parameter: `-a name=value`. `value` is parsed as
+    /// JSON if it parses (so `-a n=4` is the number 4, `-a b=true` a
     /// bool), else treated as a string. Repeatable.
-    #[arg(short = 'p', long = "param", value_name = "NAME=VALUE")]
-    params: Vec<String>,
-    /// JSON object of the function arguments (merged under `-p`).
+    #[arg(short = 'a', long = "arg", value_name = "NAME=VALUE")]
+    args: Vec<String>,
+    /// JSON object of the function arguments (merged under `-a`).
     #[arg(long = "input-file", value_name = "FILE")]
     input_file: Option<PathBuf>,
     /// Build a local musl binary instead of pulling the deployed S3
@@ -59,10 +83,18 @@ pub struct DescribeArgs {
     /// Template name (`<crate>-<fn>` kebab, or the
     /// `#[container(name = "…")]` override).
     template: String,
+    #[command(flatten)]
+    pkg: PkgSel,
+}
+
+#[derive(clap::Args)]
+pub struct LsArgs {
+    #[command(flatten)]
+    pkg: PkgSel,
+    /// Include `#[workflow]`s and synthetic templates too (default:
+    /// only `#[container]`s — the things `emulate` runs).
     #[arg(long)]
-    package: Option<String>,
-    #[arg(long)]
-    bin: Option<String>,
+    all: bool,
 }
 
 /// `cargo athena container describe` — print the runner metadata one
@@ -70,11 +102,56 @@ pub struct DescribeArgs {
 /// ports, the scratch + result paths). This is exactly what
 /// `container emulate` consumes; useful to see what *would* run.
 pub fn container_describe(a: DescribeArgs) {
-    let meta = describe(&a.template, a.package.as_deref(), a.bin.as_deref());
+    let (pkg, bin) = a.pkg.resolve();
+    let meta = describe(&a.template, pkg.as_deref(), bin.as_deref());
     println!(
         "{}",
         serde_json::to_string_pretty(&meta).expect("ContainerRunMeta is serializable")
     );
+}
+
+/// `cargo athena container ls` — list the templates a workflow binary
+/// reports, so the (full) names are discoverable for copy-paste into
+/// `emulate`/`describe`. Containers only unless `--all`.
+pub fn container_ls(a: LsArgs) {
+    let (pkg, bin) = a.pkg.resolve();
+    let mut cmd = crate::cargo_run(pkg.as_deref(), bin.as_deref());
+    cmd.env("CARGO_ATHENA_LIST", "1");
+    let out = cmd
+        .output()
+        .unwrap_or_else(|e| die(&format!("failed to spawn `cargo run`: {e}")));
+    if !out.status.success() || out.stdout.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&out.stderr));
+        die("could not list templates (run from your workflow crate, or pass --package/--bin)");
+    }
+    let all: Vec<ContainerRunMeta> = serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|e| die(&format!("could not parse template list ({e})")));
+    let mut rows: Vec<&ContainerRunMeta> = all
+        .iter()
+        .filter(|m| a.all || m.kind == "container")
+        .collect();
+    rows.sort_by(|x, y| x.name.cmp(&y.name));
+    if rows.is_empty() {
+        eprintln!("(no templates)");
+        return;
+    }
+    let w = rows.iter().map(|m| m.name.len()).max().unwrap_or(4).max(4);
+    println!("{:<w$}  KIND       ARGS", "NAME", w = w);
+    for m in rows {
+        let sig = m
+            .params
+            .iter()
+            .map(|p| {
+                if p.ty.is_empty() {
+                    p.name.clone()
+                } else {
+                    format!("{}: {}", p.name, p.ty)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("{:<w$}  {:<9}  {sig}", m.name, m.kind, w = w);
+    }
 }
 
 fn die(msg: &str) -> ! {
@@ -83,9 +160,10 @@ fn die(msg: &str) -> ! {
 }
 
 pub fn container_emulate(a: EmulateArgs) {
+    let (pkg, bin) = a.pkg.resolve();
     // 1. Introspect — the binary builds the *same* template `emit` does
     //    and reports it in the runner's vocabulary.
-    let meta = describe(&a.template, a.package.as_deref(), a.bin.as_deref());
+    let meta = describe(&a.template, pkg.as_deref(), bin.as_deref());
     if meta.kind != "container" {
         die(&format!(
             "{:?} is a #[{}]; `container emulate` targets a single #[container]. \
@@ -117,7 +195,7 @@ pub fn container_emulate(a: EmulateArgs) {
     // Binary: pull (default) / build / explicit.
     let tarball = match (&a.tarball, a.build) {
         (Some(p), _) => p.clone(),
-        (None, true) => build_local(&a),
+        (None, true) => build_local(pkg.as_deref(), bin.as_deref()),
         (None, false) => {
             let ba = meta.binary_artifact.as_ref().unwrap_or_else(|| {
                 die("template has no binary artifact (run `cargo athena build` first, \
@@ -278,7 +356,7 @@ fn mkparent(p: &Path) {
     }
 }
 
-/// Parse `-p name=value` (JSON-else-string) merged over `--input-file`,
+/// Parse `-a name=value` (JSON-else-string) merged over `--input-file`,
 /// then **type-check against the container fn's real signature** before
 /// anything launches: missing required args, unknown args (typos), and
 /// wrong scalar/array kinds all fail fast with one CLI-style report.
@@ -294,10 +372,10 @@ fn check_params(meta: &ContainerRunMeta, a: &EmulateArgs) -> Vec<(String, String
             _ => die("--input-file must be a JSON object"),
         }
     }
-    for kv in &a.params {
+    for kv in &a.args {
         let (k, v) = kv
             .split_once('=')
-            .unwrap_or_else(|| die(&format!("-p expects name=value, got {kv:?}")));
+            .unwrap_or_else(|| die(&format!("-a expects name=value, got {kv:?}")));
         let val = serde_json::from_str::<serde_json::Value>(v)
             .unwrap_or_else(|_| serde_json::Value::String(v.to_string()));
         vals.insert(k.to_string(), val);
@@ -384,7 +462,7 @@ fn check_params(meta: &ContainerRunMeta, a: &EmulateArgs) -> Vec<(String, String
         })
         .collect();
     m.push_str(&format!("\n  expected inputs: {}\n", sig.join(", ")));
-    m.push_str("  pass with -p <name>=<value> (JSON value, else string) or --input-file");
+    m.push_str("  pass with -a <name>=<value> (JSON value, else string) or --input-file");
     die(&m)
 }
 
@@ -556,10 +634,10 @@ fn s3_put(s3: &S3Ref, src: &Path) {
 
 // ---- --build (local, host-arch musl only) ---------------------------------
 
-fn build_local(a: &EmulateArgs) -> PathBuf {
+fn build_local(package: Option<&str>, bin: Option<&str>) -> PathBuf {
     crate::preflight_zig();
-    let (krate, _ver, default_bin) = crate::package_meta(a.package.as_deref());
-    let bin = a.bin.clone().unwrap_or(default_bin);
+    let (krate, _ver, default_bin) = crate::package_meta(package);
+    let bin = bin.map(str::to_string).unwrap_or(default_bin);
     let triple = if cfg!(target_arch = "aarch64") {
         "aarch64-unknown-linux-musl"
     } else {

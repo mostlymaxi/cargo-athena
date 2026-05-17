@@ -5,12 +5,13 @@ subcommand. It drives *your* workflow crate's binary (the one whose
 `main` calls `cargo_athena::entrypoint::<Root>()`) in the right mode.
 
 ```text
-cargo athena [-c FILE] emit  [--package P] [--bin B] [--out FILE] [--with-workflow]
-cargo athena [-c FILE] container emulate  <argo-name> [-p k=v].. [--input-file F]
-                                          [--build|--tarball F] [--runtime R] [--skip-artifacts]
-cargo athena [-c FILE] container describe <argo-name> [--package P] [--bin B]
-cargo athena [-c FILE] build [--package P] [--bin B] [--target T].. [--print]
-cargo athena            publish [--package P] [--bin B]            (not yet)
+cargo athena [-c F] emit  [-p PKG] [--bin B] [--out F] [--with-workflow]
+cargo athena [-c F] container ls       [-p PKG] [--bin B] [--all]
+cargo athena [-c F] container emulate  <name> [-a k=v].. [--input-file F] [-p PKG] [--bin B]
+                                       [--build|--tarball F] [--runtime R] [--skip-artifacts]
+cargo athena [-c F] container describe <name> [-p PKG] [--bin B]
+cargo athena [-c F] build [-p PKG] [--bin B] [--target T].. [--print]
+cargo athena        publish [-p PKG] [--bin B]                  (not yet)
 ```
 
 `-c, --config <FILE>` (global) points at an `athena.toml`. By default
@@ -51,7 +52,7 @@ on the node.
 
 ```sh
 # default: pull the *deployed* binary from S3 and run it in its image
-cargo athena container emulate my-crate-transform -p data=hello -p factor=4
+cargo athena container emulate my-crate-transform -a data=hello -a factor=4
 
 cargo athena container emulate my-crate-fetch --input-file args.json
 cargo athena container emulate my-crate-fetch --build         # local musl build instead
@@ -61,13 +62,18 @@ Fidelity is by construction: the binary reports its run metadata from
 the *same* `Template::build()` `emit` uses, so there's nothing to keep
 in sync.
 
-- `<argo-name>` (positional) — `<crate>-<fn>` kebab, or the
-  `#[container(name = "…")]` override. A `#[workflow]` is rejected (it's
-  a DAG, not a pod — emulate its containers individually).
-- `-p name=value` (repeatable) / `--input-file F` — the function
-  arguments. A `-p` value is parsed as JSON if it parses (`-p n=4` →
-  number), else a string; all values are JSON-encoded into the env
-  exactly as Argo passes them.
+- `<name>` (positional) — the full template name (`<crate>-<fn>` kebab,
+  or the `#[container(name = "…")]` override). `cargo athena container
+  ls` lists them. A `#[workflow]` is rejected (it's a DAG, not a pod —
+  emulate its containers individually).
+- `-a name=value` (repeatable, **`--arg`**) / `--input-file F` — the
+  function arguments. A value is parsed as JSON if it parses (`-a n=4` →
+  number), else a string; all are JSON-encoded into the env exactly as
+  Argo passes them. Arguments are **type-checked against the fn's real
+  signature before anything launches** — missing, unknown (with
+  did-you-mean), and wrong scalar/array kinds fail fast.
+- `-p`/`--package`, `--bin` select the cargo target (see
+  [package selection](#package-selection)).
 - Binary source: **default = pull the deployed tarball from the
   `athena.toml` S3 repo** (smoke-test what's live). `--build` packages a
   local host-arch musl binary; `--tarball F` uses one verbatim. S3
@@ -91,7 +97,24 @@ S3 ports, and the scratch + result paths. It's *the same* metadata
 it:
 
 ```sh
-cargo athena container describe my-crate-transform --package my-crate --bin app
+cargo athena container describe my-crate-transform
+```
+
+## `container ls`
+
+Lists the templates your workflow binary reports — full name, kind, and
+typed args — so they're discoverable for `emulate`/`describe` (no
+guessing the `<crate>-<fn>` name):
+
+```sh
+cargo athena container ls            # #[container]s only
+cargo athena container ls --all      # + #[workflow]s and synthetic templates
+```
+
+```text
+NAME                                  KIND       ARGS
+my-crate-fetch                        container  url: String
+my-crate-transform                    container  data: String, factor: i64
 ```
 
 ## `build`
@@ -116,11 +139,22 @@ client (`s3cmd` / `aws s3 cp` / `mc cp`). `emit` injects that tarball
 plus a tiny `sh` bootstrap into every container template, so one
 artifact serves every step on any node architecture.
 
-## `--package` / `--bin`
+## Package selection
 
-`cargo athena` runs *your* crate's binary; `--package` / `--bin` pick
-which one in a multi-package or multi-binary workspace (same meaning as
-for `cargo` itself). Omit them in a single-binary crate.
+`cargo athena` runs *your* crate's binary. Which one is resolved, in
+order:
+
+1. **`-p`/`--package` and `--bin`** flags (same meaning as for `cargo`
+   itself);
+2. else **`[defaults]` in `athena.toml`** — `package = "…"` /
+   `bin = "…"` (set them once instead of repeating the flags, like a
+   project default);
+3. else cargo's single-package / default-bin autodetect.
+
+So in a configured workspace `cargo athena container ls` and
+`cargo athena container emulate my-crate-fetch -a url=…` just work with
+no target flags. (`-p` is **package** here — function arguments to
+`emulate` are `-a`/`--arg`.)
 
 > Working in this repo instead of an installed binary? Any
 > `cargo athena <cmd>` above is `cargo run -p cargo-athena --bin

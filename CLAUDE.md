@@ -337,6 +337,21 @@ README is intentionally lean (user-facing); the *why* lives here.
   `crates/cargo-athena/src/emulate.rs` via `#[path="../emulate.rs"] mod
   emulate;` in the bin — NOT under `src/bin/` (that would make it a
   second binary). Golden `describe_fetch.json` pins the meta contract.
+- **CLI cleanup (2026-05-17, user-directed, same PR).** `cargo athena`
+  package selection is now a shared `PkgSel` (`#[command(flatten)]`):
+  **`-p`/`--package`** (cargo-consistent short — NOT param) + `--bin`,
+  each resolving flag → `athena.toml` `[defaults].package`/`.bin` (new
+  `Option<String>` fields on `core::Defaults`) → cargo autodetect. So a
+  configured workspace needs no target flags. `emulate`'s function args
+  moved off `-p` to **`-a`/`--arg`** (avoids the cargo `-p` clash; the
+  doppler-style `-p`=project model the user wanted). New
+  **`cargo athena container ls [--all]`** (entrypoint mode
+  `CARGO_ATHENA_LIST` → `Vec<ContainerRunMeta>` JSON → a NAME/KIND/ARGS
+  table; containers only unless `--all`) — names stay **full** (no
+  fuzzy `<fn>` resolution: user chose discoverability over magic).
+  Empirically rechecked on live kind+MinIO+docker after the rename
+  (emulate `-a`/`-p`/`--tarball` → `"hey*9"`; `ls`/`--all`/`[defaults]`
+  resolution all OK).
 
 ## Artifact ports
 

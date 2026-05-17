@@ -96,6 +96,10 @@ enum ContainerCmd {
     /// scratch + result paths. Exactly what `emulate` consumes (derived
     /// from the same `Template::build()` as `emit`).
     Describe(emulate::DescribeArgs),
+    /// List the templates a workflow binary reports (names + args), so
+    /// they're discoverable for `emulate`/`describe`. `--all` includes
+    /// `#[workflow]`s + synthetics; default is `#[container]`s only.
+    Ls(emulate::LsArgs),
 }
 
 fn main() {
@@ -126,6 +130,7 @@ fn main() {
         Cmd::Container { cmd } => match cmd {
             ContainerCmd::Emulate(args) => emulate::container_emulate(args),
             ContainerCmd::Describe(args) => emulate::container_describe(args),
+            ContainerCmd::Ls(args) => emulate::container_ls(args),
         },
         Cmd::Build {
             package,
