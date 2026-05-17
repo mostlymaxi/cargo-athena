@@ -9,8 +9,8 @@
 Compile regular Rust into [Argo Workflow](https://argoproj.github.io/workflows/) YAML.
 
 ```sh
-cargo add cargo-athena              # the library
-cargo install cargo-athena-cli      # the `cargo athena` subcommand
+cargo add cargo-athena          # the library
+cargo install cargo-athena      # the `cargo athena` subcommand
 ```
 
 📖 **[Documentation](https://mostlymaxi.github.io/cargo-athena/)** — from
@@ -70,9 +70,9 @@ inputs, run the body, serialize outputs.
 ```sh
 nix develop
 
-cargo run -q -p cargo-athena-cli -- athena emit  --package cargo-athena-example-basic
-cargo run -q -p cargo-athena-cli -- athena build --package cargo-athena-example-basic --print
-cargo run -q -p cargo-athena-cli -- athena run \
+cargo run -q -p cargo-athena --bin cargo-athena -- athena emit  --package cargo-athena-example-basic
+cargo run -q -p cargo-athena --bin cargo-athena -- athena build --package cargo-athena-example-basic --print
+cargo run -q -p cargo-athena --bin cargo-athena -- athena run \
   --package cargo-athena-example-basic \
   --template cargo-athena-example-basic-run-a-container --input '{"a":"hi"}'
 ```

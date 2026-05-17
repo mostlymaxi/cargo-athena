@@ -13,7 +13,7 @@ cargo athena publish [--package P] [--bin B]            (not yet)
 The entrypoint is fixed in the user binary's `main`
 (`cargo_athena::entrypoint::<Root>()`); the CLI just runs that binary in
 the right mode. In this workspace, invoke it via
-`cargo run -q -p cargo-athena-cli -- athena <subcommand>`.
+`cargo run -q -p cargo-athena --bin cargo-athena -- athena <subcommand>`.
 
 ## `emit`
 
@@ -22,9 +22,9 @@ Runs the user binary in emit-mode and relays the multi-document YAML: one
 `templateRef`) plus a runnable `Workflow`.
 
 ```sh
-cargo run -q -p cargo-athena-cli -- athena emit --package my-crate
+cargo run -q -p cargo-athena --bin cargo-athena -- athena emit --package my-crate
 # or write it out:
-cargo run -q -p cargo-athena-cli -- athena emit --package my-crate --out wf.yaml
+cargo run -q -p cargo-athena --bin cargo-athena -- athena emit --package my-crate --out wf.yaml
 ```
 
 Needs an [`athena.toml`](configuration.md) (it bakes the artifact
@@ -38,7 +38,7 @@ run in-pod: it sets the template + input and runs the user binary in
 run-mode.
 
 ```sh
-cargo run -q -p cargo-athena-cli -- athena run \
+cargo run -q -p cargo-athena --bin cargo-athena -- athena run \
   --template my-crate-transform \
   --package my-crate \
   --input '{"data":"hello","factor":4}'
@@ -58,7 +58,7 @@ Cross-compiles a **static-musl** binary for each target in
 `cargo-zigbuild` + `zig` (in the dev shell).
 
 ```sh
-cargo run -q -p cargo-athena-cli -- athena build --package my-crate --print
+cargo run -q -p cargo-athena --bin cargo-athena -- athena build --package my-crate --print
 ```
 
 - `--target T` (repeatable) overrides the `athena.toml` target matrix.

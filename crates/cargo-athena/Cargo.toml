@@ -4,11 +4,25 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Compile regular Rust into Argo Workflow YAML — facade crate"
+description = "Compile regular Rust into Argo Workflow YAML (library + `cargo athena` CLI)"
+
+[[bin]]
+name = "cargo-athena"
+path = "src/bin/cargo-athena.rs"
+required-features = ["cli"]
+
+[features]
+# On by default so `cargo install cargo-athena` ships the `cargo athena`
+# subcommand out of the box. Library-only users (a workflow crate doing
+# `cargo add cargo-athena`) opt out with `default-features = false` to
+# drop the clap dependency.
+default = ["cli"]
+cli = ["dep:clap"]
 
 [dependencies]
 cargo-athena-core = { workspace = true }
 cargo-athena-macros = { workspace = true }
+clap = { workspace = true, optional = true }
 
 [dev-dependencies]
 # trybuild builds tests/ui/*.rs as crates that depend on this package, so

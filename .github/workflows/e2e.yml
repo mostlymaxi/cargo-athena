@@ -41,7 +41,7 @@ jobs:
         env:
           ATHENA_CONFIG: scripts/athena.toml
         run: |
-          nix develop -c cargo run -q -p cargo-athena-cli -- athena build \
+          nix develop -c cargo run -q -p cargo-athena --bin cargo-athena -- athena build \
             --package cargo-athena-example-e2e --bin e2e
       - uses: actions/upload-artifact@v4
         with:

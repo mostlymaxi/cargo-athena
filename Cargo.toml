@@ -1,12 +1,12 @@
 # Workspace root for cargo-athena: compile regular Rust into Argo Workflow YAML.
 #
 # Crate roles:
-#   cargo-athena-api    — Argo API types generated from protobuf (prost), serde-able for YAML.
-#   cargo-athena-core   — runtime: modes, registration (inventory), DAG/promise types, YAML emit.
-#   cargo-athena-macros — #[workflow] / #[container] / #[fragment] proc macros + host!/image!/env!.
-#   cargo-athena        — facade crate users depend on; re-exports the above behind one name.
-#   cargo-athena-cli    — the `cargo athena` subcommand binary.
-#   examples/*        — end-to-end usage.
+#   cargo-athena-api    — hand-owned serde subset of the Argo Workflows API.
+#   cargo-athena-core   — runtime: modes, registration (inventory), DAG types, YAML emit.
+#   cargo-athena-macros — #[workflow] / #[container] / #[fragment] proc macros.
+#   cargo-athena        — the crate users depend on: facade lib + the
+#                         `cargo athena` CLI bin (default `cli` feature).
+#   examples/*          — end-to-end usage.
 [workspace]
 resolver = "3"
 members = ["crates/*", "examples/*"]
@@ -39,3 +39,6 @@ toml = "0.8"
 
 # registration
 inventory = "0.3"
+
+# cli (optional — behind the `cli` feature of the cargo-athena crate)
+clap = { version = "4", features = ["derive"] }

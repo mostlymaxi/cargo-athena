@@ -60,7 +60,7 @@ if [ "${ATHENA_SKIP_BUILD:-0}" = "1" ]; then
   say "using prebuilt tarball: $TARBALL"
 else
   say "cross-compile + package (cargo athena build)"
-  ( cd "$ROOT" && cargo run -q -p cargo-athena-cli -- athena build \
+  ( cd "$ROOT" && cargo run -q -p cargo-athena --bin cargo-athena -- athena build \
       --package "$PKG" --bin "$BIN" )
 fi
 test -f "$TARBALL" || { echo "missing $TARBALL"; exit 1; }
@@ -74,7 +74,7 @@ mc cp "$TARBALL" \
   athena-e2e/athena-artifacts/athena/bin/e2e/0.1.0/e2e.tar.gz
 
 say "emit WorkflowTemplates + Workflow"
-( cd "$ROOT" && cargo run -q -p cargo-athena-cli -- athena emit \
+( cd "$ROOT" && cargo run -q -p cargo-athena --bin cargo-athena -- athena emit \
     --package "$PKG" --bin "$BIN" ) > /tmp/athena-wf.yaml
 
 rm -f /tmp/athena-doc-*.yaml

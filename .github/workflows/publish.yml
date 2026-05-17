@@ -61,7 +61,7 @@ jobs:
       - name: cargo publish (dependency order)
         run: |
           set -euo pipefail
-          for c in cargo-athena-api cargo-athena-macros cargo-athena-core cargo-athena cargo-athena-cli; do
+          for c in cargo-athena-api cargo-athena-macros cargo-athena-core cargo-athena; do
             echo "::group::cargo publish -p $c"
             nix develop -c cargo publish -p "$c" --locked
             echo "::endgroup::"

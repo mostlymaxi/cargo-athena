@@ -322,7 +322,13 @@ adding a field.
   (cached) → parallel Argo matrix (`fail-fast:false`).
 - `.github/workflows/publish.yml` (LIVE since repo went public): on a
   `v*` tag (or manual dispatch) `cargo publish` in dependency order
-  **api → macros → core → cargo-athena → cargo-athena-cli**. The old
+  **api → macros → core → cargo-athena**. (`cargo-athena-cli` was
+  merged into `cargo-athena` 2026-05-17: it is now lib + the
+  `cargo athena` CLI bin behind a default `cli` feature, so
+  `cargo install cargo-athena` ships the subcommand; library-only
+  consumers use `default-features = false`. The abandoned
+  `cargo-athena-cli` 0.1.x stays on crates.io but gets no new
+  releases.) The old
   "path-dep versioning" blocker was already moot — `version.workspace =
   true` + `[workspace.dependencies]` give every internal dep
   `{ path, version = "0.1.0" }`, which `cargo publish` accepts. Needs
