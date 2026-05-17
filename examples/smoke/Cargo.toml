@@ -50,6 +50,10 @@ path = "src/bin/nested_main.rs"
 name = "smoke-inject"
 path = "src/bin/inject_main.rs"
 
+[[bin]]
+name = "smoke-ns"
+path = "src/bin/ns_main.rs"
+
 [dependencies]
 cargo-athena = { workspace = true }
 serde = { version = "1", features = ["derive"] }

@@ -15,6 +15,7 @@ const BIN_FANOUT: &str = env!("CARGO_BIN_EXE_smoke-fanout");
 const BIN_IF: &str = env!("CARGO_BIN_EXE_smoke-if");
 const BIN_NESTED: &str = env!("CARGO_BIN_EXE_smoke-nested");
 const BIN_INJECT: &str = env!("CARGO_BIN_EXE_smoke-inject");
+const BIN_NS: &str = env!("CARGO_BIN_EXE_smoke-ns");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -136,6 +137,15 @@ fn emit_pipeline_nested() {
 #[test]
 fn emit_pipeline_inject() {
     assert_golden("pipeline_inject.yaml", &run_bin(BIN_INJECT, &[]));
+}
+
+/// `#[workflow(node_selector=…)]`: literal key+value set on the dag
+/// template (Argo cascades it to every `templateRef`'d task pod),
+/// including the raw `{{workflow.parameters.region}}` escape-hatch
+/// literal. No `"lit" + arg` injection — workflows are DAGs, not pods.
+#[test]
+fn emit_pipeline_ns() {
+    assert_golden("pipeline_ns.yaml", &run_bin(BIN_NS, &[]));
 }
 
 /// Run mode: a container that returns a value (JSON to stdout).

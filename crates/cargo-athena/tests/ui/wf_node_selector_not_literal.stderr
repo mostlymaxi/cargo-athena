@@ -1,0 +1,5 @@
+error: expected string literal
+ --> tests/ui/wf_node_selector_not_literal.rs:6:57
+  |
+6 | #[cargo_athena::workflow(node_selector = { "disktype" = profile })]
+  |                                                         ^^^^^^^
