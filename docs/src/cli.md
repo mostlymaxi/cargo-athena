@@ -29,6 +29,11 @@ template, cross-referenced by `templateRef`. The names are **stable and
 deterministic** (`<crate>-<fn>`) — register them and trigger runs with
 `argo submit --from workflowtemplate/<root>`.
 
+The ergonomic path is **`publish` + [`cargo athena submit`](#submit)** —
+`submit` does this `emit` + register **and** starts the run for you.
+Reach for `emit` directly to *inspect* the YAML, or for a GitOps
+`kubectl apply` pipeline.
+
 ```sh
 cargo athena emit --package my-crate                    # to stdout
 cargo athena emit --package my-crate --out wf.yaml      # to a file
@@ -146,7 +151,9 @@ cargo athena workflow describe my-crate-pipeline
 
 Run a `#[workflow]` (or a single `#[container]`) on a real cluster —
 `argo submit --from workflowtemplate/<name>` with the safety rails you'd
-otherwise do by hand:
+otherwise do by hand. Paired with **`publish`** this is the recommended
+deploy+run flow: `publish` ships the binary, `submit` registers the
+templates and starts the run — no hand-run `emit`/`kubectl apply`:
 
 ```sh
 cargo athena submit my-crate-pipeline -a seed=hello
@@ -214,9 +221,12 @@ cargo athena publish --package my-crate   # cross-compile + package + upload
 - `--tarball F` uploads `F` verbatim and **skips the build** —
   build-once / upload-many (reuse one CI-built artifact; the kind e2e
   uses this).
-- S3 credentials come from the standard `AWS_ACCESS_KEY_ID` /
-  `AWS_SECRET_ACCESS_KEY` (/ `AWS_SESSION_TOKEN`) environment variables
-  — the same `object_store` path `submit`/`emulate` use.
+- S3 credentials: the standard `AWS_ACCESS_KEY_ID` /
+  `AWS_SECRET_ACCESS_KEY` (/ `AWS_SESSION_TOKEN`) env vars, else the
+  ambient cloud identity (EC2 IMDS / ECS task role / IRSA web-identity)
+  — the same `object_store` path `submit`/`emulate` use. The shared
+  `~/.aws/credentials` file and `AWS_PROFILE` are **not** read
+  (`object_store` is not the AWS SDK).
 - `AWS_ENDPOINT_URL` (AWS-SDK standard; `AWS_ENDPOINT_URL_S3` too)
   overrides the `athena.toml` endpoint **for this upload only** — for
   when S3 is reached differently here than from the pods (a

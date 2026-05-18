@@ -668,8 +668,10 @@ pub(crate) fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
             b = b.with_endpoint(url);
         }
     }
-    // Credentials come from the standard AWS env vars (object_store
-    // also reads `~/.aws`, but we keep the CLI contract explicit).
+    // Credentials: the standard AWS env vars below, else object_store's
+    // ambient fallback (EC2 IMDS / ECS task role / IRSA web-identity).
+    // object_store does NOT parse `~/.aws/credentials` or `AWS_PROFILE`
+    // — the shared-config file is unsupported here (not the AWS SDK).
     if let Ok(v) = std::env::var("AWS_ACCESS_KEY_ID") {
         b = b.with_access_key_id(v);
     }

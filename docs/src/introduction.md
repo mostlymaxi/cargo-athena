@@ -38,7 +38,7 @@ next step.
 - **Composable.** A workflow is a Rust type. Referencing it from another
   crate force-links it; workflows compose across modules and crates with
   no registry, no `build.rs`, no codegen step you run by hand.
-- **One binary.** `cargo athena build` cross-compiles a single
+- **One binary.** `cargo athena publish` cross-compiles a single
   static-musl binary into your artifact bucket; every container pulls it
   and runs the right function. You ship one thing.
 
