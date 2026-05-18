@@ -42,7 +42,7 @@ jobs:
           # Tiny mdbook-only closure (.#docs, no rust). Isolated prefix.
           primary-key: nix-${{ runner.os }}-docs-${{ hashFiles('flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-docs-
-          gc-max-store-size-linux: 1G
+          # No gc-max-store-size (save the whole docs closure).
           purge: true
           purge-prefixes: nix-${{ runner.os }}-docs-
           purge-created: 0

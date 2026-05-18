@@ -41,7 +41,9 @@ jobs:
           # Nix-store cache — watch for GC/symlink/perms breakage.
           primary-key: nix-${{ runner.os }}-ci-${{ hashFiles('flake.lock', 'rust-toolchain.toml') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-ci-
-          gc-max-store-size-linux: 2G
+          # No gc-max-store-size: the ~1.7G toolchain closure must be
+          # saved whole — capping it GCs paths back out and the restore
+          # comes back incomplete (defeats the cache).
           purge: true
           purge-prefixes: nix-${{ runner.os }}-ci-
           purge-created: 0

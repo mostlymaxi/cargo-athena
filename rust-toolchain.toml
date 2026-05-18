@@ -1,5 +1,9 @@
 [toolchain]
 channel = "stable"
+# minimal = rustc + cargo + rust-std only; the components below are
+# added explicitly. Drops rust-docs (never needed in CI/build) — keeps
+# it out of the Nix toolchain closure that CI caches.
+profile = "minimal"
 components = [
   "rustfmt",
   "clippy",
