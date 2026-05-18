@@ -317,6 +317,17 @@ README is intentionally lean (user-facing); the *why* lives here.
   `build` (package only, for a CI artifact / `--print`) and `publish`
   both go through one `build_tarball()` so they can't drift; the key
   is resolved purely locally (no user-binary run), same as `emit`.
+  `publish --tarball F` skips the build and uploads `F` verbatim
+  (build-once / upload-many). `AWS_ENDPOINT_URL` (AWS-SDK standard, in
+  `s3_store`) overrides the config endpoint for the upload only — the
+  in-cluster-DNS-vs-runner split (pods resolve `athena.toml`'s
+  endpoint; an outside-the-cluster `publish` needs a port-forward /
+  public host). `scripts/e2e-test.sh` **dogfoods**
+  `cargo athena publish --tarball` (replacing a hardcoded `mc cp`) —
+  the only automated live-S3 coverage of a CLI orchestration command;
+  it derives the key from the same `athena.toml` `emit` uses (kills
+  the old hardcoded-key drift) and sets `AWS_ENDPOINT_URL` to the
+  port-forwarded MinIO.
 - `cargo athena emit` injects, into every container template: the binary
   as an input artifact (`s3{}` from `athena.toml`, `archive: none`) + an
   `sh` bootstrap (`uname` → pick `app-<triple>` → `exec … --cargo-athena-

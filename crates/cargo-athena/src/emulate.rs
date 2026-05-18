@@ -638,18 +638,35 @@ pub(crate) fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
         .with_bucket_name(&s3.bucket)
         .with_region(&s3.region)
         .with_allow_http(s3.insecure);
-    // AWS proper: let region drive the URL. Custom (MinIO/etc.): use the
-    // endpoint, adding a scheme if the config gave a bare host.
-    let ep = s3.endpoint.trim();
-    if !ep.is_empty() && !ep.ends_with("amazonaws.com") {
-        let url = if ep.contains("://") {
-            ep.to_string()
-        } else if s3.insecure {
-            format!("http://{ep}")
-        } else {
-            format!("https://{ep}")
-        };
+    // `AWS_ENDPOINT_URL` (AWS-SDK standard) overrides the config
+    // endpoint — needed when S3 is reached differently from here than
+    // from the pods (e.g. an in-cluster DNS in `athena.toml` for the
+    // bootstrap, but a port-forward / public host when `publish`ing
+    // from outside the cluster). Falls back to `AWS_ENDPOINT_URL_S3`.
+    let ep_env = std::env::var("AWS_ENDPOINT_URL")
+        .ok()
+        .or_else(|| std::env::var("AWS_ENDPOINT_URL_S3").ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if let Some(url) = ep_env {
+        if url.starts_with("http://") {
+            b = b.with_allow_http(true);
+        }
         b = b.with_endpoint(url);
+    } else {
+        // AWS proper: let region drive the URL. Custom (MinIO/etc.): use
+        // the endpoint, adding a scheme if the config gave a bare host.
+        let ep = s3.endpoint.trim();
+        if !ep.is_empty() && !ep.ends_with("amazonaws.com") {
+            let url = if ep.contains("://") {
+                ep.to_string()
+            } else if s3.insecure {
+                format!("http://{ep}")
+            } else {
+                format!("https://{ep}")
+            };
+            b = b.with_endpoint(url);
+        }
     }
     // Credentials come from the standard AWS env vars (object_store
     // also reads `~/.aws`, but we keep the CLI contract explicit).

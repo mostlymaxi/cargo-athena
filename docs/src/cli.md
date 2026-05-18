@@ -15,7 +15,7 @@ cargo athena [-c F] workflow  describe <name> [-p PKG] [--bin B]
 cargo athena [-c F] submit <name> [-a k=v].. [-n NS] [--service-account SA]
                           [--node-selector k=v].. [--argo-server URL] [-y] [--update]
 cargo athena [-c F] build [-p PKG] [--bin B] [--target T].. [--print]
-cargo athena [-c F] publish [-p PKG] [--bin B] [--target T].. [--print]
+cargo athena [-c F] publish [-p PKG] [--bin B] [--target T].. [--tarball F] [--print]
 ```
 
 `-c, --config <FILE>` (global) points at an `athena.toml`. By default
@@ -211,9 +211,17 @@ cargo athena publish --package my-crate   # cross-compile + package + upload
   `--print` is a dry run (resolve + print the key, no build/upload).
   Use plain `build` when you want the tarball locally *without*
   uploading (CI artifact, inspection).
+- `--tarball F` uploads `F` verbatim and **skips the build** —
+  build-once / upload-many (reuse one CI-built artifact; the kind e2e
+  uses this).
 - S3 credentials come from the standard `AWS_ACCESS_KEY_ID` /
   `AWS_SECRET_ACCESS_KEY` (/ `AWS_SESSION_TOKEN`) environment variables
   — the same `object_store` path `submit`/`emulate` use.
+- `AWS_ENDPOINT_URL` (AWS-SDK standard; `AWS_ENDPOINT_URL_S3` too)
+  overrides the `athena.toml` endpoint **for this upload only** — for
+  when S3 is reached differently here than from the pods (a
+  port-forward, or a public vs in-cluster host). It does *not* change
+  what `emit` bakes into the templates.
 - The destination `s3://bucket/key` is printed on **stdout**
   (scriptable); progress on stderr.
 
