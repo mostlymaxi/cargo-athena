@@ -108,8 +108,9 @@ binary is pulled from S3; `--build` packages a local one instead. See
 
 `publish` cross-compiles a static-musl binary per `athena.toml` target,
 packages them into one tarball, and uploads it to the exact key `emit`
-references — one step (S3 credentials from the standard
-`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` env vars):
+references — one step (S3 credentials: `AWS_*` env vars or an EC2/ECS
+instance role — **not** `~/.aws` profiles;
+[details](cli.md#cargo-athena-publish)):
 
 ```sh
 cargo athena publish --package my-workflows
@@ -122,22 +123,40 @@ cargo athena publish --package my-workflows
 key without building or uploading. `cargo athena build` packages the
 tarball locally *without* uploading, e.g. for a CI artifact.)
 
-## 4. Register the templates and run it
+## 4. Run it
 
-`emit` injects that tarball + a tiny `sh` bootstrap into every container
-template. Register the `WorkflowTemplate`s — they have stable,
-deterministic names, so this is plain idempotent `kubectl apply` (and
-exactly what you'd commit to a GitOps repo):
+The recommended path is **`publish` then `submit`** — `submit` does the
+`emit` + register steps for you, so the whole loop is just *write Rust
+→ `publish` → `submit`*:
+
+```sh
+cargo athena submit my-workflows-run-foo -a seed=hello
+```
+
+Before creating anything, `submit`:
+
+1. **type-checks** your `-a`/`--input-file` args against the workflow's
+   real signature (the same report as `emulate`);
+2. confirms the **binary you just `publish`ed** is in the bucket (so
+   pods can bootstrap) — `publish` first, then `submit`;
+3. **registers + drift-checks** every `WorkflowTemplate` it emits —
+   creating missing ones and updating changed ones, after a y/N prompt
+   (`-y` to skip prompts, `--update` to force a re-apply);
+4. creates the run and prints its **name** on stdout.
+
+No hand-run `emit`, `kubectl apply`, or `argo submit`. It talks to the
+Argo Server (`--argo-server`/`$ARGO_SERVER`) or the Kubernetes API via
+your kubeconfig — details on [the CLI page](cli.md#submit).
+
+### GitOps / declarative alternative
+
+Prefer to commit the manifests? The template names are **stable and
+deterministic**, so `emit` is plain idempotent `kubectl apply` (exactly
+what you'd keep in a GitOps repo), and `argo submit --from` runs the
+registered root:
 
 ```sh
 cargo athena emit --package my-workflows | kubectl apply -f -
-```
-
-Then trigger a run from the registered root template
-(`<crate>-<entrypoint>`); `--from` mints a fresh run each time, so you
-re-run with just this — no re-emit, no `generateName` object to manage:
-
-```sh
 argo submit --from workflowtemplate/my-workflows-run-foo --watch
 ```
 
@@ -147,6 +166,6 @@ argo submit --from workflowtemplate/my-workflows-run-foo --watch
 > (non-idempotent, not GitOps-friendly) — the deterministic templates
 > are what you keep.
 
-That is the whole loop: **write Rust → `emit` to iterate → `build` +
-upload → `emit | kubectl apply` → `argo submit --from` to run/re-run.**
-Next: [Core Concepts](concepts.md).
+While iterating, `cargo athena emit` alone (no cluster) is the fast
+inner loop to eyeball the generated YAML. Next:
+[Core Concepts](concepts.md).

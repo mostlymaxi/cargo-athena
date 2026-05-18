@@ -81,10 +81,13 @@ binary, picks its arch, and runs the right function — deserialize
 inputs, run the body, serialize outputs.
 
 ```sh
-cargo athena emit  --package my-workflows                         # check the YAML (no infra)
-cargo athena build --package my-workflows                         # cross-compile + package the binary
-cargo athena emit  --package my-workflows | kubectl apply -f -    # register the templates
-argo submit --from workflowtemplate/my-workflows-run-foo --watch  # run it
+cargo athena emit    --package my-workflows                # check the YAML (no cluster)
+cargo athena publish --package my-workflows                # cross-compile + upload the binary
+cargo athena submit  my-workflows-run-foo -a seed=hi       # register templates + run
+
+# GitOps alternative (commit the manifests; run from the registered root):
+#   cargo athena emit --package my-workflows | kubectl apply -f -
+#   argo submit --from workflowtemplate/my-workflows-run-foo --watch
 ```
 
 The full zero→running walkthrough (including uploading the binary to
