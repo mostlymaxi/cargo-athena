@@ -7,7 +7,7 @@
 //! (`cargo_athena::entrypoint::<Root>()`); the artifact repository +
 //! target matrix come from `athena.toml`.
 
-use cargo_athena::{AthenaConfig, serde_json};
+use cargo_athena::{AthenaConfig, S3Ref, serde_json};
 use clap::{Parser, Subcommand};
 use std::process::{Command, Stdio, exit};
 
@@ -362,21 +362,45 @@ fn build(
         exit(status.code().unwrap_or(1));
     }
     eprintln!("packaged {tarball}  ->  {dest}");
-    eprintln!("(`cargo athena publish` to upload — not yet implemented)");
+    eprintln!("run `cargo athena publish` (same -p/--bin) to upload it.");
 }
 
-// ---- publish (stub) -------------------------------------------------------
+// ---- publish (upload the `build` tarball) ---------------------------------
 
+/// Resolves the artifact key exactly as `build` does (no user-binary
+/// run — keeps `build → publish` symmetric) and uploads the local
+/// tarball to the `athena.toml` repo. Creds come from `AWS_*` env via
+/// the same `object_store` path `submit`/`emulate` use.
 fn publish(package: Option<&str>, bin: Option<&str>) {
     let cfg = AthenaConfig::load();
     let (krate, version, default_bin) = package_meta(package);
     let bin = bin.map(str::to_string).unwrap_or(default_bin);
     let key = render_key(&cfg.artifact.key, &krate, &version, &bin);
-    let s3 = &cfg.artifact_repository.s3;
-    eprintln!(
-        "publish is not implemented yet.\n\
-         would upload target/athena/{bin}.tar.gz -> s3://{}/{} (endpoint {})",
-        s3.bucket, key, s3.endpoint
-    );
-    exit(2);
+    let repo = &cfg.artifact_repository.s3;
+
+    let tarball = format!("target/athena/{bin}.tar.gz");
+    let tpath = std::path::Path::new(&tarball);
+    if !tpath.exists() {
+        eprintln!(
+            "no tarball at {tarball} — run `cargo athena build` \
+             (same -p/--bin) first."
+        );
+        exit(1);
+    }
+
+    // Same field mapping core uses to emit the binary artifact, so the
+    // upload lands exactly where emit/submit/emulate expect to read it.
+    let s3 = S3Ref {
+        endpoint: repo.endpoint.clone(),
+        bucket: repo.bucket.clone(),
+        region: repo.region.clone(),
+        insecure: repo.insecure,
+        key: key.clone(),
+    };
+    let dest = format!("s3://{}/{}", s3.bucket, key);
+    eprintln!("uploading {tarball}  ->  {dest} (endpoint {})", s3.endpoint);
+    emulate::s3_put(&s3, tpath);
+    eprintln!("published.");
+    // Scriptable: the destination on stdout (all else on stderr).
+    println!("{dest}");
 }

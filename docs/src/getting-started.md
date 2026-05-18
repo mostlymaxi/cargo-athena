@@ -118,19 +118,15 @@ cargo athena build --package my-workflows
 # destination: s3://my-bucket/athena/my-workflows/0.1.0/my-workflows.tar.gz (endpoint s3.amazonaws.com)
 ```
 
-Upload that tarball to exactly that key — pick whichever client you
-have (the `s3://…` path is what `build` printed):
+Then `publish` uploads it to exactly that key (S3 credentials from the
+standard `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` env vars):
 
 ```sh
-s3cmd put target/athena/my-workflows.tar.gz \
-  s3://my-bucket/athena/my-workflows/0.1.0/my-workflows.tar.gz
-
-# or:  aws s3 cp target/athena/my-workflows.tar.gz s3://my-bucket/athena/my-workflows/0.1.0/my-workflows.tar.gz
-# or:  mc cp      target/athena/my-workflows.tar.gz  myalias/my-bucket/athena/my-workflows/0.1.0/my-workflows.tar.gz
+cargo athena publish --package my-workflows
 ```
 
-(`cargo athena build --print` does the dry run — resolve + print the
-key without building or uploading.)
+(`cargo athena build --print` is the dry run — resolve + print the key
+without building or uploading.)
 
 ## 4. Register the templates and run it
 

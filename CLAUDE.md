@@ -310,7 +310,11 @@ README is intentionally lean (user-facing); the *why* lives here.
 ## Binary delivery / runtime
 
 - `cargo athena build` cross-compiles one static-musl `.tar.gz` (target
-  matrix from `athena.toml`) into an S3-compatible `ArtifactRepository`.
+  matrix from `athena.toml`); `cargo athena publish` uploads it to the
+  S3-compatible `ArtifactRepository` — resolves the key exactly as
+  `build`/`emit` do (no user-binary run, so `build → publish` stays
+  symmetric), creds from `AWS_*` env via `object_store` (shared
+  `emulate::s3_put`, same path as `submit`/`emulate`).
 - `cargo athena emit` injects, into every container template: the binary
   as an input artifact (`s3{}` from `athena.toml`, `archive: none`) + an
   `sh` bootstrap (`uname` → pick `app-<triple>` → `exec … --cargo-athena-
