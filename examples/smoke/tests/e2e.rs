@@ -17,6 +17,7 @@ const BIN_NESTED: &str = env!("CARGO_BIN_EXE_smoke-nested");
 const BIN_INJECT: &str = env!("CARGO_BIN_EXE_smoke-inject");
 const BIN_NS: &str = env!("CARGO_BIN_EXE_smoke-ns");
 const BIN_RETRY: &str = env!("CARGO_BIN_EXE_smoke-retry");
+const BIN_TTL: &str = env!("CARGO_BIN_EXE_smoke-ttl");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -155,6 +156,14 @@ fn emit_pipeline_ns() {
 #[test]
 fn emit_pipeline_retry() {
     assert_golden("pipeline_retry.yaml", &run_bin(BIN_RETRY, &[]));
+}
+
+/// `#[workflow(ttl(..), pod_gc(..))]`: WorkflowSpec-scoped Argo
+/// `ttlStrategy`/`podGC` stamped on the workflow's own WorkflowTemplate
+/// `spec` (same per-WT plumbing as `on_exit_if_root`).
+#[test]
+fn emit_pipeline_ttl() {
+    assert_golden("pipeline_ttl.yaml", &run_bin(BIN_TTL, &[]));
 }
 
 /// `CARGO_ATHENA_DESCRIBE`: the binary reports a `ContainerRunMeta`

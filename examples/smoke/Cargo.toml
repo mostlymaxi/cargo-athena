@@ -58,6 +58,10 @@ path = "src/bin/ns_main.rs"
 name = "smoke-retry"
 path = "src/bin/retry_main.rs"
 
+[[bin]]
+name = "smoke-ttl"
+path = "src/bin/ttl_main.rs"
+
 [dependencies]
 cargo-athena = { workspace = true }
 serde = { version = "1", features = ["derive"] }

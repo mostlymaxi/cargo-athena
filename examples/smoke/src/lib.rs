@@ -352,3 +352,16 @@ pub fn pipeline_retry() {
     flaky();
     flaky_forever();
 }
+
+// --- #[workflow] ttl + pod_gc (WorkflowSpec-scoped GC) --------------------
+
+/// `ttl(after_completion=…, after_failure=…)` + `pod_gc(strategy=…)`
+/// lower to the workflow's own `spec.ttlStrategy` / `spec.podGC`
+/// (workflow-scoped, same per-WT plumbing as `on_exit_if_root`).
+#[workflow(
+    ttl(after_completion = 86400, after_failure = 3600),
+    pod_gc(strategy = "OnWorkflowSuccess")
+)]
+pub fn pipeline_ttl() {
+    cleanup();
+}

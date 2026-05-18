@@ -133,6 +133,28 @@ argo! {
         /// which only resolves a *local* template name — unusable across
         /// the one-WT-per-template wormhole.
         pub hooks: BTreeMap<String, LifecycleHook>,
+        /// Workflow-scoped TTL GC (`#[…(ttl(..))]`).
+        pub ttl_strategy: Option<TtlStrategy>,
+        /// Workflow-scoped pod GC (`#[…(pod_gc(strategy=..))]`). camelCase
+        /// of `pod_gc` is `podGc`, but Argo's field is `podGC` — the
+        /// `argo!` macro forwards this explicit rename ahead of its
+        /// `rename_all`, so it wins.
+        #[serde(rename = "podGC")]
+        pub pod_gc: Option<PodGc>,
+    }
+
+    /// Argo `ttlStrategy`: delete the finished Workflow after the given
+    /// seconds. Each bound is independent (`#[…(ttl(after_completion=…,
+    /// after_success=…, after_failure=…))]`).
+    pub struct TtlStrategy {
+        pub seconds_after_completion: Option<i32>,
+        pub seconds_after_success: Option<i32>,
+        pub seconds_after_failure: Option<i32>,
+    }
+
+    /// Argo `podGC`: when to delete the Workflow's pods.
+    pub struct PodGc {
+        pub strategy: String,
     }
 
     /// Points a runnable Workflow at a WorkflowTemplate resource.

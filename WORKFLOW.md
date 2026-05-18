@@ -22,7 +22,9 @@ runtime surprises.
            node_selector = { "k" = "v", ... },
            on_exit_if_root = path::to::template,
            retry(limit = 2, policy = "OnError", backoff = "30s"),
-           timeout = "1h")]
+           timeout = "1h",
+           ttl(after_completion = 86400, after_success = 3600, after_failure = 7200),
+           pod_gc(strategy = "OnWorkflowSuccess"))]
 ```
 
 | Arg | Effect |
@@ -33,6 +35,8 @@ runtime surprises.
 | `on_exit_if_root = t` | Whole-workflow exit handler. Every workflow that sets it carries it on **its own** `WorkflowTemplate`'s `spec.hooks.exit.templateRef`. Argo runs exit hooks workflow-scoped: only the workflow you actually **submit** fires its handler — so `argo submit --from workflowtemplate/X` runs *X*'s handler; *X*'s handler stays inert when *X* is just a `templateRef`'d sub-step of a bigger run (submit it directly to get it). Distinct from the per-task `.on_exit(t)` builder, which is a different, always-fires task hook. |
 | `retry(limit = N \| unlimited, policy = "…", backoff = "<dur>")` | Template-level Argo `retryStrategy` on this dag/steps template. `limit` is **required** (`unlimited` ⇒ unbounded, no `limit` field); `policy` ∈ `Always\|OnFailure\|OnError\|OnTransientError` (optional; Argo defaults to `OnFailure`); `backoff` a duration string (optional). Not re-stamped on synthesized `if`-wrapper templates (workflow-scoped-attr policy). |
 | `timeout = "<dur>"` | Template-level Argo `timeout` (e.g. `"1h"`). Optional. |
+| `ttl(after_completion = <s>, after_success = <s>, after_failure = <s>)` | WorkflowSpec-scoped Argo `ttlStrategy` (GC the finished Workflow after the given seconds). All three optional ints but **≥1 required**. Stamped on this workflow's own `WorkflowTemplate` `spec` (workflow-scoped, same per-WT plumbing as `on_exit_if_root`); not re-stamped on synthesized `if`-wrapper templates. |
+| `pod_gc(strategy = "<S>")` | WorkflowSpec-scoped Argo `podGC`. `strategy` **required**, ∈ `OnPodCompletion\|OnPodSuccess\|OnWorkflowCompletion\|OnWorkflowSuccess`. Same per-WT scoping as `ttl`. |
 
 All are optional. A parameter *name* (i.e. a function argument) or a
 `name = "…"` value that a YAML 1.1 parser reads as a boolean/null

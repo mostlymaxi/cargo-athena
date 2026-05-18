@@ -1,0 +1,5 @@
+error: unknown podGC strategy `Nope` (expected OnPodCompletion|OnPodSuccess|OnWorkflowCompletion|OnWorkflowSuccess)
+ --> tests/ui/wf_podgc_bad.rs:5:4
+  |
+5 | fn f() {}
+  |    ^

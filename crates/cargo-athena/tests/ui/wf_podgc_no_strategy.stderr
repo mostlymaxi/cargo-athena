@@ -1,0 +1,5 @@
+error: `pod_gc(...)` requires `strategy = "..."`
+ --> tests/ui/wf_podgc_no_strategy.rs:4:4
+  |
+4 | fn f() {}
+  |    ^

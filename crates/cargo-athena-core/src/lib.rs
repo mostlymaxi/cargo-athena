@@ -272,6 +272,13 @@ pub trait Template {
     /// fires exit hooks workflow-scoped, so it runs only when this
     /// workflow is the one submitted (inert as a nested templateRef).
     const ON_EXIT: Option<&'static str> = None;
+    /// Workflow-scoped TTL GC, from `#[…(ttl(..))]`. `build_templates`
+    /// puts it on this template's own `spec.ttlStrategy` (same per-WT
+    /// plumbing as `ON_EXIT`; never on synthetic `if` wrappers).
+    const TTL: ::core::option::Option<crate::api::TtlStrategy> = None;
+    /// Workflow-scoped pod GC strategy, from `#[…(pod_gc(strategy=..))]`.
+    /// `build_templates` puts it on this template's own `spec.podGC`.
+    const POD_GC: ::core::option::Option<&'static str> = None;
 
     /// Build this template's inner Argo `template` object.
     fn build(ctx: &BuildCtx) -> api::Template;
@@ -860,6 +867,13 @@ pub struct Collector {
     /// the workflow that is actually submitted (workflow-scoped), so
     /// submitting a sub-workflow's template directly runs its own hook.
     exits: HashMap<String, &'static str>,
+    /// `<argo name> -> ttlStrategy` for every template with `ttl(..)`.
+    /// Stamped onto that WorkflowTemplate's `spec.ttlStrategy` (same
+    /// per-WT, workflow-scoped semantics as `exits`).
+    ttl: HashMap<String, crate::api::TtlStrategy>,
+    /// `<argo name> -> podGC strategy` for every template with
+    /// `pod_gc(..)`. Stamped onto that WT's `spec.podGC`.
+    pod_gc: HashMap<String, String>,
     /// `<argo name> -> stringified input types` (parallel to the
     /// template's INPUTS), for `container emulate` arg type-checking.
     types: HashMap<String, &'static [&'static str]>,
@@ -881,6 +895,8 @@ impl Collector {
             builders: Vec::new(),
             runners: HashMap::new(),
             exits: HashMap::new(),
+            ttl: HashMap::new(),
+            pod_gc: HashMap::new(),
             types: HashMap::new(),
             synthetic: HashSet::new(),
         }
@@ -904,6 +920,12 @@ impl Collector {
         self.builders.push(T::build);
         if let Some(handler) = T::ON_EXIT {
             self.exits.insert(T::ARGO_NAME.to_string(), handler);
+        }
+        if let Some(t) = T::TTL {
+            self.ttl.insert(T::ARGO_NAME.to_string(), t);
+        }
+        if let Some(s) = T::POD_GC {
+            self.pod_gc.insert(T::ARGO_NAME.to_string(), s.to_string());
         }
         if !T::INPUT_TYPES.is_empty() {
             self.types.insert(T::ARGO_NAME.to_string(), T::INPUT_TYPES);
@@ -954,7 +976,8 @@ impl Collector {
         // own hook stays inert when nested — but submit that sub-WT
         // directly and its own hook fires.
         for t in tpls.iter_mut() {
-            if let Some(handler) = self.exits.get(&name_of(t))
+            let name = name_of(t);
+            if let Some(handler) = self.exits.get(&name)
                 && let Some(spec) = t.spec.as_mut()
             {
                 spec.hooks.insert(
@@ -968,6 +991,21 @@ impl Collector {
                         ..Default::default()
                     },
                 );
+            }
+            // `ttl(..)`/`pod_gc(..)` are WorkflowSpec-scoped: stamped on
+            // each declaring template's OWN WorkflowTemplate (Argo runs
+            // GC workflow-scoped, same per-WT model as the exit hook).
+            if let Some(ttl) = self.ttl.get(&name)
+                && let Some(spec) = t.spec.as_mut()
+            {
+                spec.ttl_strategy = Some(ttl.clone());
+            }
+            if let Some(s) = self.pod_gc.get(&name)
+                && let Some(spec) = t.spec.as_mut()
+            {
+                spec.pod_gc = Some(api::PodGc {
+                    strategy: s.clone(),
+                });
             }
         }
         tpls
@@ -1019,6 +1057,12 @@ impl Collector {
                         m
                     })
                     .unwrap_or_default(),
+                // Only the emit root's ttl/pod_gc reaches the runnable
+                // Workflow (same workflow-scoped reasoning as the hook).
+                ttl_strategy: E::TTL,
+                pod_gc: E::POD_GC.map(|s| api::PodGc {
+                    strategy: s.to_string(),
+                }),
                 ..Default::default()
             }),
         };
