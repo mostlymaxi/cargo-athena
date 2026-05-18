@@ -330,3 +330,25 @@ pub fn pipeline_ns() {
     let raw = fetch("https://example.com".to_string());
     transform(raw, 3);
 }
+
+// --- #[container]/#[workflow] retry + timeout -----------------------------
+
+/// `retry(limit = N, policy = ..., backoff = "<dur>")` + `timeout` lower
+/// to template-level Argo `retryStrategy`/`timeout`.
+#[container(retry(limit = 3, policy = "OnError", backoff = "30s"), timeout = "5m")]
+pub fn flaky() -> String {
+    "ok".to_string()
+}
+
+/// `limit = unlimited` is the explicit opt-in for unbounded retries:
+/// emits `retryStrategy` with **no** `limit` (Argo's nil = unlimited).
+#[container(retry(limit = unlimited, policy = "Always"))]
+pub fn flaky_forever() -> String {
+    "ok".to_string()
+}
+
+#[workflow(retry(limit = 2))]
+pub fn pipeline_retry() {
+    flaky();
+    flaky_forever();
+}

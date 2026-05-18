@@ -1,0 +1,5 @@
+error: `retry(...)` requires `limit = N` (or `limit = unlimited`)
+ --> tests/ui/ctr_retry_no_limit.rs:4:4
+  |
+4 | fn f() {}
+  |    ^

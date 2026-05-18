@@ -20,7 +20,9 @@ runtime surprises.
 ```rust,ignore
 #[workflow(name = "...", steps,
            node_selector = { "k" = "v", ... },
-           on_exit_if_root = path::to::template)]
+           on_exit_if_root = path::to::template,
+           retry(limit = 2, policy = "OnError", backoff = "30s"),
+           timeout = "1h")]
 ```
 
 | Arg | Effect |
@@ -29,6 +31,8 @@ runtime surprises.
 | `steps` | Emit an Argo `steps:` template (one sequential group per statement, refs via `{{steps.X…}}`, no `dependencies`) instead of the default data-dependency `dag:`. |
 | `node_selector = { "k" = "v" }` | Set `nodeSelector` on this dag/steps template. The Argo controller **cascades** it onto every task pod this workflow `templateRef`s. **Keys and values are literal strings only** — see [Node selector](#node-selector). |
 | `on_exit_if_root = t` | Whole-workflow exit handler. Every workflow that sets it carries it on **its own** `WorkflowTemplate`'s `spec.hooks.exit.templateRef`. Argo runs exit hooks workflow-scoped: only the workflow you actually **submit** fires its handler — so `argo submit --from workflowtemplate/X` runs *X*'s handler; *X*'s handler stays inert when *X* is just a `templateRef`'d sub-step of a bigger run (submit it directly to get it). Distinct from the per-task `.on_exit(t)` builder, which is a different, always-fires task hook. |
+| `retry(limit = N \| unlimited, policy = "…", backoff = "<dur>")` | Template-level Argo `retryStrategy` on this dag/steps template. `limit` is **required** (`unlimited` ⇒ unbounded, no `limit` field); `policy` ∈ `Always\|OnFailure\|OnError\|OnTransientError` (optional; Argo defaults to `OnFailure`); `backoff` a duration string (optional). Not re-stamped on synthesized `if`-wrapper templates (workflow-scoped-attr policy). |
+| `timeout = "<dur>"` | Template-level Argo `timeout` (e.g. `"1h"`). Optional. |
 
 All are optional. A parameter *name* (i.e. a function argument) or a
 `name = "…"` value that a YAML 1.1 parser reads as a boolean/null
