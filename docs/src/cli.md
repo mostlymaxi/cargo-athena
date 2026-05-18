@@ -15,7 +15,7 @@ cargo athena [-c F] workflow  describe <name> [-p PKG] [--bin B]
 cargo athena [-c F] submit <name> [-a k=v].. [-n NS] [--service-account SA]
                           [--node-selector k=v].. [--argo-server URL] [-y] [--update]
 cargo athena [-c F] build [-p PKG] [--bin B] [--target T].. [--print]
-cargo athena [-c F] publish [-p PKG] [--bin B]
+cargo athena [-c F] publish [-p PKG] [--bin B] [--target T].. [--print]
 ```
 
 `-c, --config <FILE>` (global) points at an `athena.toml`. By default
@@ -198,17 +198,19 @@ cargo athena build --package my-crate --print   # dry run: just resolve + print 
 
 ## `cargo athena publish`
 
-Uploads the `build` tarball to [`athena.toml`](configuration.md)'s
-artifact repository — resolving the **same key** `build`/`emit` use, so
-it lands exactly where the injected bootstrap fetches it:
+The one-shot **build + upload**: cross-compiles + packages (exactly
+like `build`) and then uploads the tarball to
+[`athena.toml`](configuration.md)'s artifact repository — the same key
+`emit` resolves, so it lands where the injected bootstrap fetches it:
 
 ```sh
-cargo athena build   --package my-crate   # cross-compile + package
-cargo athena publish --package my-crate   # upload that tarball to S3
+cargo athena publish --package my-crate   # cross-compile + package + upload
 ```
 
-- Pass the same `-p/--bin` as `build` (the key is derived from them).
-  Errors if the tarball is missing (run `build` first).
+- Takes the same flags as `build` (`-p/--bin`, `--target`, `--print`).
+  `--print` is a dry run (resolve + print the key, no build/upload).
+  Use plain `build` when you want the tarball locally *without*
+  uploading (CI artifact, inspection).
 - S3 credentials come from the standard `AWS_ACCESS_KEY_ID` /
   `AWS_SECRET_ACCESS_KEY` (/ `AWS_SESSION_TOKEN`) environment variables
   — the same `object_store` path `submit`/`emulate` use.
