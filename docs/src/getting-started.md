@@ -106,27 +106,21 @@ binary is pulled from S3; `--build` packages a local one instead. See
 
 ## 3. Build & upload the binary
 
-`build` cross-compiles a static-musl binary per `athena.toml` target,
-packages them into one tarball, and **prints the exact upload
-destination**:
+`publish` cross-compiles a static-musl binary per `athena.toml` target,
+packages them into one tarball, and uploads it to the exact key `emit`
+references — one step (S3 credentials from the standard
+`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` env vars):
 
 ```sh
-cargo athena build --package my-workflows
-# …
+cargo athena publish --package my-workflows
 # tarball: target/athena/my-workflows.tar.gz
 # upload key: athena/my-workflows/0.1.0/my-workflows.tar.gz
 # destination: s3://my-bucket/athena/my-workflows/0.1.0/my-workflows.tar.gz (endpoint s3.amazonaws.com)
 ```
 
-Then `publish` uploads it to exactly that key (S3 credentials from the
-standard `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` env vars):
-
-```sh
-cargo athena publish --package my-workflows
-```
-
-(`cargo athena build --print` is the dry run — resolve + print the key
-without building or uploading.)
+(`cargo athena publish --print` is the dry run — resolve + print the
+key without building or uploading. `cargo athena build` packages the
+tarball locally *without* uploading, e.g. for a CI artifact.)
 
 ## 4. Register the templates and run it
 

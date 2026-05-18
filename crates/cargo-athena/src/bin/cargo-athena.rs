@@ -72,8 +72,8 @@ enum Cmd {
     /// name. Talks to the Argo Server (`--argo-server`/`$ARGO_SERVER`)
     /// or the kube API (kubeconfig/in-cluster).
     Submit(submit::SubmitArgs),
-    /// Cross-compile static-musl binaries, package the tarball, print
-    /// the upload key.
+    /// Cross-compile + package the tarball locally (no upload); print
+    /// the upload key. Use `publish` to build **and** upload in one step.
     Build {
         #[arg(long)]
         package: Option<String>,
@@ -86,12 +86,19 @@ enum Cmd {
         #[arg(long)]
         print: bool,
     },
-    /// (not yet implemented) upload the packaged tarball.
+    /// One-shot `build` + S3 upload: cross-compile, package, and upload
+    /// the tarball to the `athena.toml` artifact repository.
     Publish {
         #[arg(long)]
         package: Option<String>,
         #[arg(long)]
         bin: Option<String>,
+        /// Override the `athena.toml` target matrix (repeatable).
+        #[arg(long = "target")]
+        targets: Vec<String>,
+        /// Dry run: resolve + report the key without building/uploading.
+        #[arg(long)]
+        print: bool,
     },
 }
 
@@ -167,9 +174,12 @@ fn main() {
             targets,
             print,
         } => build(package.as_deref(), bin.as_deref(), &targets, print),
-        Cmd::Publish { package, bin } => {
-            publish(package.as_deref(), bin.as_deref())
-        }
+        Cmd::Publish {
+            package,
+            bin,
+            targets,
+            print,
+        } => publish(package.as_deref(), bin.as_deref(), &targets, print),
     }
 }
 
@@ -291,6 +301,28 @@ fn build(
     cli_targets: &[String],
     print: bool,
 ) {
+    if let Some((tarball, _s3, dest)) =
+        build_tarball(package, bin, cli_targets, print)
+    {
+        eprintln!("packaged {tarball}  ->  {dest}");
+        eprintln!(
+            "(`build` packages only — `cargo athena publish` does \
+             cross-compile + package + upload in one step.)"
+        );
+    }
+}
+
+/// Resolve the key + print the plan, then (unless `print`)
+/// cross-compile every target and package one tarball. Returns
+/// `(tarball_path, S3Ref, dest)` for the caller to upload, or `None` on
+/// a `--print` dry run. Shared by `build` (package only) and `publish`
+/// (build + upload) so the two can never drift.
+fn build_tarball(
+    package: Option<&str>,
+    bin: Option<&str>,
+    cli_targets: &[String],
+    print: bool,
+) -> Option<(String, S3Ref, String)> {
     let cfg = AthenaConfig::load();
     let (krate, version, default_bin) = package_meta(package);
     let bin = bin.map(str::to_string).unwrap_or(default_bin);
@@ -302,7 +334,16 @@ fn build(
     };
 
     let key = render_key(&cfg.artifact.key, &krate, &version, &bin);
-    let s3 = &cfg.artifact_repository.s3;
+    let repo = &cfg.artifact_repository.s3;
+    // Same field mapping core uses to emit the binary artifact, so the
+    // upload lands exactly where emit/submit/emulate read it.
+    let s3 = S3Ref {
+        endpoint: repo.endpoint.clone(),
+        bucket: repo.bucket.clone(),
+        region: repo.region.clone(),
+        insecure: repo.insecure,
+        key: key.clone(),
+    };
     let dest = format!("s3://{}/{} (endpoint {})", s3.bucket, key, s3.endpoint);
     let tarball = format!("target/athena/{bin}.tar.gz");
 
@@ -318,7 +359,7 @@ fn build(
     eprintln!("destination: {dest}");
 
     if print {
-        return;
+        return None;
     }
 
     preflight_zig();
@@ -361,46 +402,28 @@ fn build(
     if !status.success() {
         exit(status.code().unwrap_or(1));
     }
-    eprintln!("packaged {tarball}  ->  {dest}");
-    eprintln!("run `cargo athena publish` (same -p/--bin) to upload it.");
+    Some((tarball, s3, dest))
 }
 
-// ---- publish (upload the `build` tarball) ---------------------------------
+// ---- publish (build + upload) ---------------------------------------------
 
-/// Resolves the artifact key exactly as `build` does (no user-binary
-/// run — keeps `build → publish` symmetric) and uploads the local
-/// tarball to the `athena.toml` repo. Creds come from `AWS_*` env via
-/// the same `object_store` path `submit`/`emulate` use.
-fn publish(package: Option<&str>, bin: Option<&str>) {
-    let cfg = AthenaConfig::load();
-    let (krate, version, default_bin) = package_meta(package);
-    let bin = bin.map(str::to_string).unwrap_or(default_bin);
-    let key = render_key(&cfg.artifact.key, &krate, &version, &bin);
-    let repo = &cfg.artifact_repository.s3;
-
-    let tarball = format!("target/athena/{bin}.tar.gz");
-    let tpath = std::path::Path::new(&tarball);
-    if !tpath.exists() {
-        eprintln!(
-            "no tarball at {tarball} — run `cargo athena build` \
-             (same -p/--bin) first."
-        );
-        exit(1);
-    }
-
-    // Same field mapping core uses to emit the binary artifact, so the
-    // upload lands exactly where emit/submit/emulate expect to read it.
-    let s3 = S3Ref {
-        endpoint: repo.endpoint.clone(),
-        bucket: repo.bucket.clone(),
-        region: repo.region.clone(),
-        insecure: repo.insecure,
-        key: key.clone(),
+/// One-shot: `build_tarball` (cross-compile + package) then upload to
+/// the `athena.toml` repo via the shared `emulate::s3_put`
+/// (`object_store`, `AWS_*` creds — the path `submit`/`emulate` use).
+fn publish(
+    package: Option<&str>,
+    bin: Option<&str>,
+    cli_targets: &[String],
+    print: bool,
+) {
+    let Some((tarball, s3, dest)) =
+        build_tarball(package, bin, cli_targets, print)
+    else {
+        return; // --print dry run: nothing built, nothing to upload
     };
-    let dest = format!("s3://{}/{}", s3.bucket, key);
-    eprintln!("uploading {tarball}  ->  {dest} (endpoint {})", s3.endpoint);
-    emulate::s3_put(&s3, tpath);
+    eprintln!("uploading {tarball}  ->  {dest}");
+    emulate::s3_put(&s3, std::path::Path::new(&tarball));
     eprintln!("published.");
     // Scriptable: the destination on stdout (all else on stderr).
-    println!("{dest}");
+    println!("s3://{}/{}", s3.bucket, s3.key);
 }
