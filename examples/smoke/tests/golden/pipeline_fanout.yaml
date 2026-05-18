@@ -152,7 +152,7 @@ spec:
         arguments:
           parameters:
           - name: items
-            value: '{{tasks.b.outputs.parameters.return}}'
+            value: '{{=toJSON(map(fromJSON(tasks[''b''].outputs.parameters[''return'']), { type(#) == "string" ? fromJSON(#) : # }))}}'
         templateRef:
           name: cargo-athena-example-smoke-summarize
           template: cargo-athena-example-smoke-summarize

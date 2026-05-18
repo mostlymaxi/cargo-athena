@@ -65,16 +65,28 @@ README is intentionally lean (user-facing); the *why* lives here.
   (`cargo-athena-core`, blanket `impl` for `Vec<T>`/`[T;N]`, body
   `unimplemented!()`, re-exported via facade) injected into the ghost as
   `use ::cargo_athena::AthenaList;` so `a.fan_out(|x| C::__athena_sig(x,…))`
-  type-checks element/closure/result. The aggregated output is consumed as
-  a **normal** `{{tasks.<b>.outputs.parameters.return}}` ref → `Vec<U>`:
-  **empirically proven** on real Argo v4.0.5 that the `withParam`
-  aggregate of valid-JSON returns is already a clean JSON array (no
-  base64, no `toJSON`/`fromJSON` renormalize — the run-side
-  `from_str`-else-`String` contract makes it universally
-  `from_str::<Vec<U>>`-able), and athena's emitted `pipeline_fanout`
-  SUBMIT-OK. The closure body MUST be a template call (else
-  `compile_error!`); the `fan_out` source must be a prior binding or
-  workflow input.
+  type-checks element/closure/result. **Aggregate consumption is
+  kind-aware (`Arg::FanAgg`), NOT a plain ref** — the earlier "plain
+  ref, clean array, no renormalize" claim was empirically FALSE
+  (caught 2026-05-18 by the full-matrix e2e). Proven from Argo v4.0.5
+  source (`controller/operator.go` `aggregatedJSONValueList` /
+  `tryJSONUnmarshal`): the `withParam` aggregate is **type-
+  heterogeneous** — element returns that parse to an object/array are
+  kept as native JSON (`[{…},…]`), but every JSON *scalar*
+  (string/number/bool/null) hits `tryJSONUnmarshal`'s
+  `default: success=false` and falls back to `json.Marshal([]string{…})`
+  (raw, escaped → `["\"A\"",…]`). So athena emits the universal
+  kind-aware re-norm
+  `{{=toJSON(map(fromJSON(<agg>), { type(#)=="string" ? fromJSON(#) : # }))}}`
+  (`type`/`map`/`fromJSON`/`toJSON` = expr-lang v1.17 builtins; keys
+  off the actual aggregate-element kind, so the macro needs NO element
+  type — unknowable cross-crate). Per element: `fromJSON` it iff it
+  came back a string (the stringified-scalar case), else pass the
+  parsed object/array through; then re-`toJSON`. **Proven on real Argo
+  v4.0.5 for `Vec<String>/Vec<i64>/Vec<bool>/Vec<Bag>/Vec<Vec<Bag>>`**
+  via in-container `assert_eq!` against exact values (examples/e2e). The
+  closure body MUST be a template call (else `compile_error!`); the
+  `fan_out` source must be a prior binding or workflow input.
 - **`#[workflow]` body contract (strict, fail-loud).** Only
   `let x = template(args);`, `template(args);`, and `if`/`else`/`else if`
   (see next bullet) are lowered. Every other statement (`match`,

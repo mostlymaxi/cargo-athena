@@ -127,4 +127,67 @@ else
   exit 1
 fi
 
+say "feature-matrix assertions"
+# The mega pipeline Succeeding already proves every feature ran; these
+# assert the *observable effect* of the trickier ones from pod logs.
+WF=$(argo get -n "$NS" @latest -o json | jq -r '.metadata.name')
+LOGS=$(argo logs -n "$NS" "$WF" 2>/dev/null || true)
+need() { # need <grep-regex> <feature label>
+  if printf '%s\n' "$LOGS" | grep -qE "$1"; then
+    echo "ok: $2"
+  else
+    echo "FAIL: $2 — expected /$1/ in workflow logs"; exit 1
+  fi
+}
+need 'echo:nested'                 "nested call (note(echo(..)))"
+# fan_out matrix: the OK lines print only AFTER an in-container
+# assert_eq! against the exact decoded Rust value — a mis-encoded
+# aggregate panics the pod (workflow Error), no quote/format ambiguity.
+need 'OK summarize'                "fan_out aggregate: Vec<String> (scalar row)"
+need 'OK sum_lens'                 "fan_out aggregate: Vec<i64> (scalar row)"
+need 'OK count_true'               "fan_out aggregate: Vec<bool> (scalar row)"
+need 'OK collect_bags'             "fan_out aggregate: Vec<Bag> (struct row)"
+need 'OK flatten_bags'             "fan_out aggregate: Vec<Vec<Bag>> (array row)"
+need 'note:L4'                     "value-if + statement-if (chose left(4))"
+need 'id=abc'                      "struct-field access (m.id)"
+need 'tagged image busybox:1.36-musl' "image injection (busybox: + tag)"
+need 'read e2e-note = payload-42'  "save_artifact! -> load_artifact! roundtrip"
+need 'cleanup ran'                 "on_exit_if_root + per-task .on_exit"
+
+# #[workflow(node_selector=…)] must cascade onto every task pod.
+SEL=$(kubectl -n "$NS" get pods -l "workflows.argoproj.io/workflow=$WF" \
+  -o jsonpath='{.items[0].spec.nodeSelector.kubernetes\.io/arch}' 2>/dev/null)
+if [ "$SEL" = "amd64" ]; then
+  echo "ok: node_selector cascaded onto task pods (kubernetes.io/arch=amd64)"
+else
+  echo "FAIL: node_selector not on pods (got '$SEL')"; exit 1
+fi
+
+say "CLI gate: container emulate (docker)"
+# Run one #[container] under docker exactly as Argo would, from the
+# already-built tarball (no S3 needed). Proves the emulate runtime path.
+EMU=$( cd "$ROOT" && cargo run -q -p cargo-athena --bin cargo-athena -- \
+  athena container emulate cargo-athena-example-e2e-transform \
+  --package "$PKG" --bin "$BIN" --tarball "$TARBALL" \
+  -a input=ci --skip-artifacts 2>/dev/null | tail -1 )
+echo "emulate returned: $EMU"
+[ "$EMU" = 'return: "ci-transformed"' ] || {
+  echo "FAIL: container emulate — expected 'return: \"ci-transformed\"'"; exit 1; }
+
+say "CLI gate: submit (kube path)"
+# `cargo athena submit` against the kube API (kubeconfig current-context
+# = this kind cluster). Templates already applied above; --skip-binary-
+# check because MinIO is only reachable by its in-cluster DNS here.
+SUBWF=$( cd "$ROOT" && cargo run -q -p cargo-athena --bin cargo-athena -- \
+  athena submit cargo-athena-example-e2e-finalize-wf \
+  --package "$PKG" --bin "$BIN" -n "$NS" --skip-binary-check -y \
+  2>/dev/null | tail -1 )
+echo "submit created: $SUBWF"
+[ -n "$SUBWF" ] || { echo "FAIL: submit printed no workflow name"; exit 1; }
+argo wait -n "$NS" "$SUBWF" >/dev/null 2>&1 || true
+SUBPHASE=$(argo get -n "$NS" "$SUBWF" -o json 2>/dev/null | jq -r '.status.phase')
+[ "$SUBPHASE" = "Succeeded" ] || {
+  echo "FAIL: submitted workflow $SUBWF phase=$SUBPHASE"; exit 1; }
+echo "ok: submit -> $SUBWF Succeeded"
+
 say "PASS — full e2e green"
