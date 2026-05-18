@@ -37,7 +37,17 @@ jobs:
             extra-substituters = https://nix-community.cachix.org
             extra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
             accept-flake-config = true
-      - run: nix develop -c mdbook build docs
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          # Tiny mdbook-only closure (.#docs, no rust). Isolated prefix.
+          primary-key: nix-${{ runner.os }}-docs-${{ hashFiles('flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-docs-
+          gc-max-store-size-linux: 1G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-docs-
+          purge-created: 0
+          purge-primary-key: never
+      - run: nix develop .#docs -c mdbook build docs
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
