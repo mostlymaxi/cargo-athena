@@ -528,8 +528,6 @@ adding a field.
 
 ## Conventions
 
-- **Commit identity MUST be `Maxi Saparov <max.saparov@gmail.com>`** (not
-  `maxi.saparov@`).
 - **Example/test layout** (post-cleanup):
   - `examples/basic` — minimal pure example (no tests).
   - `examples/smoke` — broad "all features" fixture; `src/lib.rs` is a
