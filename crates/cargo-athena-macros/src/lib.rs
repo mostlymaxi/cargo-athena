@@ -317,8 +317,8 @@ impl deluxe::ParseMetaItem for RetryArgs {
     }
 }
 
-/// `ttl(after_completion = <secs>, after_success = <secs>,
-/// after_failure = <secs>)` — WorkflowSpec-scoped Argo `ttlStrategy`.
+/// `ttl_if_root(after_completion = <secs>, after_success = <secs>,
+/// after_failure = <secs>)` — root-only WorkflowSpec Argo `ttlStrategy`.
 /// All three optional, ≥1 required (enforced in `ttl_const_tokens`).
 /// Hand-parsed for the same reason as `RetryArgs` (deluxe's derived
 /// `ParseMetaItem` only does the brace form, not `name(…)`).
@@ -343,7 +343,7 @@ impl TtlArgs {
                     return Err(syn::Error::new_spanned(
                         &key,
                         format!(
-                            "unknown `ttl(...)` field `{other}` (expected \
+                            "unknown `ttl_if_root(...)` field `{other}` (expected \
                              after_completion, after_success, after_failure)"
                         ),
                     ));
@@ -375,7 +375,7 @@ impl deluxe::ParseMetaItem for TtlArgs {
     }
 }
 
-/// `pod_gc(strategy = "<S>")` — WorkflowSpec-scoped Argo `podGC`.
+/// `pod_gc_if_root(strategy = "<S>")` — root-only WorkflowSpec `podGC`.
 /// `strategy` is required + must be a known strategy (enforced in
 /// `pod_gc_const_tokens`). Hand-parsed for the same reason as
 /// `RetryArgs`.
@@ -397,7 +397,9 @@ impl PodGcArgs {
                 other => {
                     return Err(syn::Error::new_spanned(
                         &key,
-                        format!("unknown `pod_gc(...)` field `{other}` (expected strategy)"),
+                        format!(
+                            "unknown `pod_gc_if_root(...)` field `{other}` (expected strategy)"
+                        ),
                     ));
                 }
             }
@@ -451,10 +453,10 @@ struct ContainerArgs {
     retry: Option<RetryArgs>,
     /// Template-level `timeout` duration string (e.g. `"5m"`).
     timeout: Option<String>,
-    /// WorkflowSpec-scoped TTL GC (`ttl(after_completion=…, …)`).
-    ttl: Option<TtlArgs>,
-    /// WorkflowSpec-scoped pod GC (`pod_gc(strategy=…)`).
-    pod_gc: Option<PodGcArgs>,
+    /// Root-only WorkflowSpec TTL GC (`ttl_if_root(after_completion=…)`).
+    ttl_if_root: Option<TtlArgs>,
+    /// Root-only WorkflowSpec pod GC (`pod_gc_if_root(strategy=…)`).
+    pod_gc_if_root: Option<PodGcArgs>,
 }
 
 /// `#[workflow(name = "...", steps, node_selector = { "k" = "v", ... },
@@ -486,10 +488,10 @@ struct WorkflowArgs {
     retry: Option<RetryArgs>,
     /// Template-level `timeout` duration string (e.g. `"5m"`).
     timeout: Option<String>,
-    /// WorkflowSpec-scoped TTL GC (`ttl(after_completion=…, …)`).
-    ttl: Option<TtlArgs>,
-    /// WorkflowSpec-scoped pod GC (`pod_gc(strategy=…)`).
-    pod_gc: Option<PodGcArgs>,
+    /// Root-only WorkflowSpec TTL GC (`ttl_if_root(after_completion=…)`).
+    ttl_if_root: Option<TtlArgs>,
+    /// Root-only WorkflowSpec pod GC (`pod_gc_if_root(strategy=…)`).
+    pod_gc_if_root: Option<PodGcArgs>,
 }
 
 /// Parse attribute args into `T`, or return a `compile_error!`.
@@ -599,14 +601,14 @@ fn ttl_secs_tok(e: &Option<Expr>) -> Result<proc_macro2::TokenStream, syn::Error
         }
         Some(e) => Err(syn::Error::new_spanned(
             e,
-            "`ttl(...)` seconds must be a non-negative integer literal",
+            "`ttl_if_root(...)` seconds must be a non-negative integer literal",
         )),
     }
 }
 
-/// Lower `ttl(..)` to a token expr of type
+/// Lower `ttl_if_root(..)` to a token expr of type
 /// `::core::option::Option<::cargo_athena::api::TtlStrategy>`. ≥1 of the
-/// three bounds is required (an empty `ttl()` is a compile error).
+/// three bounds is required (an empty `ttl_if_root()` is a compile error).
 fn ttl_const_tokens(
     ttl: &Option<TtlArgs>,
     span: proc_macro2::Span,
@@ -618,7 +620,7 @@ fn ttl_const_tokens(
     if t.after_completion.is_none() && t.after_success.is_none() && t.after_failure.is_none() {
         return Err(syn::Error::new(
             span,
-            "`ttl(...)` needs at least one of \
+            "`ttl_if_root(...)` needs at least one of \
              after_completion/after_success/after_failure",
         ));
     }
@@ -634,7 +636,7 @@ fn ttl_const_tokens(
     })
 }
 
-/// Lower `pod_gc(strategy = "<S>")` to a token expr of type
+/// Lower `pod_gc_if_root(strategy = "<S>")` to a token expr of type
 /// `::core::option::Option<&'static str>`. `strategy` is required and
 /// must be one of the four Argo podGC strategies.
 fn pod_gc_const_tokens(
@@ -649,7 +651,7 @@ fn pod_gc_const_tokens(
         None => {
             return Err(syn::Error::new(
                 span,
-                "`pod_gc(...)` requires `strategy = \"...\"`",
+                "`pod_gc_if_root(...)` requires `strategy = \"...\"`",
             ));
         }
         Some(s) => s,
@@ -936,11 +938,11 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let timeout_tok = timeout_tokens(&cfg.timeout);
     // WorkflowSpec-scoped `ttlStrategy` / `podGC` trait consts (stamped
     // per-WT by `Collector` like `ON_EXIT`).
-    let ttl_tok = match ttl_const_tokens(&cfg.ttl, ident.span()) {
+    let ttl_tok = match ttl_const_tokens(&cfg.ttl_if_root, ident.span()) {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };
-    let podgc_tok = match pod_gc_const_tokens(&cfg.pod_gc, ident.span()) {
+    let podgc_tok = match pod_gc_const_tokens(&cfg.pod_gc_if_root, ident.span()) {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };
@@ -3280,11 +3282,11 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
     // WorkflowSpec-scoped `ttlStrategy` / `podGC` trait consts (stamped
     // per-WT by `Collector` like `ON_EXIT`; never on synthetic `if`
     // wrapper/arm templates — `emit_synth` omits these consts).
-    let ttl_tok = match ttl_const_tokens(&cfg.ttl, ident.span()) {
+    let ttl_tok = match ttl_const_tokens(&cfg.ttl_if_root, ident.span()) {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };
-    let podgc_tok = match pod_gc_const_tokens(&cfg.pod_gc, ident.span()) {
+    let podgc_tok = match pod_gc_const_tokens(&cfg.pod_gc_if_root, ident.span()) {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };

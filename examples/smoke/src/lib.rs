@@ -355,12 +355,14 @@ pub fn pipeline_retry() {
 
 // --- #[workflow] ttl + pod_gc (WorkflowSpec-scoped GC) --------------------
 
-/// `ttl(after_completion=…, after_failure=…)` + `pod_gc(strategy=…)`
-/// lower to the workflow's own `spec.ttlStrategy` / `spec.podGC`
-/// (workflow-scoped, same per-WT plumbing as `on_exit_if_root`).
+/// `ttl_if_root(after_completion=…, after_failure=…)` +
+/// `pod_gc_if_root(strategy=…)` lower to the workflow's own
+/// `spec.ttlStrategy` / `spec.podGC` — **root-only** (apply only when
+/// this WT is the submitted workflow; same proven semantics as
+/// `on_exit_if_root`).
 #[workflow(
-    ttl(after_completion = 86400, after_failure = 3600),
-    pod_gc(strategy = "OnWorkflowSuccess")
+    ttl_if_root(after_completion = 86400, after_failure = 3600),
+    pod_gc_if_root(strategy = "OnWorkflowSuccess")
 )]
 pub fn pipeline_ttl() {
     cleanup();

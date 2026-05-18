@@ -1,5 +1,5 @@
-error: `ttl(...)` needs at least one of after_completion/after_success/after_failure
- --> tests/ui/wf_ttl_empty.rs:4:4
+error: `ttl_if_root(...)` needs at least one of after_completion/after_success/after_failure
+ --> tests/ui/wf_ttl_empty.rs:5:4
   |
-4 | fn f() {}
+5 | fn f() {}
   |    ^
