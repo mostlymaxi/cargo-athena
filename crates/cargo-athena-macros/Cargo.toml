@@ -18,3 +18,5 @@ deluxe = { workspace = true }
 # value is consistently JSON, so the run-side `from_str` and attribute
 # `{{=fromJSON(...)}}` are always correct).
 serde_json = { workspace = true }
+# Parse `active_deadline = "1h30m"` durations at macro time.
+humantime = { workspace = true }

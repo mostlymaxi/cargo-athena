@@ -367,3 +367,19 @@ pub fn pipeline_retry() {
 pub fn pipeline_ttl() {
     cleanup();
 }
+
+// --- #[container]/#[workflow] active_deadline (per-template) --------------
+
+/// `active_deadline = <secs | "1h30m">` lowers to **per-template**
+/// `Template.activeDeadlineSeconds` (per-pod; applies even when this
+/// template is `templateRef`'d — NOT root-only, unlike `ttl_if_root`).
+/// Int = seconds; string = a humantime duration.
+#[container(active_deadline = 600)]
+pub fn slowtask() {
+    println!("slowtask");
+}
+
+#[workflow(active_deadline = "1h30m")]
+pub fn pipeline_deadline() {
+    slowtask();
+}

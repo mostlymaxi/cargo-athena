@@ -191,6 +191,10 @@ argo! {
         pub retry_strategy: Option<RetryStrategy>,
         /// Template-level timeout duration (`#[…(timeout = "5m")]`).
         pub timeout: String,
+        /// Template-level deadline (`#[…(active_deadline = …)]`) →
+        /// Argo `Template.activeDeadlineSeconds` (per-pod; applies even
+        /// when this template is `templateRef`'d — NOT root-only).
+        pub active_deadline_seconds: Option<i32>,
     }
 
     /// Argo `retryStrategy`: re-run the template on failure. Nil `limit`
