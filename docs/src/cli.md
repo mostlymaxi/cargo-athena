@@ -15,7 +15,7 @@ cargo athena [-c F] workflow  describe <name> [-p PKG] [--bin B]
 cargo athena [-c F] submit <name> [-a k=v].. [-n NS] [--service-account SA]
                           [--node-selector k=v].. [--argo-server URL] [-y] [--update]
 cargo athena [-c F] build [-p PKG] [--bin B] [--target T].. [--print]
-cargo athena        publish [-p PKG] [--bin B]                  (not yet)
+cargo athena [-c F] publish [-p PKG] [--bin B]
 ```
 
 `-c, --config <FILE>` (global) points at an `athena.toml`. By default
@@ -196,10 +196,28 @@ cargo athena build --package my-crate --print   # dry run: just resolve + print 
   [`zig`](https://ziglang.org/download/). `build` checks for both up
   front and tells you exactly what to install if either is missing.
 
-Upload the printed `.tar.gz` to the printed `s3://…` key with any S3
-client (`s3cmd` / `aws s3 cp` / `mc cp`). `emit` injects that tarball
-plus a tiny `sh` bootstrap into every container template, so one
-artifact serves every step on any node architecture.
+## `cargo athena publish`
+
+Uploads the `build` tarball to [`athena.toml`](configuration.md)'s
+artifact repository — resolving the **same key** `build`/`emit` use, so
+it lands exactly where the injected bootstrap fetches it:
+
+```sh
+cargo athena build   --package my-crate   # cross-compile + package
+cargo athena publish --package my-crate   # upload that tarball to S3
+```
+
+- Pass the same `-p/--bin` as `build` (the key is derived from them).
+  Errors if the tarball is missing (run `build` first).
+- S3 credentials come from the standard `AWS_ACCESS_KEY_ID` /
+  `AWS_SECRET_ACCESS_KEY` (/ `AWS_SESSION_TOKEN`) environment variables
+  — the same `object_store` path `submit`/`emulate` use.
+- The destination `s3://bucket/key` is printed on **stdout**
+  (scriptable); progress on stderr.
+
+`emit` injects that tarball plus a tiny `sh` bootstrap into every
+container template, so one artifact serves every step on any node
+architecture.
 
 ## Package selection
 

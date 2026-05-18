@@ -696,7 +696,7 @@ fn s3_get(s3: &S3Ref, dst: &Path) {
     std::fs::write(dst, &bytes).unwrap_or_else(|e| die(&format!("write {}: {e}", dst.display())));
 }
 
-fn s3_put(s3: &S3Ref, src: &Path) {
+pub(crate) fn s3_put(s3: &S3Ref, src: &Path) {
     let store = s3_store(s3);
     let key = object_store::path::Path::from(s3.key.as_str());
     let data = std::fs::read(src).unwrap_or_else(|e| die(&format!("read {}: {e}", src.display())));
