@@ -23,6 +23,7 @@ runtime surprises.
            on_exit_if_root = path::to::template,
            retry(limit = 2, policy = "OnError", backoff = "30s"),
            timeout = "1h",
+           active_deadline = "1h30m",
            ttl_if_root(after_completion = 86400, after_success = 3600, after_failure = 7200),
            pod_gc_if_root(strategy = "OnWorkflowSuccess"))]
 ```
@@ -35,6 +36,7 @@ runtime surprises.
 | `on_exit_if_root = t` | Whole-workflow exit handler. Every workflow that sets it carries it on **its own** `WorkflowTemplate`'s `spec.hooks.exit.templateRef`. Argo runs exit hooks workflow-scoped: only the workflow you actually **submit** fires its handler — so `argo submit --from workflowtemplate/X` runs *X*'s handler; *X*'s handler stays inert when *X* is just a `templateRef`'d sub-step of a bigger run (submit it directly to get it). Distinct from the per-task `.on_exit(t)` builder, which is a different, always-fires task hook. |
 | `retry(limit = N \| unlimited, policy = "…", backoff = "<dur>")` | Template-level Argo `retryStrategy` on this dag/steps template. `limit` is **required** (`unlimited` ⇒ unbounded, no `limit` field); `policy` ∈ `Always\|OnFailure\|OnError\|OnTransientError` (optional; Argo defaults to `OnFailure`); `backoff` a duration string (optional). Not re-stamped on synthesized `if`-wrapper templates (workflow-scoped-attr policy). |
 | `timeout = "<dur>"` | Template-level Argo `timeout` (e.g. `"1h"`). Optional. |
+| `active_deadline = <secs \| "1h30m">` | **Template-level** Argo `Template.activeDeadlineSeconds` (kill this template's pod after this long). Int literal = seconds, or a [humantime](https://docs.rs/humantime) duration string (`"90s"`, `"1h30m"`, `"2d"`) — `> 0`, parsed to integer seconds at compile time. **Per-pod — applies even when this template is `templateRef`'d** (NOT root-only, unlike `ttl_if_root`). |
 | `ttl_if_root(after_completion = <s>, after_success = <s>, after_failure = <s>)` | WorkflowSpec-scoped Argo `ttlStrategy` (GC the finished Workflow after the given seconds). All three optional ints but **≥1 required**. **Root-only — applies only when this WorkflowTemplate is the workflow you actually submit; inert when used as a nested `templateRef`'d sub-workflow** (proven on real Argo v4.0.5; identical mechanism to `on_exit_if_root`). Not re-stamped on synthesized `if`-wrapper templates. |
 | `pod_gc_if_root(strategy = "<S>")` | WorkflowSpec-scoped Argo `podGC`. `strategy` **required**, ∈ `OnPodCompletion\|OnPodSuccess\|OnWorkflowCompletion\|OnWorkflowSuccess`. **Root-only** (same as `ttl_if_root`): applies only to the submitted top-level workflow; inert when nested via `templateRef`. |
 

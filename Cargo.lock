@@ -202,6 +202,7 @@ name = "cargo-athena-macros"
 version = "0.4.0"
 dependencies = [
  "deluxe",
+ "humantime",
  "proc-macro2",
  "quote",
  "serde_json",

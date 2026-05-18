@@ -453,6 +453,8 @@ struct ContainerArgs {
     retry: Option<RetryArgs>,
     /// Template-level `timeout` duration string (e.g. `"5m"`).
     timeout: Option<String>,
+    /// Template-level `active_deadline = <secs | "1h30m">` (per-pod).
+    active_deadline: Option<syn::Expr>,
     /// Root-only WorkflowSpec TTL GC (`ttl_if_root(after_completion=…)`).
     ttl_if_root: Option<TtlArgs>,
     /// Root-only WorkflowSpec pod GC (`pod_gc_if_root(strategy=…)`).
@@ -488,6 +490,8 @@ struct WorkflowArgs {
     retry: Option<RetryArgs>,
     /// Template-level `timeout` duration string (e.g. `"5m"`).
     timeout: Option<String>,
+    /// Template-level `active_deadline = <secs | "1h30m">` (per-pod).
+    active_deadline: Option<syn::Expr>,
     /// Root-only WorkflowSpec TTL GC (`ttl_if_root(after_completion=…)`).
     ttl_if_root: Option<TtlArgs>,
     /// Root-only WorkflowSpec pod GC (`pod_gc_if_root(strategy=…)`).
@@ -584,6 +588,50 @@ fn timeout_tokens(timeout: &Option<String>) -> proc_macro2::TokenStream {
         Some(s) => quote! { #s.to_string() },
         None => quote! { ::std::string::String::new() },
     }
+}
+
+/// Lower `active_deadline = <secs | "1h30m">` to an `Option<i32>` token
+/// (seconds) for `Template.active_deadline_seconds`. Int literal =
+/// seconds; string literal = a `humantime` duration. Must be `> 0` and
+/// fit i32, else a targeted compile error. Per-template (NOT root-only).
+fn active_deadline_tokens(
+    e: &Option<Expr>,
+    span: proc_macro2::Span,
+) -> Result<proc_macro2::TokenStream, syn::Error> {
+    let e = match e {
+        None => return Ok(quote! { ::core::option::Option::None }),
+        Some(e) => e,
+    };
+    let bad = || {
+        syn::Error::new(
+            span,
+            "`active_deadline`: expected a positive integer (seconds) or \
+             a duration string like \"1h30m\" / \"2d\" (humantime)",
+        )
+    };
+    let secs: u64 = match e {
+        Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Int(i),
+            ..
+        }) => i.base10_parse::<u64>().map_err(|_| bad())?,
+        Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(s),
+            ..
+        }) => humantime::parse_duration(&s.value())
+            .map_err(|_| bad())?
+            .as_secs(),
+        _ => {
+            return Err(syn::Error::new(
+                span,
+                "`active_deadline`: expected an integer or a duration string",
+            ));
+        }
+    };
+    if secs == 0 || secs > i32::MAX as u64 {
+        return Err(bad());
+    }
+    let n = secs as i32;
+    Ok(quote! { ::core::option::Option::Some(#n) })
 }
 
 /// One `after_* = <secs>` field → `Some(<n> i32)` / `None`. Only a
@@ -936,6 +984,10 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
         Err(e) => return e.to_compile_error().into(),
     };
     let timeout_tok = timeout_tokens(&cfg.timeout);
+    let active_deadline_tok = match active_deadline_tokens(&cfg.active_deadline, ident.span()) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
     // WorkflowSpec-scoped `ttlStrategy` / `podGC` trait consts (stamped
     // per-WT by `Collector` like `ON_EXIT`).
     let ttl_tok = match ttl_const_tokens(&cfg.ttl_if_root, ident.span()) {
@@ -1107,6 +1159,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                     },
                     retry_strategy: #retry_tok,
                     timeout: #timeout_tok,
+                    active_deadline_seconds: #active_deadline_tok,
                     ..::core::default::Default::default()
                 }
             }
@@ -3275,9 +3328,14 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         Err(e) => return e.to_compile_error().into(),
     };
     let timeout_tok = timeout_tokens(&cfg.timeout);
+    let active_deadline_tok = match active_deadline_tokens(&cfg.active_deadline, ident.span()) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
     let retry_timeout_tokens = quote! {
         retry_strategy: #retry_tok,
         timeout: #timeout_tok,
+        active_deadline_seconds: #active_deadline_tok,
     };
     // WorkflowSpec-scoped `ttlStrategy` / `podGC` trait consts (stamped
     // per-WT by `Collector` like `ON_EXIT`; never on synthetic `if`

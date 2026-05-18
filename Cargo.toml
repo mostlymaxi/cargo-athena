@@ -31,6 +31,8 @@ syn = { version = "2", features = ["full", "extra-traits", "visit", "visit-mut"]
 quote = "1"
 proc-macro2 = "1"
 deluxe = "0.5"
+# Small, zero-dep duration parser — `active_deadline = "1h30m"` at macro time.
+humantime = "2"
 
 # protobuf / serialization
 prost = "0.13"

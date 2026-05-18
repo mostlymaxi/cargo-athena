@@ -18,6 +18,7 @@ const BIN_INJECT: &str = env!("CARGO_BIN_EXE_smoke-inject");
 const BIN_NS: &str = env!("CARGO_BIN_EXE_smoke-ns");
 const BIN_RETRY: &str = env!("CARGO_BIN_EXE_smoke-retry");
 const BIN_TTL: &str = env!("CARGO_BIN_EXE_smoke-ttl");
+const BIN_DEADLINE: &str = env!("CARGO_BIN_EXE_smoke-deadline");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -164,6 +165,14 @@ fn emit_pipeline_retry() {
 #[test]
 fn emit_pipeline_ttl() {
     assert_golden("pipeline_ttl.yaml", &run_bin(BIN_TTL, &[]));
+}
+
+/// Per-template `Template.activeDeadlineSeconds`: `active_deadline = 600`
+/// (int) on a container WT, `active_deadline = "1h30m"` (humantime →
+/// 5400) on the workflow's dag template.
+#[test]
+fn emit_pipeline_deadline() {
+    assert_golden("pipeline_deadline.yaml", &run_bin(BIN_DEADLINE, &[]));
 }
 
 /// `CARGO_ATHENA_DESCRIBE`: the binary reports a `ContainerRunMeta`

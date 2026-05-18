@@ -1,0 +1,5 @@
+error: `active_deadline`: expected a positive integer (seconds) or a duration string like "1h30m" / "2d" (humantime)
+ --> tests/ui/ctr_deadline_zero.rs:4:4
+  |
+4 | fn f() {}
+  |    ^
