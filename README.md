@@ -107,6 +107,11 @@ scripts/deploy.sh && scripts/e2e-test.sh && scripts/teardown.sh
 # ATHENA_E2E_SINGLE=1 for a 1-node cluster (hosts blocking kind cross-node networking)
 ```
 
+The dev shell pulls a prebuilt Rust toolchain from
+`nix-community.cachix.org` (fenix) instead of compiling it. Trusted Nix
+users get this automatically; otherwise pass `--accept-flake-config`
+(or add yourself to `trusted-users` in `nix.conf`).
+
 ## License
 
 Licensed under either of

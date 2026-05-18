@@ -1,10 +1,22 @@
 {
   description = "cargo-athena — a Rust library + binary scaffolded with Nix";
 
+  # fenix publishes prebuilt Rust toolchains to nix-community.cachix.org,
+  # so `nix develop` *substitutes* the toolchain (a fast binary download)
+  # instead of refetching the Rust dist + realizing wrappers — locally
+  # AND in CI. Trusted Nix users pick this up automatically; others run
+  # with `--accept-flake-config` (or add themselves to `trusted-users`).
+  nixConfig = {
+    extra-substituters = [ "https://nix-community.cachix.org" ];
+    extra-trusted-public-keys = [
+      "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
+    ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
+    fenix = {
+      url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-utils.url = "github:numtide/flake-utils";
@@ -14,18 +26,24 @@
     {
       self,
       nixpkgs,
-      rust-overlay,
+      fenix,
       flake-utils,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        overlays = [ (import rust-overlay) ];
+        overlays = [ fenix.overlays.default ];
         pkgs = import nixpkgs { inherit system overlays; };
 
         # Toolchain is defined once in ./rust-toolchain.toml so that
-        # `cargo`/`rustup` and Nix agree on the exact same Rust.
-        rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        # `cargo`/`rustup` and Nix agree on the exact same Rust. fenix's
+        # `fromToolchainFile` wants a `sha256` over the resolved toolchain;
+        # re-pin it (run `nix develop`, paste the hash Nix prints) whenever
+        # rust-toolchain.toml or the fenix input changes.
+        rustToolchain = pkgs.fenix.fromToolchainFile {
+          file = ./rust-toolchain.toml;
+          sha256 = "sha256-gh/xTkxKHL4eiRXzWv8KP7vfjSk61Iq48x47BEDFgfk=";
+        };
 
         rustPlatform = pkgs.makeRustPlatform {
           cargo = rustToolchain;
