@@ -28,6 +28,21 @@ becomes a container template; in-pod, your binary deserializes `data`
 and `factor`, runs the function body, and serializes the result for the
 next step.
 
+```yaml
+# `cargo athena emit` → one WorkflowTemplate per fn, wired by name:
+kind: WorkflowTemplate              # the #[workflow] is a DAG
+metadata: { name: app-pipeline }
+spec:
+  templates:
+    - dag:
+        tasks:
+          - { name: fetch }
+          - { name: transform, dependencies: [fetch] }   # data dep → edge
+          - { name: publish,   dependencies: [transform] }
+# …plus one WorkflowTemplate per #[container]: your image, your binary,
+# and a tiny bootstrap that runs the right function.
+```
+
 ## Why
 
 - **No YAML.** The workflow *is* the program. Refactor with the
@@ -50,6 +65,10 @@ next step.
 | `#[container] fn` | an Argo `WorkflowTemplate` (a container step) that runs your real Rust |
 | `#[fragment] fn` | a plain helper that carries pod resources into its callers |
 | `fn main()` | the entrypoint — and the single multi-step binary |
+
+Ship and run it in two commands: `cargo athena publish` (cross-compile
++ upload the binary), then `cargo athena submit <workflow>` (registers
+the templates and starts the run) — see the [CLI](cli.md).
 
 Read [Getting Started](getting-started.md) to go hands-on, then
 [Core Concepts](concepts.md) for the mental model. The
