@@ -30,6 +30,7 @@ jobs:
           extra-conf: |
             extra-substituters = https://nix-community.cachix.org
             extra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
+            accept-flake-config = true
       # No Nix-store cache: cache-nix-action on Determinate-installer
       # runners repeatedly broke (GC dangling-symlinks, then poisoned
       # keys, then /nix/var/log perms on restore) for a ~2 min saving on
@@ -89,6 +90,7 @@ jobs:
           extra-conf: |
             extra-substituters = https://nix-community.cachix.org
             extra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
+            accept-flake-config = true
       # (no Nix-store cache — see the build job for why)
       - uses: actions/download-artifact@v4
         with:
