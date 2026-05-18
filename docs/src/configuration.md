@@ -1,7 +1,7 @@
 # `athena.toml`
 
 `athena.toml` describes where the binary and artifacts live and a few
-pod defaults. It is required by `cargo athena` for `build`/`emit` and is
+pod defaults. It is required by `cargo athena` and is
 **never read in-pod** (everything it controls is baked into the emitted
 YAML). The nearest one walking up from the cwd is used (like
 `Cargo.toml`); point at a specific file with `cargo athena -c FILE …`
@@ -49,7 +49,7 @@ template as an Argo `s3{}` artifact source.
 
 | Key | Meaning |
 |---|---|
-| `key` | The exact S3 object key for the binary `.tar.gz`. `cargo athena build` uploads here; `emit` references it. |
+| `key` | The exact S3 object key for the binary `.tar.gz`. `cargo athena publish` uploads here; `emit` references it. |
 
 ## `[bootstrap]`
 

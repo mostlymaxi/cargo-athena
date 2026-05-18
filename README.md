@@ -73,9 +73,9 @@ fn main() { cargo_athena::entrypoint::<run_foo>(); }   // entrypoint = a type
 Each `#[workflow]`/`#[container]` compiles to its own Argo
 `WorkflowTemplate`, cross-referenced by `templateRef` (referencing a
 template's type force-links its crate, so workflows compose across
-modules and crates with no registry). `cargo athena build`
-cross-compiles one static-musl binary into the S3 `ArtifactRepository`
-from `athena.toml`; `emit` injects that binary plus a tiny `sh`
+modules and crates with no registry). `cargo athena publish`
+cross-compiles one static-musl binary and uploads it to the S3
+`ArtifactRepository` from `athena.toml`; `emit` injects that binary plus a tiny `sh`
 bootstrap into every container template, so in-pod each step pulls the
 binary, picks its arch, and runs the right function — deserialize
 inputs, run the body, serialize outputs.

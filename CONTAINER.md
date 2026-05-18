@@ -30,8 +30,9 @@ The image is arbitrary — it only needs a POSIX `sh`, `tar`, and `uname`
 
 ### How it runs in-pod
 
-`cargo athena build` cross-compiles one static-musl, multi-arch
-`.tar.gz` into the S3 `ArtifactRepository` from `athena.toml`. `emit`
+`cargo athena publish` cross-compiles one static-musl, multi-arch
+`.tar.gz` and uploads it to the S3 `ArtifactRepository` from
+`athena.toml` (`build` packages it locally without uploading). `emit`
 injects, into every container template, that tarball as an input
 artifact plus a small `sh` bootstrap that `uname`s, picks the matching
 `app-<triple>`, and `exec`s it with `--cargo-athena-template <name>`.

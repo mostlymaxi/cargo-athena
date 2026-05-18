@@ -5,7 +5,7 @@ subcommand. It drives *your* workflow crate's binary (the one whose
 `main` calls `cargo_athena::entrypoint::<Root>()`) in the right mode.
 
 ```text
-cargo athena [-c F] emit  [-p PKG] [--bin B] [--out F] [--with-workflow]
+cargo athena [-c F] emit  [--package PKG] [--bin B] [--out F] [--with-workflow]
 cargo athena [-c F] container ls       [-p PKG] [--bin B] [--all]
 cargo athena [-c F] container emulate  <name> [-a k=v].. [--input-file F] [-p PKG] [--bin B]
                                        [--build|--tarball F] [--runtime R] [--skip-artifacts]
@@ -14,8 +14,8 @@ cargo athena [-c F] workflow  ls       [-p PKG] [--bin B] [--include-synthetic]
 cargo athena [-c F] workflow  describe <name> [-p PKG] [--bin B]
 cargo athena [-c F] submit <name> [-a k=v].. [-n NS] [--service-account SA]
                           [--node-selector k=v].. [--argo-server URL] [-y] [--update]
-cargo athena [-c F] build [-p PKG] [--bin B] [--target T].. [--print]
-cargo athena [-c F] publish [-p PKG] [--bin B] [--target T].. [--tarball F] [--print]
+cargo athena [-c F] build [--package PKG] [--bin B] [--target T].. [--print]
+cargo athena [-c F] publish [--package PKG] [--bin B] [--target T].. [--tarball F] [--print]
 ```
 
 `-c, --config <FILE>` (global) points at an `athena.toml`. By default
@@ -255,6 +255,11 @@ So in a configured workspace `cargo athena container ls` and
 `cargo athena container emulate my-crate-fetch -a url=…` just work with
 no target flags. (`-p` is **package** here — function arguments to
 `emulate` are `-a`/`--arg`.)
+
+This precedence (and the `-p` short flag) is for
+`container`/`workflow`/`submit`. `emit`/`build`/`publish` take
+`--package`/`--bin` explicitly — no `-p`, no `[defaults]` fallback
+(pass them, or rely on cargo's single-package autodetect).
 
 > Working in this repo instead of an installed binary? Any
 > `cargo athena <cmd>` above is `cargo run -p cargo-athena --bin

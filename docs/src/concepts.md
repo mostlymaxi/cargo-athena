@@ -53,9 +53,10 @@ composable without a global registry.
 
 ## 5. One binary, delivered through S3
 
-There is a single multi-step binary. `cargo athena build`
+There is a single multi-step binary. `cargo athena publish`
 cross-compiles it static-musl for each target in `athena.toml` and
-packages them as one tarball in your S3 `ArtifactRepository`. `emit`
+uploads them as one tarball to your S3 `ArtifactRepository` (`build`
+packages that tarball locally, without uploading). `emit`
 injects that tarball as an input artifact plus an `sh` bootstrap into
 every container template; in-pod the bootstrap `uname`s, picks
 `app-<triple>`, and execs it with `--cargo-athena-template <name>`.
