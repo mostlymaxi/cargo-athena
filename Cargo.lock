@@ -178,6 +178,7 @@ name = "cargo-athena-example-e2e"
 version = "0.3.0"
 dependencies = [
  "cargo-athena",
+ "serde",
 ]
 
 [[package]]
