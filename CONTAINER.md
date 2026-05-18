@@ -49,6 +49,8 @@ All athena paths live under a pod-scoped `emptyDir` at `/athena`.
     on_exit_if_root = path::to::template,
     retry(limit = 3, policy = "OnError", backoff = "30s"),
     timeout = "5m",
+    ttl(after_completion = 86400, after_success = 3600, after_failure = 7200),
+    pod_gc(strategy = "OnWorkflowSuccess"),
 )]
 ```
 
@@ -61,6 +63,8 @@ All athena paths live under a pod-scoped `emptyDir` at `/athena`.
 | `on_exit_if_root = t` | Whole-workflow exit handler on this template's own `spec.hooks.exit` — Argo fires it only for the workflow you actually submit (workflow-scoped). Same semantics as `#[workflow(on_exit_if_root)]`; distinct from the per-task `.on_exit(t)` builder. |
 | `retry(limit = N \| unlimited, policy = "…", backoff = "<dur>")` | Template-level Argo `retryStrategy`. `limit` is **required** (`unlimited` ⇒ unbounded, no `limit` field); `policy` ∈ `Always\|OnFailure\|OnError\|OnTransientError` (optional; Argo defaults to `OnFailure`); `backoff` a duration string (optional). |
 | `timeout = "<dur>"` | Template-level Argo `timeout` (e.g. `"5m"`). Optional. |
+| `ttl(after_completion = <s>, after_success = <s>, after_failure = <s>)` | WorkflowSpec-scoped Argo `ttlStrategy` (GC the finished Workflow after the given seconds). All three optional ints but **≥1 required**. Stamped on this template's own `WorkflowTemplate` `spec` (workflow-scoped, fires only for the workflow you submit — same semantics as `on_exit_if_root`). |
+| `pod_gc(strategy = "<S>")` | WorkflowSpec-scoped Argo `podGC`. `strategy` **required**, ∈ `OnPodCompletion\|OnPodSuccess\|OnWorkflowCompletion\|OnWorkflowSuccess`. Same per-WT scoping as `ttl`. |
 
 All optional. As with `#[workflow]`, an argument *name* or a `name = "…"`
 value that a YAML 1.1 parser reads as a boolean/null is a compile error.

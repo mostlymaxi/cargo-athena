@@ -317,6 +317,116 @@ impl deluxe::ParseMetaItem for RetryArgs {
     }
 }
 
+/// `ttl(after_completion = <secs>, after_success = <secs>,
+/// after_failure = <secs>)` — WorkflowSpec-scoped Argo `ttlStrategy`.
+/// All three optional, ≥1 required (enforced in `ttl_const_tokens`).
+/// Hand-parsed for the same reason as `RetryArgs` (deluxe's derived
+/// `ParseMetaItem` only does the brace form, not `name(…)`).
+#[derive(Default)]
+struct TtlArgs {
+    after_completion: Option<syn::Expr>,
+    after_success: Option<syn::Expr>,
+    after_failure: Option<syn::Expr>,
+}
+
+impl TtlArgs {
+    fn parse_fields(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let mut out = TtlArgs::default();
+        while !input.is_empty() {
+            let key: syn::Ident = input.parse()?;
+            input.parse::<syn::Token![=]>()?;
+            match key.to_string().as_str() {
+                "after_completion" => out.after_completion = Some(input.parse::<syn::Expr>()?),
+                "after_success" => out.after_success = Some(input.parse::<syn::Expr>()?),
+                "after_failure" => out.after_failure = Some(input.parse::<syn::Expr>()?),
+                other => {
+                    return Err(syn::Error::new_spanned(
+                        &key,
+                        format!(
+                            "unknown `ttl(...)` field `{other}` (expected \
+                             after_completion, after_success, after_failure)"
+                        ),
+                    ));
+                }
+            }
+            if !input.is_empty() {
+                input.parse::<syn::Token![,]>()?;
+            }
+        }
+        Ok(out)
+    }
+}
+
+impl deluxe::ParseMetaItem for TtlArgs {
+    fn parse_meta_item(
+        input: syn::parse::ParseStream,
+        _mode: deluxe::ParseMode,
+    ) -> deluxe::Result<Self> {
+        if input.peek(syn::token::Brace) {
+            let content;
+            syn::braced!(content in input);
+            return TtlArgs::parse_fields(&content);
+        }
+        TtlArgs::parse_fields(input)
+    }
+
+    fn missing_meta_item(_name: &str, _span: proc_macro2::Span) -> deluxe::Result<Self> {
+        Ok(TtlArgs::default())
+    }
+}
+
+/// `pod_gc(strategy = "<S>")` — WorkflowSpec-scoped Argo `podGC`.
+/// `strategy` is required + must be a known strategy (enforced in
+/// `pod_gc_const_tokens`). Hand-parsed for the same reason as
+/// `RetryArgs`.
+#[derive(Default)]
+struct PodGcArgs {
+    strategy: Option<String>,
+}
+
+impl PodGcArgs {
+    fn parse_fields(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let mut out = PodGcArgs::default();
+        while !input.is_empty() {
+            let key: syn::Ident = input.parse()?;
+            input.parse::<syn::Token![=]>()?;
+            match key.to_string().as_str() {
+                "strategy" => {
+                    out.strategy = Some(input.parse::<syn::LitStr>()?.value());
+                }
+                other => {
+                    return Err(syn::Error::new_spanned(
+                        &key,
+                        format!("unknown `pod_gc(...)` field `{other}` (expected strategy)"),
+                    ));
+                }
+            }
+            if !input.is_empty() {
+                input.parse::<syn::Token![,]>()?;
+            }
+        }
+        Ok(out)
+    }
+}
+
+impl deluxe::ParseMetaItem for PodGcArgs {
+    fn parse_meta_item(
+        input: syn::parse::ParseStream,
+        _mode: deluxe::ParseMode,
+    ) -> deluxe::Result<Self> {
+        if input.peek(syn::token::Brace) {
+            let content;
+            syn::braced!(content in input);
+            return PodGcArgs::parse_fields(&content);
+        }
+        PodGcArgs::parse_fields(input)
+    }
+
+    fn missing_meta_item(_name: &str, _span: proc_macro2::Span) -> deluxe::Result<Self> {
+        Ok(PodGcArgs::default())
+    }
+}
+
 /// `#[container(image = "...", name = "...", service_account = "...",
 ///   node_selector = { "k" = "v", ... })]`
 ///
@@ -341,6 +451,10 @@ struct ContainerArgs {
     retry: Option<RetryArgs>,
     /// Template-level `timeout` duration string (e.g. `"5m"`).
     timeout: Option<String>,
+    /// WorkflowSpec-scoped TTL GC (`ttl(after_completion=…, …)`).
+    ttl: Option<TtlArgs>,
+    /// WorkflowSpec-scoped pod GC (`pod_gc(strategy=…)`).
+    pod_gc: Option<PodGcArgs>,
 }
 
 /// `#[workflow(name = "...", steps, node_selector = { "k" = "v", ... },
@@ -372,6 +486,10 @@ struct WorkflowArgs {
     retry: Option<RetryArgs>,
     /// Template-level `timeout` duration string (e.g. `"5m"`).
     timeout: Option<String>,
+    /// WorkflowSpec-scoped TTL GC (`ttl(after_completion=…, …)`).
+    ttl: Option<TtlArgs>,
+    /// WorkflowSpec-scoped pod GC (`pod_gc(strategy=…)`).
+    pod_gc: Option<PodGcArgs>,
 }
 
 /// Parse attribute args into `T`, or return a `compile_error!`.
@@ -464,6 +582,91 @@ fn timeout_tokens(timeout: &Option<String>) -> proc_macro2::TokenStream {
         Some(s) => quote! { #s.to_string() },
         None => quote! { ::std::string::String::new() },
     }
+}
+
+/// One `after_* = <secs>` field → `Some(<n> i32)` / `None`. Only a
+/// non-negative integer literal is accepted (seconds).
+fn ttl_secs_tok(e: &Option<Expr>) -> Result<proc_macro2::TokenStream, syn::Error> {
+    match e {
+        None => Ok(quote! { ::core::option::Option::None }),
+        Some(Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Int(i),
+            ..
+        })) => {
+            let n: u32 = i.base10_parse()?;
+            let n = n as i32;
+            Ok(quote! { ::core::option::Option::Some(#n) })
+        }
+        Some(e) => Err(syn::Error::new_spanned(
+            e,
+            "`ttl(...)` seconds must be a non-negative integer literal",
+        )),
+    }
+}
+
+/// Lower `ttl(..)` to a token expr of type
+/// `::core::option::Option<::cargo_athena::api::TtlStrategy>`. ≥1 of the
+/// three bounds is required (an empty `ttl()` is a compile error).
+fn ttl_const_tokens(
+    ttl: &Option<TtlArgs>,
+    span: proc_macro2::Span,
+) -> Result<proc_macro2::TokenStream, syn::Error> {
+    let t = match ttl {
+        None => return Ok(quote! { ::core::option::Option::None }),
+        Some(t) => t,
+    };
+    if t.after_completion.is_none() && t.after_success.is_none() && t.after_failure.is_none() {
+        return Err(syn::Error::new(
+            span,
+            "`ttl(...)` needs at least one of \
+             after_completion/after_success/after_failure",
+        ));
+    }
+    let comp = ttl_secs_tok(&t.after_completion)?;
+    let succ = ttl_secs_tok(&t.after_success)?;
+    let fail = ttl_secs_tok(&t.after_failure)?;
+    Ok(quote! {
+        ::core::option::Option::Some(::cargo_athena::api::TtlStrategy {
+            seconds_after_completion: #comp,
+            seconds_after_success: #succ,
+            seconds_after_failure: #fail,
+        })
+    })
+}
+
+/// Lower `pod_gc(strategy = "<S>")` to a token expr of type
+/// `::core::option::Option<&'static str>`. `strategy` is required and
+/// must be one of the four Argo podGC strategies.
+fn pod_gc_const_tokens(
+    pod_gc: &Option<PodGcArgs>,
+    span: proc_macro2::Span,
+) -> Result<proc_macro2::TokenStream, syn::Error> {
+    let g = match pod_gc {
+        None => return Ok(quote! { ::core::option::Option::None }),
+        Some(g) => g,
+    };
+    let s = match &g.strategy {
+        None => {
+            return Err(syn::Error::new(
+                span,
+                "`pod_gc(...)` requires `strategy = \"...\"`",
+            ));
+        }
+        Some(s) => s,
+    };
+    match s.as_str() {
+        "OnPodCompletion" | "OnPodSuccess" | "OnWorkflowCompletion" | "OnWorkflowSuccess" => {}
+        other => {
+            return Err(syn::Error::new(
+                span,
+                format!(
+                    "unknown podGC strategy `{other}` (expected \
+                     OnPodCompletion|OnPodSuccess|OnWorkflowCompletion|OnWorkflowSuccess)"
+                ),
+            ));
+        }
+    }
+    Ok(quote! { ::core::option::Option::Some(#s) })
 }
 
 /// Rewrites every decl macro (`host!`, `load_artifact*!`,
@@ -731,6 +934,16 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
         Err(e) => return e.to_compile_error().into(),
     };
     let timeout_tok = timeout_tokens(&cfg.timeout);
+    // WorkflowSpec-scoped `ttlStrategy` / `podGC` trait consts (stamped
+    // per-WT by `Collector` like `ON_EXIT`).
+    let ttl_tok = match ttl_const_tokens(&cfg.ttl, ident.span()) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let podgc_tok = match pod_gc_const_tokens(&cfg.pod_gc, ident.span()) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
     // Type-guard: every injected operand must be `Injectable`
     // (String/str/number) in the container's real arg types — a type
     // whose `serde_json` form round-trips to the obvious raw scalar.
@@ -795,6 +1008,8 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
             const KIND: ::cargo_athena::TemplateKind =
                 ::cargo_athena::TemplateKind::Container;
             #on_exit_const
+            const TTL: ::core::option::Option<::cargo_athena::api::TtlStrategy> = #ttl_tok;
+            const POD_GC: ::core::option::Option<&'static str> = #podgc_tok;
 
             fn run(__in: ::cargo_athena::serde_json::Value)
                 -> ::cargo_athena::serde_json::Value
@@ -3062,6 +3277,17 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         retry_strategy: #retry_tok,
         timeout: #timeout_tok,
     };
+    // WorkflowSpec-scoped `ttlStrategy` / `podGC` trait consts (stamped
+    // per-WT by `Collector` like `ON_EXIT`; never on synthetic `if`
+    // wrapper/arm templates — `emit_synth` omits these consts).
+    let ttl_tok = match ttl_const_tokens(&cfg.ttl, ident.span()) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let podgc_tok = match pod_gc_const_tokens(&cfg.pod_gc, ident.span()) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
 
     // Default = `dag:` (parallel by data-deps). `#[workflow(steps)]` =
     // `steps:` (one sequential group per statement).
@@ -3137,6 +3363,8 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
             const KIND: ::cargo_athena::TemplateKind =
                 ::cargo_athena::TemplateKind::Workflow;
             #on_exit_const
+            const TTL: ::core::option::Option<::cargo_athena::api::TtlStrategy> = #ttl_tok;
+            const POD_GC: ::core::option::Option<&'static str> = #podgc_tok;
 
             fn build(_ctx: &::cargo_athena::BuildCtx)
                 -> ::cargo_athena::api::Template
