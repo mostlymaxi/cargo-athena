@@ -54,18 +54,16 @@
         version =
           (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
 
-        # One source of truth for the dev tooling. The full shell is the
-        # lean CI shell PLUS the e2e/docs tooling. CI's test/clippy only
-        # compile, so they use `.#ci` and skip substituting the ~10 heavy
-        # tools (kind/kubectl/argo/zig/mdbook/…) on every fresh runner.
-        ciPackages = [ rustToolchain ];
-        devPackages = ciPackages ++ [
-          pkgs.cargo-watch
-          pkgs.cargo-edit
-          pkgs.cargo-nextest
+        # One source of truth for the dev tooling, composed so each CI
+        # job materializes only what it uses — the rest of the fat shell
+        # is never substituted on that job's fresh runners.
+        ciPackages = [ rustToolchain ]; # test / clippy / publish
+        crossTools = [
           # static-musl cross-compilation for `cargo athena build`.
           pkgs.cargo-zigbuild
           pkgs.zig
+        ];
+        clusterTools = [
           # kind e2e: cluster + Argo + MinIO. Needs a host Docker or
           # Podman daemon (not a nix package — provided by the host).
           pkgs.kind
@@ -73,9 +71,22 @@
           pkgs.argo-workflows
           pkgs.minio-client
           pkgs.jq
-          # Documentation site (docs/, published to GitHub Pages).
-          pkgs.mdbook
         ];
+        # Documentation site (docs/, published to GitHub Pages). No rust
+        # — keep it out of the docs closure.
+        docsPackages = [ pkgs.mdbook ];
+        crossPackages = ciPackages ++ crossTools; # .#build (e2e build job)
+        e2ePackages = ciPackages ++ clusterTools; # .#e2e  (e2e job)
+        devPackages = # fat local default = union of all
+          ciPackages
+          ++ crossTools
+          ++ clusterTools
+          ++ docsPackages
+          ++ [
+            pkgs.cargo-watch
+            pkgs.cargo-edit
+            pkgs.cargo-nextest
+          ];
         # Lets rust-analyzer find the standard library sources.
         rustSrcEnv = "${rustToolchain}/lib/rustlib/src/rust/library";
       in
@@ -122,11 +133,27 @@
           '';
         };
 
-        # Lean shell for compile-only CI (test/clippy): toolchain only,
-        # so `nix develop .#ci` doesn't substitute the e2e/docs closure.
+        # Lean per-job CI shells: each substitutes only its own tools, so
+        # `nix develop .#<x>` on a fresh runner skips the rest. One
+        # source of truth — every one is a subset of the fat default.
         devShells.ci = pkgs.mkShell {
+          # test / clippy / publish (compile only)
           packages = ciPackages;
           env.RUST_SRC_PATH = rustSrcEnv;
+        };
+        devShells.build = pkgs.mkShell {
+          # e2e build job: `cargo athena build` (static-musl cross)
+          packages = crossPackages;
+          env.RUST_SRC_PATH = rustSrcEnv;
+        };
+        devShells.e2e = pkgs.mkShell {
+          # e2e job: deploy.sh + e2e-test.sh (cargo + cluster tools)
+          packages = e2ePackages;
+          env.RUST_SRC_PATH = rustSrcEnv;
+        };
+        devShells.docs = pkgs.mkShell {
+          # pages: mdbook only, no rust toolchain in the closure
+          packages = docsPackages;
         };
 
         formatter = pkgs.nixfmt-rfc-style;

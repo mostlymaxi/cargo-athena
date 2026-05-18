@@ -34,6 +34,18 @@ jobs:
             extra-substituters = https://nix-community.cachix.org
             extra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
             accept-flake-config = true
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          # Same lean toolchain closure as test/clippy (.#ci); shares
+          # their nix-<os>-ci- cache. Re-trial of the previously-removed
+          # Nix-store cache — watch for GC/symlink/perms breakage.
+          primary-key: nix-${{ runner.os }}-ci-${{ hashFiles('flake.lock', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-ci-
+          gc-max-store-size-linux: 2G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-ci-
+          purge-created: 0
+          purge-primary-key: never
       - uses: actions/cache@v4
         with:
           path: |
@@ -70,7 +82,7 @@ jobs:
           set -euo pipefail
           for c in cargo-athena-api cargo-athena-macros cargo-athena-core cargo-athena; do
             echo "::group::cargo publish -p $c"
-            nix develop -c cargo publish -p "$c" --locked
+            nix develop .#ci -c cargo publish -p "$c" --locked
             echo "::endgroup::"
           done
 

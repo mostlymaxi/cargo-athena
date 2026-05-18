@@ -31,11 +31,17 @@ jobs:
             extra-substituters = https://nix-community.cachix.org
             extra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
             accept-flake-config = true
-      # No Nix-store cache: cache-nix-action on Determinate-installer
-      # runners repeatedly broke (GC dangling-symlinks, then poisoned
-      # keys, then /nix/var/log perms on restore) for a ~2 min saving on
-      # a 15-20 min kind+Argo e2e. Not worth the flake — substitute from
-      # cache.nixos.org instead. Only the cargo cache below is kept.
+      # Restore-only: e2e.yml *consumes* the toolchain Nix-store cache
+      # that test/clippy/publish populate (prefix nix-<os>-ci-) and
+      # never uploads — 3 parallel matrix legs writing a multi-GB
+      # closure would thrash the 10 GB repo budget. zig/cluster tools
+      # come from cache.nixos.org. (cache-nix-action was removed once
+      # for GC/symlink/perms breakage on save/restore; read-only use
+      # can't hit the save-side failure modes.)
+      - uses: nix-community/cache-nix-action/restore@v7
+        with:
+          primary-key: nix-${{ runner.os }}-ci-${{ hashFiles('flake.lock', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-ci-
       - uses: actions/cache@v4
         with:
           path: |
@@ -48,7 +54,7 @@ jobs:
         env:
           ATHENA_CONFIG: scripts/athena.toml
         run: |
-          nix develop -c cargo run -q -p cargo-athena --bin cargo-athena -- athena build \
+          nix develop .#build -c cargo run -q -p cargo-athena --bin cargo-athena -- athena build \
             --package cargo-athena-example-e2e --bin e2e
       - uses: actions/upload-artifact@v4
         with:
@@ -91,7 +97,11 @@ jobs:
             extra-substituters = https://nix-community.cachix.org
             extra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
             accept-flake-config = true
-      # (no Nix-store cache — see the build job for why)
+      # Restore-only toolchain cache (see the build job) — no upload.
+      - uses: nix-community/cache-nix-action/restore@v7
+        with:
+          primary-key: nix-${{ runner.os }}-ci-${{ hashFiles('flake.lock', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-ci-
       - uses: actions/download-artifact@v4
         with:
           name: athena-e2e-tarball
@@ -102,10 +112,10 @@ jobs:
           ATHENA_SKIP_BUILD: "1"
           ATHENA_TARBALL: ${{ github.workspace }}/dist/e2e.tar.gz
         run: |
-          nix develop -c bash -c 'scripts/deploy.sh && scripts/e2e-test.sh'
+          nix develop .#e2e -c bash -c 'scripts/deploy.sh && scripts/e2e-test.sh'
       - name: teardown
         if: always()
-        run: nix develop -c scripts/teardown.sh || true
+        run: nix develop .#e2e -c scripts/teardown.sh || true
 
       # Per-version live status for the README table. GitHub has no
       # per-matrix-job badge, so each job publishes pass/fail to a gist
