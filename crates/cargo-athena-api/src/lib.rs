@@ -165,6 +165,25 @@ argo! {
         /// inner runs in parallel, outer sequentially. Plain serde nests
         /// `Vec<Vec<_>>` natively (no proto wrapper needed).
         pub steps: Vec<Vec<DagTask>>,
+        /// Template-level retry policy (`#[container/workflow(retry(..))]`).
+        pub retry_strategy: Option<RetryStrategy>,
+        /// Template-level timeout duration (`#[…(timeout = "5m")]`).
+        pub timeout: String,
+    }
+
+    /// Argo `retryStrategy`: re-run the template on failure. Nil `limit`
+    /// == unlimited; `retry_policy` empty == Argo default (`OnFailure`).
+    pub struct RetryStrategy {
+        pub limit: Option<i32>,
+        pub retry_policy: String,
+        pub backoff: Option<Backoff>,
+    }
+
+    /// Exponential back-off between retries.
+    pub struct Backoff {
+        pub duration: String,
+        pub factor: Option<i32>,
+        pub max_duration: String,
     }
 
     pub struct Inputs {

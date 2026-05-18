@@ -241,6 +241,82 @@ fn check_yaml_safe_names(func: &ItemFn, name_override: &Option<String>) -> Resul
 
 // Attribute args, parsed with `deluxe` (all fields optional/defaulted).
 
+/// `retry(limit = N | unlimited, policy = "...", backoff = "<dur>")` —
+/// template-level Argo `retryStrategy`. `limit` is required (enforced in
+/// `retry_strategy_tokens`, not the parse); `policy`/`backoff` optional.
+///
+/// Manual `ParseMetaItem` (not `#[derive]`): the spec mandates the
+/// **paren** call form `retry(limit = …, …)`. deluxe's derived
+/// `ParseMetaItem` only accepts the *brace* form for a struct field
+/// (`retry { … }`); for `name(…)` it routes through
+/// `parse_meta_item_inline`, whose derived body still demands curly
+/// braces ("expected curly braces"). Hand-parsing the comma-separated
+/// `ident = value` pairs from the parenthesized buffer (public `syn`
+/// only — no deluxe internals) gives exactly the spec'd grammar.
+#[derive(Default)]
+struct RetryArgs {
+    limit: Option<syn::Expr>,
+    policy: Option<String>,
+    backoff: Option<String>,
+}
+
+impl RetryArgs {
+    /// Parse the comma-separated `ident = value` pairs from a buffer
+    /// (the parenthesized `retry( … )` content).
+    fn parse_fields(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let mut out = RetryArgs::default();
+        while !input.is_empty() {
+            let key: syn::Ident = input.parse()?;
+            input.parse::<syn::Token![=]>()?;
+            match key.to_string().as_str() {
+                "limit" => out.limit = Some(input.parse::<syn::Expr>()?),
+                "policy" => {
+                    out.policy = Some(input.parse::<syn::LitStr>()?.value());
+                }
+                "backoff" => {
+                    out.backoff = Some(input.parse::<syn::LitStr>()?.value());
+                }
+                other => {
+                    return Err(syn::Error::new_spanned(
+                        &key,
+                        format!(
+                            "unknown `retry(...)` field `{other}` \
+                             (expected limit, policy, backoff)"
+                        ),
+                    ));
+                }
+            }
+            if !input.is_empty() {
+                input.parse::<syn::Token![,]>()?;
+            }
+        }
+        Ok(out)
+    }
+}
+
+impl deluxe::ParseMetaItem for RetryArgs {
+    fn parse_meta_item(
+        input: syn::parse::ParseStream,
+        _mode: deluxe::ParseMode,
+    ) -> deluxe::Result<Self> {
+        // Reached for the `retry( … )` paren form: deluxe (via
+        // `Option<T>` → `Paren::parse_delimited_meta_item`) hands us
+        // the already-unwrapped parenthesized buffer, so the bare
+        // comma-separated `ident = value` field list is parsed here.
+        // Also accept an explicit `{ … }` brace group for symmetry.
+        if input.peek(syn::token::Brace) {
+            let content;
+            syn::braced!(content in input);
+            return RetryArgs::parse_fields(&content);
+        }
+        RetryArgs::parse_fields(input)
+    }
+
+    fn missing_meta_item(_name: &str, _span: proc_macro2::Span) -> deluxe::Result<Self> {
+        Ok(RetryArgs::default())
+    }
+}
+
 /// `#[container(image = "...", name = "...", service_account = "...",
 ///   node_selector = { "k" = "v", ... })]`
 ///
@@ -261,6 +337,10 @@ struct ContainerArgs {
     /// only when this workflow is the one submitted (the run's root).
     /// Named distinctly from the per-task `.on_exit(t)` builder.
     on_exit_if_root: Option<syn::Path>,
+    /// Template-level `retryStrategy` (`limit` required when present).
+    retry: Option<RetryArgs>,
+    /// Template-level `timeout` duration string (e.g. `"5m"`).
+    timeout: Option<String>,
 }
 
 /// `#[workflow(name = "...", steps, node_selector = { "k" = "v", ... },
@@ -288,6 +368,10 @@ struct WorkflowArgs {
     steps: deluxe::Flag,
     node_selector: std::collections::BTreeMap<String, String>,
     on_exit_if_root: Option<syn::Path>,
+    /// Template-level `retryStrategy` (`limit` required when present).
+    retry: Option<RetryArgs>,
+    /// Template-level `timeout` duration string (e.g. `"5m"`).
+    timeout: Option<String>,
 }
 
 /// Parse attribute args into `T`, or return a `compile_error!`.
@@ -296,6 +380,90 @@ fn parse_attr<T: deluxe::ParseMetaItem + Default>(attr: TokenStream) -> Result<T
         return Ok(T::default());
     }
     deluxe::parse2::<T>(attr.into()).map_err(|e| e.into_compile_error().into())
+}
+
+/// Lower `retry(..)` to a token expr of type
+/// `::core::option::Option<::cargo_athena::api::RetryStrategy>`.
+/// `limit` is required; `limit = unlimited` (bare ident) ⇒ nil limit
+/// (Argo treats that as unbounded); `policy` (if any) ∈ the 4 Argo
+/// policies; `backoff` ⇒ `Backoff { duration }`.
+fn retry_strategy_tokens(
+    retry: &Option<RetryArgs>,
+    span: proc_macro2::Span,
+) -> Result<proc_macro2::TokenStream, syn::Error> {
+    let r = match retry {
+        None => return Ok(quote! { ::core::option::Option::None }),
+        Some(r) => r,
+    };
+    // `limit` REQUIRED inside `retry(..)`.
+    let limit_tok = match &r.limit {
+        None => {
+            return Err(syn::Error::new(
+                span,
+                "`retry(...)` requires `limit = N` (or `limit = unlimited`)",
+            ));
+        }
+        Some(Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Int(i),
+            ..
+        })) => {
+            let n: u32 = i.base10_parse()?;
+            let n = n as i32;
+            quote! { ::core::option::Option::Some(#n) }
+        }
+        Some(Expr::Path(p)) if p.path.is_ident("unlimited") => {
+            quote! { ::core::option::Option::None }
+        }
+        Some(e) => {
+            return Err(syn::Error::new_spanned(
+                e,
+                "`limit` must be an integer or `unlimited`",
+            ));
+        }
+    };
+    // `policy` ∈ the 4 Argo retry policies (absent ⇒ Argo default).
+    let policy_tok = match &r.policy {
+        None => quote! { ::std::string::String::new() },
+        Some(p) => {
+            match p.as_str() {
+                "Always" | "OnFailure" | "OnError" | "OnTransientError" => {}
+                other => {
+                    return Err(syn::Error::new(
+                        span,
+                        format!(
+                            "unknown retry policy `{other}` (expected \
+                             Always|OnFailure|OnError|OnTransientError)"
+                        ),
+                    ));
+                }
+            }
+            quote! { #p.to_string() }
+        }
+    };
+    let backoff_tok = match &r.backoff {
+        None => quote! { ::core::option::Option::None },
+        Some(d) => quote! {
+            ::core::option::Option::Some(::cargo_athena::api::Backoff {
+                duration: #d.to_string(),
+                ..::core::default::Default::default()
+            })
+        },
+    };
+    Ok(quote! {
+        ::core::option::Option::Some(::cargo_athena::api::RetryStrategy {
+            limit: #limit_tok,
+            retry_policy: #policy_tok,
+            backoff: #backoff_tok,
+        })
+    })
+}
+
+/// Lower the `timeout = "<dur>"` attr to a `String` token expr.
+fn timeout_tokens(timeout: &Option<String>) -> proc_macro2::TokenStream {
+    match timeout {
+        Some(s) => quote! { #s.to_string() },
+        None => quote! { ::std::string::String::new() },
+    }
 }
 
 /// Rewrites every decl macro (`host!`, `load_artifact*!`,
@@ -557,6 +725,12 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(s) => quote! { ::core::option::Option::Some(#s) },
         None => quote! { ::core::option::Option::None },
     };
+    // Template-level `retryStrategy` / `timeout`.
+    let retry_tok = match retry_strategy_tokens(&cfg.retry, ident.span()) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let timeout_tok = timeout_tokens(&cfg.timeout);
     // Type-guard: every injected operand must be `Injectable`
     // (String/str/number) in the container's real arg types — a type
     // whose `serde_json` form round-trips to the obvious raw scalar.
@@ -714,6 +888,8 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                             #ns_keys.to_string(), #ns_vals.to_string()); )*
                         __ns
                     },
+                    retry_strategy: #retry_tok,
+                    timeout: #timeout_tok,
                     ..::core::default::Default::default()
                 }
             }
@@ -2875,6 +3051,18 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         },
     };
 
+    // Template-level `retryStrategy` / `timeout` (real WT only — never
+    // re-stamped on synthetic `if` wrapper/arm templates).
+    let retry_tok = match retry_strategy_tokens(&cfg.retry, ident.span()) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let timeout_tok = timeout_tokens(&cfg.timeout);
+    let retry_timeout_tokens = quote! {
+        retry_strategy: #retry_tok,
+        timeout: #timeout_tok,
+    };
+
     // Default = `dag:` (parallel by data-deps). `#[workflow(steps)]` =
     // `steps:` (one sequential group per statement).
     let build_body = if steps_mode {
@@ -2888,6 +3076,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
                 inputs: #inputs_tokens,
                 steps: __steps,
                 #node_selector_tokens
+                #retry_timeout_tokens
                 #outputs_tokens
                 ..::core::default::Default::default()
             }
@@ -2903,6 +3092,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
                 dag: ::core::option::Option::Some(
                     ::cargo_athena::api::DagTemplate { tasks: __tasks }),
                 #node_selector_tokens
+                #retry_timeout_tokens
                 #outputs_tokens
                 ..::core::default::Default::default()
             }
