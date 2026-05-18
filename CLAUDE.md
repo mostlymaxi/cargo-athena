@@ -221,6 +221,25 @@ README is intentionally lean (user-facing); the *why* lives here.
   on every WT). The `--with-workflow` runnable Workflow also keeps its
   own explicit `hooks` for the root (redundant, zero-regression).
   Handler templates force-linked via `collect()`.
+- **ALL `WorkflowSpec`-level attrs are root-only — `on_exit_if_root`
+  is NOT special (proven from Argo v4.0.5 source,
+  `/home/maxi/build/argo-workflows`).** `setExecWorkflow`
+  (`workflow/controller/operator.go:4283`) materializes `woc.execWf`
+  ONCE from the submitted root (inline, or `workflowTemplateRef` →
+  `StoredWorkflowSpec`); every spec field is read `woc.execWf.Spec.X`
+  (Hooks `hooks.go:17`, OnExit `operator.go:451`, PodGC
+  `pod_cleanup.go:26`+`workflowpod.go:277`, ActiveDeadlineSeconds
+  `operator.go:611/618`, Parallelism `operator.go:337/3113`); a nested
+  `templateRef` resolves a *template by name only*, never the
+  referenced WT's spec. So any field in a WT's `.spec` applies ONLY
+  when that WT is the submitted run; inert when `templateRef`'d as a
+  sub-workflow. **Convention: spec-scoped attrs carry the `_if_root`
+  suffix** (`on_exit_if_root`, `ttl_if_root`, `pod_gc_if_root`);
+  **template-level** attrs (`retry`, `timeout`, `active_deadline` →
+  `Template.*`) take effect per-pod even when nested and get NO
+  suffix. ttl/podGC use the same Collector plumbing as ON_EXIT
+  (`Template::TTL`/`POD_GC` consts → Collector maps keyed by
+  `ARGO_NAME` → per-WT `spec` post-pass in `build_templates`).
 - **`nodeSelector` DOES cascade (empirical, real Argo v4.0.5,
   2026-05-16).** A parent DAG/steps template's `nodeSelector` is merged
   by the Argo controller onto the pods of templates it calls via
