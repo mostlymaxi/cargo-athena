@@ -24,6 +24,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v16
+        with:
+          # Trust the cachix substituter at the *system* nix.conf level
+          # — flake `nixConfig` is ignored non-interactively (untrusted).
+          extra-conf: |
+            extra-substituters = https://nix-community.cachix.org
+            extra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
       # No Nix-store cache: cache-nix-action on Determinate-installer
       # runners repeatedly broke (GC dangling-symlinks, then poisoned
       # keys, then /nix/var/log perms on restore) for a ~2 min saving on
@@ -77,6 +83,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v16
+        with:
+          # Trust the cachix substituter at the *system* nix.conf level
+          # — flake `nixConfig` is ignored non-interactively (untrusted).
+          extra-conf: |
+            extra-substituters = https://nix-community.cachix.org
+            extra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
       # (no Nix-store cache — see the build job for why)
       - uses: actions/download-artifact@v4
         with:
