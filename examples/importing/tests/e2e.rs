@@ -25,10 +25,12 @@ fn assert_golden(name: &str, actual: &str) {
         eprintln!("updated golden {}", path.display());
         return;
     }
-    let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
-        panic!("missing golden {} — run `UPDATE_EXPECT=1`", path.display())
-    });
-    assert_eq!(actual, expected, "\n{name} drifted; refresh with UPDATE_EXPECT=1\n");
+    let expected = std::fs::read_to_string(&path)
+        .unwrap_or_else(|_| panic!("missing golden {} — run `UPDATE_EXPECT=1`", path.display()));
+    assert_eq!(
+        actual, expected,
+        "\n{name} drifted; refresh with UPDATE_EXPECT=1\n"
+    );
 }
 
 fn run_bin(envs: &[(&str, &str)]) -> String {

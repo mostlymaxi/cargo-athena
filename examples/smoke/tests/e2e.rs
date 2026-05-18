@@ -179,7 +179,10 @@ fn list_all() {
 /// `workflow ls` hides unless `--include-synthetic`).
 #[test]
 fn list_if() {
-    assert_golden("list_if.json", &run_bin(BIN_IF, &[("CARGO_ATHENA_LIST", "1")]));
+    assert_golden(
+        "list_if.json",
+        &run_bin(BIN_IF, &[("CARGO_ATHENA_LIST", "1")]),
+    );
 }
 
 /// Run mode: a container that returns a value (JSON to stdout).
@@ -204,7 +207,10 @@ fn run_mode_branchy() {
     let out = run_bin(
         BIN_PIPELINE,
         &[
-            ("CARGO_ATHENA_TEMPLATE", "cargo-athena-example-smoke-branchy"),
+            (
+                "CARGO_ATHENA_TEMPLATE",
+                "cargo-athena-example-smoke-branchy",
+            ),
             ("CARGO_ATHENA_INPUT", r#"{"mode":"fast"}"#),
         ],
     );

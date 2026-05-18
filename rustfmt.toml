@@ -1,0 +1,4 @@
+# This project formats with stock rustfmt — run `cargo fmt` before
+# pushing (CI enforces `cargo fmt --all -- --check`). Defaults only;
+# `edition` is pinned so a bare `rustfmt` / editor matches `cargo fmt`.
+edition = "2024"

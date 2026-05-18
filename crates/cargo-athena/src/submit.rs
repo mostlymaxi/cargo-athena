@@ -173,7 +173,11 @@ impl Cluster for KubeApi {
 
     fn apply_template(&self, ns: &str, wt: &api::WorkflowTemplate) {
         let api = self.api(ns, "WorkflowTemplate", "workflowtemplates");
-        let name = wt.metadata.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+        let name = wt
+            .metadata
+            .as_ref()
+            .map(|m| m.name.clone())
+            .unwrap_or_default();
         let body = serde_json::to_value(wt).expect("WorkflowTemplate is JSON");
         self.rt
             .block_on(api.patch(
@@ -273,7 +277,11 @@ impl Cluster for ArgoServer {
     }
 
     fn apply_template(&self, ns: &str, wt: &api::WorkflowTemplate) {
-        let name = wt.metadata.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+        let name = wt
+            .metadata
+            .as_ref()
+            .map(|m| m.name.clone())
+            .unwrap_or_default();
         let exists = self.get_template(ns, &name).is_some();
         if exists {
             self.send(
@@ -302,7 +310,10 @@ impl Cluster for ArgoServer {
                 .json(&serde_json::json!({ "namespace": ns, "workflow": wf })),
             "submit workflow",
         );
-        v["metadata"]["name"].as_str().unwrap_or_default().to_string()
+        v["metadata"]["name"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
     }
 
     fn describe(&self) -> String {
@@ -370,7 +381,11 @@ pub fn submit(a: SubmitArgs) {
     let ns = a
         .namespace
         .clone()
-        .or_else(|| std::env::var("ARGO_NAMESPACE").ok().filter(|s| !s.is_empty()))
+        .or_else(|| {
+            std::env::var("ARGO_NAMESPACE")
+                .ok()
+                .filter(|s| !s.is_empty())
+        })
         .or_else(|| AthenaConfig::load().defaults.namespace.clone())
         .unwrap_or_else(|| "default".to_string());
     let sa = a

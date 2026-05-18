@@ -229,8 +229,10 @@ pub fn container_emulate(a: EmulateArgs) {
         (None, true) => build_local(pkg.as_deref(), bin.as_deref()),
         (None, false) => {
             let ba = meta.binary_artifact.as_ref().unwrap_or_else(|| {
-                die("template has no binary artifact (run `cargo athena build` first, \
-                     or pass --build / --tarball)")
+                die(
+                    "template has no binary artifact (run `cargo athena build` first, \
+                     or pass --build / --tarball)",
+                )
             });
             let dst = work.join("dist.tar.gz");
             s3_get(&ba.s3, &dst);
@@ -320,7 +322,11 @@ pub fn container_emulate(a: EmulateArgs) {
 /// `cargo-athena` crate itself makes `cargo run` build the CLI, not a
 /// workflow — hence the explicit guidance below instead of dumping its
 /// clap usage.
-pub(crate) fn describe(template: &str, package: Option<&str>, bin: Option<&str>) -> ContainerRunMeta {
+pub(crate) fn describe(
+    template: &str,
+    package: Option<&str>,
+    bin: Option<&str>,
+) -> ContainerRunMeta {
     let hint = || -> String {
         let where_ = match (package, bin) {
             (Some(p), Some(b)) => format!("--package {p} --bin {b}"),
@@ -355,8 +361,12 @@ pub(crate) fn describe(template: &str, package: Option<&str>, bin: Option<&str>)
             .join("\n");
         die(&format!("{}\n\n  binary output (tail):\n{tail}", hint()));
     }
-    serde_json::from_slice(&out.stdout)
-        .unwrap_or_else(|e| die(&format!("could not parse container metadata ({e}).\n{}", hint())))
+    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+        die(&format!(
+            "could not parse container metadata ({e}).\n{}",
+            hint()
+        ))
+    })
 }
 
 fn detect_runtime(over: Option<&str>) -> String {
@@ -556,11 +566,14 @@ impl std::fmt::Display for Kind {
 /// don't shape-check here — the container still does full serde.
 fn expected_kind(ty: &str) -> Option<Kind> {
     let t = ty.trim_start_matches('&');
-    let t = t.strip_prefix("'static").unwrap_or(t).trim_start_matches('&');
+    let t = t
+        .strip_prefix("'static")
+        .unwrap_or(t)
+        .trim_start_matches('&');
     match t {
         "String" | "str" | "char" | "PathBuf" | "Path" | "Box<str>" => Some(Kind::Str),
-        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64"
-        | "u128" | "usize" => Some(Kind::Int),
+        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128"
+        | "usize" => Some(Kind::Int),
         "f32" | "f64" => Some(Kind::Float),
         "bool" => Some(Kind::Bool),
         _ if t.starts_with("Vec<")
@@ -719,10 +732,8 @@ pub(crate) fn s3_put(s3: &S3Ref, src: &Path) {
     let store = s3_store(s3);
     let key = object_store::path::Path::from(s3.key.as_str());
     let data = std::fs::read(src).unwrap_or_else(|e| die(&format!("read {}: {e}", src.display())));
-    rt().block_on(async {
-        object_store::ObjectStore::put(&store, &key, data.into()).await
-    })
-    .unwrap_or_else(|e| die(&format!("S3 PUT {}: {e}", s3.key)));
+    rt().block_on(async { object_store::ObjectStore::put(&store, &key, data.into()).await })
+        .unwrap_or_else(|e| die(&format!("S3 PUT {}: {e}", s3.key)));
 }
 
 // ---- --build (local, host-arch musl only) ---------------------------------
