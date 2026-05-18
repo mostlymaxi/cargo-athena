@@ -775,6 +775,15 @@ enum Arg {
     /// The fan-out closure parameter: `|x| C(x)` → `{{item}}`,
     /// `|x| C(x.f)` → `{{item.f}}` (only valid on a `fan_out` node).
     Item { path: Vec<String> },
+    /// Consuming a `fan_out` binding's **aggregate**. Argo's `withParam`
+    /// aggregate is an array of each per-item task's `return` param,
+    /// which is *already JSON-encoded* (Regime B) — so a plain
+    /// `{{tasks.b.outputs.parameters.return}}` ref double-encodes (a
+    /// `Vec<String>` comes back quote-wrapped). Emit a per-element
+    /// re-normalizing expr instead (the array analog of the `Json`
+    /// `toJSON(fromJSON(..))` universal-safe form). Carries the
+    /// producing `fan_out` task (adds the DAG dep, like `Ref`).
+    FanAgg(String),
 }
 
 /// Where a `Json` arg's root value comes from.
@@ -2347,7 +2356,7 @@ fn analyze_workflow(
         parent_rust: func.sig.ident.to_string(),
         parent_argo: parent_argo.to_string(),
     };
-    let (nodes, output_task) = analyze_stmts(
+    let (mut nodes, output_task) = analyze_stmts(
         &func.block.stmts,
         &inputs,
         want_output,
@@ -2363,6 +2372,24 @@ fn analyze_workflow(
             e
         }
     })?;
+    // A downstream task consuming a `fan_out` binding gets Argo's
+    // `withParam` aggregate, whose elements are each per-item task's
+    // already-JSON-encoded `return` — a plain `Ref` double-encodes.
+    // Re-tag those refs so emit uses the array-renormalizing expr.
+    let fan_tasks: std::collections::HashSet<String> = nodes
+        .iter()
+        .filter(|n| n.fan.is_some())
+        .map(|n| n.task.clone())
+        .collect();
+    for n in &mut nodes {
+        for a in &mut n.args {
+            if let Arg::Ref(t) = a
+                && fan_tasks.contains(t)
+            {
+                *a = Arg::FanAgg(t.clone());
+            }
+        }
+    }
     Ok((nodes, output_task, ctx.synth))
 }
 
@@ -2475,6 +2502,44 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                     value: ::core::option::Option::Some(#v.to_string()),
                     ..::core::default::Default::default()
                 });
+            }
+        }
+        // Consuming a `fan_out` aggregate. Argo's `aggregatedJSONValueList`
+        // (controller/operator.go) is **type-heterogeneous** — proven
+        // from Argo v4.0.5 source: `tryJSONUnmarshal` keeps elements
+        // that parse to an object/array as native JSON, but for every
+        // JSON *scalar* (string/number/bool/null) hits `default:
+        // success=false` and falls back to `json.Marshal([]string{…})`
+        // (raw, escaped). So the aggregate is EITHER `[{…},…]` (native)
+        // OR `["\"v\"",…]` (escaped scalars). One universal kind-aware
+        // re-normalization keyed off the actual aggregate-element kind
+        // (NOT the Rust type — unknowable cross-crate): per element,
+        // `fromJSON` it iff it came back a string (the stringified-
+        // scalar case), else pass the parsed object/array through;
+        // then re-`toJSON` the array. (`type`/`map`/`fromJSON`/`toJSON`
+        // are expr-lang v1.17 builtins.)
+        Arg::FanAgg(dep) => {
+            let scope = if steps { "steps" } else { "tasks" };
+            let dep_push = if steps {
+                quote! {}
+            } else {
+                quote! { __deps.push(#dep.to_string()); }
+            };
+            let value = format!(
+                "{{{{=toJSON(map(fromJSON({scope}['{dep}']\
+                 .outputs.parameters['return']), \
+                 {{ type(#) == \"string\" ? fromJSON(#) : # }}))}}}}"
+            );
+            quote! {
+                {
+                    let __name = __inputs.get(#i).copied().unwrap_or_default().to_string();
+                    #dep_push
+                    __params.push(::cargo_athena::api::Parameter {
+                        name: __name,
+                        value: ::core::option::Option::Some(#value.to_string()),
+                        ..::core::default::Default::default()
+                    });
+                }
             }
         }
     });
@@ -2603,6 +2668,23 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                         __hp.push(::cargo_athena::api::Parameter {
                             name: __hin.get(#i).copied().unwrap_or_default().to_string(),
                             value: ::core::option::Option::Some(#v.to_string()),
+                            ..::core::default::Default::default()
+                        });
+                    }
+                }
+                // Same array-renormalizing form as task args; hooks add
+                // no DAG dependency.
+                Arg::FanAgg(dep) => {
+                    let s = if steps { "steps" } else { "tasks" };
+                    let value = format!(
+                        "{{{{=toJSON(map(fromJSON({s}['{dep}']\
+                         .outputs.parameters['return']), \
+                         {{ type(#) == \"string\" ? fromJSON(#) : # }}))}}}}"
+                    );
+                    quote! {
+                        __hp.push(::cargo_athena::api::Parameter {
+                            name: __hin.get(#i).copied().unwrap_or_default().to_string(),
+                            value: ::core::option::Option::Some(#value.to_string()),
                             ..::core::default::Default::default()
                         });
                     }
