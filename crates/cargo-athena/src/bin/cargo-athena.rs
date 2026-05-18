@@ -96,6 +96,10 @@ enum Cmd {
         /// Override the `athena.toml` target matrix (repeatable).
         #[arg(long = "target")]
         targets: Vec<String>,
+        /// Upload this prebuilt tarball verbatim instead of building
+        /// (build-once / upload-many, e.g. a CI artifact).
+        #[arg(long)]
+        tarball: Option<String>,
         /// Dry run: resolve + report the key without building/uploading.
         #[arg(long)]
         print: bool,
@@ -178,8 +182,15 @@ fn main() {
             package,
             bin,
             targets,
+            tarball,
             print,
-        } => publish(package.as_deref(), bin.as_deref(), &targets, print),
+        } => publish(
+            package.as_deref(),
+            bin.as_deref(),
+            &targets,
+            tarball.as_deref(),
+            print,
+        ),
     }
 }
 
@@ -312,6 +323,38 @@ fn build(
     }
 }
 
+/// The artifact's S3 location: the exact key `emit` resolves from
+/// `athena.toml` (so an upload lands where the injected bootstrap reads
+/// it) + a human `dest` string. `AWS_ENDPOINT_URL` can override the
+/// endpoint at upload time without changing what `emit` injects.
+fn artifact_s3(
+    cfg: &AthenaConfig,
+    krate: &str,
+    version: &str,
+    bin: &str,
+) -> (S3Ref, String) {
+    let key = render_key(&cfg.artifact.key, krate, version, bin);
+    let repo = &cfg.artifact_repository.s3;
+    // Same field mapping core uses to emit the binary artifact.
+    let s3 = S3Ref {
+        endpoint: repo.endpoint.clone(),
+        bucket: repo.bucket.clone(),
+        region: repo.region.clone(),
+        insecure: repo.insecure,
+        key: key.clone(),
+    };
+    let dest = format!("s3://{}/{} (endpoint {})", s3.bucket, key, s3.endpoint);
+    (s3, dest)
+}
+
+fn do_upload(s3: &S3Ref, path: &std::path::Path, dest: &str) {
+    eprintln!("uploading {}  ->  {dest}", path.display());
+    emulate::s3_put(s3, path);
+    eprintln!("published.");
+    // Scriptable: the destination on stdout (all else on stderr).
+    println!("s3://{}/{}", s3.bucket, s3.key);
+}
+
 /// Resolve the key + print the plan, then (unless `print`)
 /// cross-compile every target and package one tarball. Returns
 /// `(tarball_path, S3Ref, dest)` for the caller to upload, or `None` on
@@ -333,18 +376,7 @@ fn build_tarball(
         cli_targets.to_vec()
     };
 
-    let key = render_key(&cfg.artifact.key, &krate, &version, &bin);
-    let repo = &cfg.artifact_repository.s3;
-    // Same field mapping core uses to emit the binary artifact, so the
-    // upload lands exactly where emit/submit/emulate read it.
-    let s3 = S3Ref {
-        endpoint: repo.endpoint.clone(),
-        bucket: repo.bucket.clone(),
-        region: repo.region.clone(),
-        insecure: repo.insecure,
-        key: key.clone(),
-    };
-    let dest = format!("s3://{}/{} (endpoint {})", s3.bucket, key, s3.endpoint);
+    let (s3, dest) = artifact_s3(&cfg, &krate, &version, &bin);
     let tarball = format!("target/athena/{bin}.tar.gz");
 
     eprintln!("crate={krate} version={version} bin={bin}");
@@ -355,7 +387,7 @@ fn build_tarball(
         );
     }
     eprintln!("tarball: {tarball}");
-    eprintln!("upload key: {key}");
+    eprintln!("upload key: {}", s3.key);
     eprintln!("destination: {dest}");
 
     if print {
@@ -405,25 +437,45 @@ fn build_tarball(
     Some((tarball, s3, dest))
 }
 
-// ---- publish (build + upload) ---------------------------------------------
+// ---- publish (build + upload, or --tarball: upload prebuilt) --------------
 
-/// One-shot: `build_tarball` (cross-compile + package) then upload to
-/// the `athena.toml` repo via the shared `emulate::s3_put`
-/// (`object_store`, `AWS_*` creds — the path `submit`/`emulate` use).
+/// Default: `build_tarball` (cross-compile + package) then upload.
+/// `--tarball F`: skip the build and upload `F` verbatim (build-once /
+/// upload-many — a CI artifact, or the kind e2e dogfood). Upload goes
+/// through the shared `emulate::s3_put` (`object_store`, `AWS_*` creds;
+/// `AWS_ENDPOINT_URL` overrides the endpoint) — same path as
+/// `submit`/`emulate`.
 fn publish(
     package: Option<&str>,
     bin: Option<&str>,
     cli_targets: &[String],
+    tarball_in: Option<&str>,
     print: bool,
 ) {
+    if let Some(path) = tarball_in {
+        let cfg = AthenaConfig::load();
+        let (krate, version, default_bin) = package_meta(package);
+        let bin = bin.map(str::to_string).unwrap_or(default_bin);
+        let (s3, dest) = artifact_s3(&cfg, &krate, &version, &bin);
+        let p = std::path::Path::new(path);
+        if !p.exists() {
+            eprintln!("no tarball at {path}");
+            exit(1);
+        }
+        eprintln!("crate={krate} version={version} bin={bin}");
+        eprintln!("upload key: {}", s3.key);
+        eprintln!("destination: {dest}");
+        if print {
+            eprintln!("(--print) would upload {path}");
+            return;
+        }
+        do_upload(&s3, p, &dest);
+        return;
+    }
     let Some((tarball, s3, dest)) =
         build_tarball(package, bin, cli_targets, print)
     else {
         return; // --print dry run: nothing built, nothing to upload
     };
-    eprintln!("uploading {tarball}  ->  {dest}");
-    emulate::s3_put(&s3, std::path::Path::new(&tarball));
-    eprintln!("published.");
-    // Scriptable: the destination on stdout (all else on stderr).
-    println!("s3://{}/{}", s3.bucket, s3.key);
+    do_upload(&s3, std::path::Path::new(&tarball), &dest);
 }

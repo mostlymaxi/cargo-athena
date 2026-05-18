@@ -65,13 +65,19 @@ else
 fi
 test -f "$TARBALL" || { echo "missing $TARBALL"; exit 1; }
 
-say "upload binary tarball to MinIO"
+say "upload binary tarball (cargo athena publish --tarball — dogfood)"
 kubectl -n "$NS" port-forward svc/minio 9000:9000 >/dev/null 2>&1 &
 PF=$!
 until (exec 3<>/dev/tcp/127.0.0.1/9000) 2>/dev/null; do sleep 1; done
 mc alias set athena-e2e http://127.0.0.1:9000 athena athena12345 >/dev/null
-mc cp "$TARBALL" \
-  athena-e2e/athena-artifacts/athena/bin/e2e/0.1.0/e2e.tar.gz
+# Dogfood `publish` instead of a hardcoded `mc cp`: it derives the key
+# from the SAME athena.toml `emit` uses (no key drift). athena.toml's
+# endpoint is the in-cluster MinIO DNS (what the pods resolve);
+# AWS_ENDPOINT_URL points this runner-side upload at the port-forward.
+( cd "$ROOT" && AWS_ACCESS_KEY_ID=athena AWS_SECRET_ACCESS_KEY=athena12345 \
+    AWS_ENDPOINT_URL=http://127.0.0.1:9000 \
+    cargo run -q -p cargo-athena --bin cargo-athena -- athena publish \
+      --package "$PKG" --bin "$BIN" --tarball "$TARBALL" )
 
 say "emit WorkflowTemplates + Workflow"
 # --with-workflow: this script splits out the runnable Workflow doc and
