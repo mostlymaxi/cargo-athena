@@ -29,6 +29,18 @@ jobs:
             extra-substituters = https://nix-community.cachix.org
             extra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=
             accept-flake-config = true
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          # Re-trialing the community Nix-store cache (removed before for
+          # GC/symlink/perms breakage on Determinate runners) now that the
+          # CI shell is lean — watch for those failure modes recurring.
+          primary-key: nix-${{ runner.os }}-ci-${{ hashFiles('flake.lock', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-ci-
+          gc-max-store-size-linux: 2G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-ci-
+          purge-created: 0
+          purge-primary-key: never
       - uses: actions/cache@v4
         with:
           path: |
@@ -37,4 +49,4 @@ jobs:
             target
           key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
-      - run: nix develop -c cargo test --workspace
+      - run: nix develop .#ci -c cargo test --workspace

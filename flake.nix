@@ -53,6 +53,31 @@
         # Single source of truth for the version (workspace Cargo.toml).
         version =
           (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+
+        # One source of truth for the dev tooling. The full shell is the
+        # lean CI shell PLUS the e2e/docs tooling. CI's test/clippy only
+        # compile, so they use `.#ci` and skip substituting the ~10 heavy
+        # tools (kind/kubectl/argo/zig/mdbook/…) on every fresh runner.
+        ciPackages = [ rustToolchain ];
+        devPackages = ciPackages ++ [
+          pkgs.cargo-watch
+          pkgs.cargo-edit
+          pkgs.cargo-nextest
+          # static-musl cross-compilation for `cargo athena build`.
+          pkgs.cargo-zigbuild
+          pkgs.zig
+          # kind e2e: cluster + Argo + MinIO. Needs a host Docker or
+          # Podman daemon (not a nix package — provided by the host).
+          pkgs.kind
+          pkgs.kubectl
+          pkgs.argo-workflows
+          pkgs.minio-client
+          pkgs.jq
+          # Documentation site (docs/, published to GitHub Pages).
+          pkgs.mdbook
+        ];
+        # Lets rust-analyzer find the standard library sources.
+        rustSrcEnv = "${rustToolchain}/lib/rustlib/src/rust/library";
       in
       {
         # `nix build` / `nix profile install github:mostlymaxi/cargo-athena`
@@ -90,31 +115,18 @@
         };
 
         devShells.default = pkgs.mkShell {
-          packages = [
-            rustToolchain
-            pkgs.cargo-watch
-            pkgs.cargo-edit
-            pkgs.cargo-nextest
-            # static-musl cross-compilation for `cargo athena build`.
-            pkgs.cargo-zigbuild
-            pkgs.zig
-            # kind e2e: cluster + Argo + MinIO. Needs a host Docker or
-            # Podman daemon (not a nix package — provided by the host).
-            pkgs.kind
-            pkgs.kubectl
-            pkgs.argo-workflows
-            pkgs.minio-client
-            pkgs.jq
-            # Documentation site (docs/, published to GitHub Pages).
-            pkgs.mdbook
-          ];
-
-          # Lets rust-analyzer find the standard library sources.
-          env.RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
-
+          packages = devPackages;
+          env.RUST_SRC_PATH = rustSrcEnv;
           shellHook = ''
             echo "cargo-athena dev shell — $(rustc --version)"
           '';
+        };
+
+        # Lean shell for compile-only CI (test/clippy): toolchain only,
+        # so `nix develop .#ci` doesn't substitute the e2e/docs closure.
+        devShells.ci = pkgs.mkShell {
+          packages = ciPackages;
+          env.RUST_SRC_PATH = rustSrcEnv;
         };
 
         formatter = pkgs.nixfmt-rfc-style;
