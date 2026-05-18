@@ -103,9 +103,7 @@ fn decl_kind(mac: &syn::Macro) -> Option<(DeclKind, &'static str)> {
 /// `save_artifact!("n", expr)` → `"n"`). Literal-only by contract.
 fn first_str_lit(mac: &syn::Macro) -> Option<String> {
     let args = mac
-        .parse_body_with(
-            syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated,
-        )
+        .parse_body_with(syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated)
         .ok()?;
     match args.first()? {
         Expr::Lit(syn::ExprLit {
@@ -194,9 +192,7 @@ fn make_argo_name(name_override: &Option<String>, rust_name: &str) -> String {
 /// numeric/sexagesimal forms, so only the word set can ever fire.)
 fn yaml_ambiguous(s: &str) -> Option<&'static str> {
     match s.to_ascii_lowercase().as_str() {
-        "y" | "yes" | "n" | "no" | "true" | "false" | "on" | "off" => {
-            Some("a YAML 1.1 boolean")
-        }
+        "y" | "yes" | "n" | "no" | "true" | "false" | "on" | "off" => Some("a YAML 1.1 boolean"),
         "null" | "~" => Some("a YAML 1.1 null"),
         _ => None,
     }
@@ -207,10 +203,7 @@ fn yaml_ambiguous(s: &str) -> Option<&'static str> {
 /// the offending token so the fix is obvious. Synthetic `if`/`else`
 /// wrappers reuse the `#[workflow]` codegen path, so their captured
 /// inputs are covered by the same check.
-fn check_yaml_safe_names(
-    func: &ItemFn,
-    name_override: &Option<String>,
-) -> Result<(), TokenStream> {
+fn check_yaml_safe_names(func: &ItemFn, name_override: &Option<String>) -> Result<(), TokenStream> {
     for (ident, _) in fn_args(func) {
         if let Some(why) = yaml_ambiguous(&ident.to_string()) {
             let n = ident.to_string();
@@ -316,8 +309,7 @@ struct DeclRewrite;
 impl VisitMut for DeclRewrite {
     fn visit_macro_mut(&mut self, mac: &mut syn::Macro) {
         if let Some((_, private)) = decl_kind(mac) {
-            let p: syn::Path =
-                syn::parse_str(&format!("::cargo_athena::{private}")).unwrap();
+            let p: syn::Path = syn::parse_str(&format!("::cargo_athena::{private}")).unwrap();
             mac.path = p;
         }
         syn::visit_mut::visit_macro_mut(self, mac);
@@ -338,12 +330,7 @@ fn with_host_rewritten(func: &ItemFn) -> ItemFn {
 fn is_builder_method(m: &syn::Ident) -> bool {
     matches!(
         m.to_string().as_str(),
-        "continue_on"
-            | "on_exit"
-            | "on_success"
-            | "on_failure"
-            | "on_error"
-            | "hook_if"
+        "continue_on" | "on_exit" | "on_success" | "on_failure" | "on_error" | "hook_if"
     )
 }
 
@@ -457,29 +444,20 @@ fn inject_lower(
             }
             path.reverse();
             let Expr::Path(p) = cur else {
-                return Err(syn::Error::new_spanned(
-                    cur,
-                    UNSUPPORTED_INJECT,
-                ));
+                return Err(syn::Error::new_spanned(cur, UNSUPPORTED_INJECT));
             };
             if p.path.segments.len() != 1 {
-                return Err(syn::Error::new_spanned(
-                    cur,
-                    UNSUPPORTED_INJECT,
-                ));
+                return Err(syn::Error::new_spanned(cur, UNSUPPORTED_INJECT));
             }
             let root = p.path.segments[0].ident.to_string();
             if !args.contains(&root) {
                 return Err(syn::Error::new_spanned(
                     cur,
-                    format!(
-                        "`{root}` is not a parameter of this #[container]."
-                    ),
+                    format!("`{root}` is not a parameter of this #[container]."),
                 ));
             }
             ops.push(unwrap_expr(e).clone());
-            let acc: String =
-                path.iter().map(|f| format!("['{f}']")).collect();
+            let acc: String = path.iter().map(|f| format!("['{f}']")).collect();
             Ok(format!(
                 "{{{{=fromJSON(inputs.parameters['{root}']){acc}}}}}"
             ))
@@ -521,8 +499,10 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let arg_names: Vec<String> = arg_idents.iter().map(|i| i.to_string()).collect();
 
     // Argo delivers params via container env so the binary can read them.
-    let param_env_names: Vec<String> =
-        arg_names.iter().map(|n| format!("ATHENA_PARAM_{n}")).collect();
+    let param_env_names: Vec<String> = arg_names
+        .iter()
+        .map(|n| format!("ATHENA_PARAM_{n}"))
+        .collect();
     let param_env_vals: Vec<String> = arg_names
         .iter()
         .map(|n| format!("{{{{inputs.parameters.{n}}}}}"))
@@ -530,8 +510,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let inputs_slice = str_slice(&arg_names);
     // Stringified arg types, parallel to INPUTS — `container emulate`
     // type-checks supplied params against these before launching.
-    let arg_type_strs: Vec<String> =
-        arg_types.iter().map(|t| quote!(#t).to_string()).collect();
+    let arg_type_strs: Vec<String> = arg_types.iter().map(|t| quote!(#t).to_string()).collect();
     let input_types_slice = str_slice(&arg_type_strs);
     let host_slice = str_slice(&scan.host_paths);
     let in_art_slice = str_slice(&scan.in_artifacts);
@@ -540,8 +519,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Lower the injectable attribute values (image / service_account /
     // node_selector values) — a string literal stays verbatim; a
     // `+`-concat injects args as `{{=fromJSON(inputs.parameters[..])}}`.
-    let argset: std::collections::HashSet<String> =
-        arg_names.iter().cloned().collect();
+    let argset: std::collections::HashSet<String> = arg_names.iter().cloned().collect();
     let mut inject_ops: Vec<Expr> = Vec::new();
     let image_s = match cfg
         .image
@@ -893,10 +871,9 @@ fn expr_to_arg(
         // "7" round-tripping as a number) and lets attribute
         // interpolation always use `{{=fromJSON(...)}}`.
         Expr::Lit(syn::ExprLit { lit, .. }) => Ok(match lit {
-            syn::Lit::Str(s) => Arg::Lit(
-                serde_json::to_string(&s.value())
-                    .expect("string is JSON-serializable"),
-            ),
+            syn::Lit::Str(s) => {
+                Arg::Lit(serde_json::to_string(&s.value()).expect("string is JSON-serializable"))
+            }
             // `base10_digits()` is already a valid JSON number.
             syn::Lit::Int(i) => Arg::Lit(i.base10_digits().to_string()),
             syn::Lit::Float(f) => Arg::Lit(f.base10_digits().to_string()),
@@ -916,36 +893,32 @@ fn expr_to_arg(
         //    a binding/input that would mismatch the ghost's type and
         //    break the (de)serialize contract. Restrict them to a string
         //    literal (where they're an identity for the emit).
-        Expr::MethodCall(mc) if mc.args.is_empty() => {
-            match mc.method.to_string().as_str() {
-                "clone" | "to_owned" => {
+        Expr::MethodCall(mc) if mc.args.is_empty() => match mc.method.to_string().as_str() {
+            "clone" | "to_owned" => expr_to_arg(&mc.receiver, bindings, inputs),
+            "to_string" | "into" => {
+                if matches!(
+                    unwrap_expr(&mc.receiver),
+                    Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(_),
+                        ..
+                    })
+                ) {
                     expr_to_arg(&mc.receiver, bindings, inputs)
-                }
-                "to_string" | "into" => {
-                    if matches!(
-                        unwrap_expr(&mc.receiver),
-                        Expr::Lit(syn::ExprLit {
-                            lit: syn::Lit::Str(_),
-                            ..
-                        })
-                    ) {
-                        expr_to_arg(&mc.receiver, bindings, inputs)
-                    } else {
-                        Err(syn::Error::new_spanned(
-                            mc,
-                            "`.to_string()`/`.into()` in a #[workflow] arg \
+                } else {
+                    Err(syn::Error::new_spanned(
+                        mc,
+                        "`.to_string()`/`.into()` in a #[workflow] arg \
                              is only allowed on a string literal. On a \
                              binding/input the value already has the right \
                              serialized type; converting it would mismatch \
                              the emitted Argo parameter (the raw serialized \
                              value) and break the (de)serialize contract — \
                              pass it directly, or `.clone()` to fan out.",
-                        ))
-                    }
+                    ))
                 }
-                _ => Err(syn::Error::new_spanned(mc, UNSUPPORTED_ARG)),
             }
-        }
+            _ => Err(syn::Error::new_spanned(mc, UNSUPPORTED_ARG)),
+        },
         Expr::Path(p) if p.path.segments.len() == 1 => {
             let name = p.path.segments[0].ident.to_string();
             if let Some(task) = bindings.get(&name) {
@@ -1030,11 +1003,7 @@ fn resolve_arg(
     if let Some(it) = item {
         let mut cur = unwrap_expr(e);
         while let Expr::MethodCall(mc) = cur {
-            if mc.args.is_empty()
-                && matches!(
-                    mc.method.to_string().as_str(),
-                    "clone" | "to_owned"
-                )
+            if mc.args.is_empty() && matches!(mc.method.to_string().as_str(), "clone" | "to_owned")
             {
                 cur = unwrap_expr(&mc.receiver);
             } else {
@@ -1168,7 +1137,10 @@ enum WhenOp {
     /// A parent `#[workflow]` input parameter.
     Input(String),
     /// `a.b.c` named-field access (same lowering as `Arg::Json`).
-    Json { src: JsonSrc, path: Vec<String> },
+    Json {
+        src: JsonSrc,
+        path: Vec<String>,
+    },
     Str(String),
     Int(String),
     Bool(bool),
@@ -1266,9 +1238,9 @@ fn cond_to_when(
                 _ => Err(syn::Error::new_spanned(b, UNSUPPORTED_COND)),
             }
         }
-        Expr::Unary(u) if matches!(u.op, syn::UnOp::Not(_)) => Ok(
-            WhenExpr::Not(Box::new(cond_to_when(&u.expr, bindings, inputs)?)),
-        ),
+        Expr::Unary(u) if matches!(u.op, syn::UnOp::Not(_)) => Ok(WhenExpr::Not(Box::new(
+            cond_to_when(&u.expr, bindings, inputs)?,
+        ))),
         // A bare operand condition: `if flag` / `if a.enabled`.
         other => Ok(WhenExpr::Truthy(cond_operand(other, bindings, inputs)?)),
     }
@@ -1337,24 +1309,12 @@ fn hoist_cond(
             let mut nb = b.clone();
             let (l, r) = match b.op {
                 Eq(_) | Ne(_) | Lt(_) | Le(_) | Gt(_) | Ge(_) => (
-                    hoist_operand(
-                        &b.left, used, nodes, bindings, inputs, seen,
-                        cond_binds,
-                    )?,
-                    hoist_operand(
-                        &b.right, used, nodes, bindings, inputs, seen,
-                        cond_binds,
-                    )?,
+                    hoist_operand(&b.left, used, nodes, bindings, inputs, seen, cond_binds)?,
+                    hoist_operand(&b.right, used, nodes, bindings, inputs, seen, cond_binds)?,
                 ),
                 And(_) | Or(_) => (
-                    hoist_cond(
-                        &b.left, used, nodes, bindings, inputs, seen,
-                        cond_binds,
-                    )?,
-                    hoist_cond(
-                        &b.right, used, nodes, bindings, inputs, seen,
-                        cond_binds,
-                    )?,
+                    hoist_cond(&b.left, used, nodes, bindings, inputs, seen, cond_binds)?,
+                    hoist_cond(&b.right, used, nodes, bindings, inputs, seen, cond_binds)?,
                 ),
                 _ => return Ok(e.clone()),
             };
@@ -1369,9 +1329,7 @@ fn hoist_cond(
             )?);
             Ok(Expr::Unary(nu))
         }
-        _ => hoist_operand(
-            e, used, nodes, bindings, inputs, seen, cond_binds,
-        ),
+        _ => hoist_operand(e, used, nodes, bindings, inputs, seen, cond_binds),
     }
 }
 
@@ -1410,9 +1368,7 @@ fn hook_target(arg: &Expr) -> syn::Result<(Path, Vec<Expr>)> {
 
 /// The single template-target arg of `.on_exit/.on_success/.on_failure/
 /// .on_error(t)` (exactly one).
-fn single_hook_target(
-    mc: &syn::ExprMethodCall,
-) -> syn::Result<(Path, Vec<Expr>)> {
+fn single_hook_target(mc: &syn::ExprMethodCall) -> syn::Result<(Path, Vec<Expr>)> {
     let mut it = mc.args.iter();
     let (Some(arg), None) = (it.next(), it.next()) else {
         return Err(syn::Error::new_spanned(
@@ -1439,7 +1395,8 @@ fn peel_builders(e: &Expr) -> syn::Result<(&Expr, NodeOpts)> {
             "continue_on" => {
                 if opts.continue_on.is_some() {
                     return Err(syn::Error::new_spanned(
-                        mc, "`.continue_on(...)` specified more than once.",
+                        mc,
+                        "`.continue_on(...)` specified more than once.",
                     ));
                 }
                 if mc.args.is_empty() {
@@ -1467,7 +1424,8 @@ fn peel_builders(e: &Expr) -> syn::Result<(&Expr, NodeOpts)> {
             "on_exit" => {
                 if on_exit_seen {
                     return Err(syn::Error::new_spanned(
-                        mc, "`.on_exit(...)` specified more than once.",
+                        mc,
+                        "`.on_exit(...)` specified more than once.",
                     ));
                 }
                 on_exit_seen = true;
@@ -1512,7 +1470,8 @@ fn peel_builders(e: &Expr) -> syn::Result<(&Expr, NodeOpts)> {
                     };
                     let expression = match unwrap_expr(&asn.left) {
                         Expr::Lit(syn::ExprLit {
-                            lit: syn::Lit::Str(s), ..
+                            lit: syn::Lit::Str(s),
+                            ..
                         }) => s.value(),
                         _ => {
                             return Err(syn::Error::new_spanned(
@@ -1693,8 +1652,7 @@ fn when_op_str(o: &WhenOp) -> String {
             format!("{{{{tasks.{t}.outputs.parameters.return}}}}")
         }
         WhenOp::Json { src, path } => {
-            let acc: String =
-                path.iter().map(|f| format!("['{f}']")).collect();
+            let acc: String = path.iter().map(|f| format!("['{f}']")).collect();
             let refexpr = match src {
                 JsonSrc::Task(t) => {
                     format!("tasks['{t}'].outputs.parameters['return']")
@@ -1715,12 +1673,9 @@ fn when_op_str(o: &WhenOp) -> String {
 /// on expr-lang's precedence table (valid-by-construction).
 fn render_when(w: &WhenExpr) -> String {
     match w {
-        WhenExpr::Cmp { lhs, op, rhs } => format!(
-            "({} {} {})",
-            when_op_str(lhs),
-            op.argo(),
-            when_op_str(rhs)
-        ),
+        WhenExpr::Cmp { lhs, op, rhs } => {
+            format!("({} {} {})", when_op_str(lhs), op.argo(), when_op_str(rhs))
+        }
         WhenExpr::And(a, b) => {
             format!("({} && {})", render_when(a), render_when(b))
         }
@@ -1825,10 +1780,7 @@ fn callee_paths(nodes: &[Node], extra: &[Path]) -> Vec<Path> {
     let mut seen = std::collections::HashSet::new();
     nodes
         .iter()
-        .flat_map(|n| {
-            std::iter::once(&n.callee)
-                .chain(n.hooks.iter().map(|h| &h.template))
-        })
+        .flat_map(|n| std::iter::once(&n.callee).chain(n.hooks.iter().map(|h| &h.template)))
         .chain(extra.iter())
         .filter(|p| seen.insert(quote!(#p).to_string()))
         .cloned()
@@ -1865,10 +1817,8 @@ fn synth_if(
     // (`if foo() > 3` → a parent `foo` node + `__athena_cond_N` ref);
     // identical calls share one task. Conditions are then plain
     // binding/input/field/literal expressions again.
-    let mut seen_calls: std::collections::HashMap<String, syn::Ident> =
-        Default::default();
-    let mut cond_binds: std::collections::HashMap<String, String> =
-        Default::default();
+    let mut seen_calls: std::collections::HashMap<String, syn::Ident> = Default::default();
+    let mut cond_binds: std::collections::HashMap<String, String> = Default::default();
     let arms: Vec<(Option<Expr>, syn::Block)> = arms
         .into_iter()
         .map(|(c, b)| -> syn::Result<_> {
@@ -1910,10 +1860,7 @@ fn synth_if(
         pushref(rs, &mut refset);
         if let Some(c) = cond {
             pushref(
-                referenced_idents(std::slice::from_ref(&Stmt::Expr(
-                    c.clone(),
-                    None,
-                ))),
+                referenced_idents(std::slice::from_ref(&Stmt::Expr(c.clone(), None))),
                 &mut refset,
             );
         }
@@ -1935,22 +1882,19 @@ fn synth_if(
         }
     }
     // Capture scope: inside the wrapper/arms every capture is an input.
-    let cap_inputs: std::collections::HashSet<String> =
-        captures.iter().cloned().collect();
+    let cap_inputs: std::collections::HashSet<String> = captures.iter().cloned().collect();
     let empty_bindings = std::collections::HashMap::new();
 
     let k = ctx.if_ctr;
     ctx.if_ctr += 1;
-    let wrap_ident =
-        format_ident!("__athena_{}_if{}", ctx.parent_rust, k);
+    let wrap_ident = format_ident!("__athena_{}_if{}", ctx.parent_rust, k);
     let wrap_argo = format!("{}-if{}", ctx.parent_argo, k);
 
     // One sub-workflow + one when-gated wrapper task per arm.
     let mut wrap_nodes: Vec<Node> = Vec::new();
     let mut arm_tasks: Vec<String> = Vec::new();
     for (j, (_, body)) in arms.iter().enumerate() {
-        let arm_ident =
-            format_ident!("__athena_{}_if{}_arm{}", ctx.parent_rust, k, j);
+        let arm_ident = format_ident!("__athena_{}_if{}_arm{}", ctx.parent_rust, k, j);
         let arm_argo = format!("{wrap_argo}-arm{j}");
         let (anodes, aout) = analyze_stmts(
             &body.stmts,
@@ -1985,19 +1929,12 @@ fn synth_if(
             if let Some(c) = cond {
                 conj(
                     &mut gate,
-                    WhenExpr::Not(Box::new(cond_to_when(
-                        c,
-                        &empty_bindings,
-                        &cap_inputs,
-                    )?)),
+                    WhenExpr::Not(Box::new(cond_to_when(c, &empty_bindings, &cap_inputs)?)),
                 );
             }
         }
         if let Some(c) = &arms[j].0 {
-            conj(
-                &mut gate,
-                cond_to_when(c, &empty_bindings, &cap_inputs)?,
-            );
+            conj(&mut gate, cond_to_when(c, &empty_bindings, &cap_inputs)?);
         }
         let task = format!("arm{j}");
         arm_tasks.push(task.clone());
@@ -2071,8 +2008,7 @@ fn analyze_stmts(
     rust_self: &str,
     ctx: &mut SynthCtx,
 ) -> syn::Result<(Vec<Node>, Option<String>)> {
-    let mut bindings: std::collections::HashMap<String, String> =
-        Default::default();
+    let mut bindings: std::collections::HashMap<String, String> = Default::default();
     let mut used: std::collections::HashSet<String> = Default::default();
     let mut nodes: Vec<Node> = Vec::new();
     let mut output_task: Option<String> = None;
@@ -2113,13 +2049,9 @@ fn analyze_stmts(
                     )?
                 } else {
                     let (base_expr, opts) = peel_builders(&init.expr)?;
-                    if let Some((recv, item, callee, raw)) =
-                        fan_parts(base_expr)
-                    {
+                    if let Some((recv, item, callee, raw)) = fan_parts(base_expr) {
                         let fsrc = fan_src(&recv, &bindings, inputs)?;
-                        let base = bind
-                            .clone()
-                            .unwrap_or_else(|| path_leaf(&callee));
+                        let base = bind.clone().unwrap_or_else(|| path_leaf(&callee));
                         push_call(
                             callee,
                             raw,
@@ -2133,26 +2065,12 @@ fn analyze_stmts(
                             inputs,
                         )?
                     } else {
-                        let (callee, raw) = call_parts(base_expr)
-                            .ok_or_else(|| {
-                                syn::Error::new_spanned(
-                                    &init.expr,
-                                    NOT_A_TEMPLATE_CALL,
-                                )
-                            })?;
-                        let base = bind
-                            .clone()
-                            .unwrap_or_else(|| path_leaf(&callee));
+                        let (callee, raw) = call_parts(base_expr).ok_or_else(|| {
+                            syn::Error::new_spanned(&init.expr, NOT_A_TEMPLATE_CALL)
+                        })?;
+                        let base = bind.clone().unwrap_or_else(|| path_leaf(&callee));
                         push_call(
-                            callee,
-                            raw,
-                            &base,
-                            opts,
-                            None,
-                            None,
-                            &mut used,
-                            &mut nodes,
-                            &bindings,
+                            callee, raw, &base, opts, None, None, &mut used, &mut nodes, &bindings,
                             inputs,
                         )?
                     }
@@ -2165,14 +2083,7 @@ fn analyze_stmts(
                 if let Expr::If(ei) = unwrap_expr(expr) {
                     let value = is_last && semi.is_none() && want_output;
                     let task = synth_if(
-                        ei,
-                        None,
-                        value,
-                        &bindings,
-                        inputs,
-                        &mut used,
-                        &mut nodes,
-                        ctx,
+                        ei, None, value, &bindings, inputs, &mut used, &mut nodes, ctx,
                     )?;
                     if value {
                         output_task = Some(task);
@@ -2186,24 +2097,13 @@ fn analyze_stmts(
                     })?;
                     if let Expr::If(ei) = unwrap_expr(target) {
                         output_task = Some(synth_if(
-                            ei,
-                            None,
-                            true,
-                            &bindings,
-                            inputs,
-                            &mut used,
-                            &mut nodes,
-                            ctx,
+                            ei, None, true, &bindings, inputs, &mut used, &mut nodes, ctx,
                         )?);
                     } else {
                         let (base_expr, opts) = peel_builders(target)?;
                         output_task = Some(match unwrap_expr(base_expr) {
-                            Expr::Path(p)
-                                if p.path.segments.len() == 1 =>
-                            {
-                                if opts.continue_on.is_some()
-                                    || !opts.hooks.is_empty()
-                                {
+                            Expr::Path(p) if p.path.segments.len() == 1 => {
+                                if opts.continue_on.is_some() || !opts.hooks.is_empty() {
                                     return Err(syn::Error::new_spanned(
                                         target,
                                         "`.continue_on`/`.hooks`/`.on_exit` \
@@ -2211,72 +2111,47 @@ fn analyze_stmts(
                                          call, not a returned binding.",
                                     ));
                                 }
-                                let name =
-                                    p.path.segments[0].ident.to_string();
-                                bindings.get(&name).cloned().ok_or_else(
-                                    || {
-                                        syn::Error::new_spanned(
-                                            target,
-                                            format!(
-                                                "`{name}` is returned but \
+                                let name = p.path.segments[0].ident.to_string();
+                                bindings.get(&name).cloned().ok_or_else(|| {
+                                    syn::Error::new_spanned(
+                                        target,
+                                        format!(
+                                            "`{name}` is returned but \
                                                  isn't a binding from a \
                                                  `let = template(...)`."
-                                            ),
-                                        )
-                                    },
-                                )?
+                                        ),
+                                    )
+                                })?
                             }
                             _ => {
-                                let (callee, raw) = call_parts(base_expr)
-                                    .ok_or_else(|| {
-                                        syn::Error::new_spanned(
-                                            target,
-                                            NOT_A_TEMPLATE_CALL,
-                                        )
-                                    })?;
+                                let (callee, raw) = call_parts(base_expr).ok_or_else(|| {
+                                    syn::Error::new_spanned(target, NOT_A_TEMPLATE_CALL)
+                                })?;
                                 let base = path_leaf(&callee);
                                 push_call(
-                                    callee,
-                                    raw,
-                                    &base,
-                                    opts,
-                                    None,
-                                    None,
-                                    &mut used,
-                                    &mut nodes,
-                                    &bindings,
-                                    inputs,
+                                    callee, raw, &base, opts, None, None, &mut used, &mut nodes,
+                                    &bindings, inputs,
                                 )?
                             }
                         });
                     }
                 } else if let Expr::Path(p) = unwrap_expr(expr) {
-                    if !(is_last
-                        && semi.is_none()
-                        && p.path.segments.len() == 1)
-                    {
-                        return Err(syn::Error::new_spanned(
-                            expr,
-                            UNSUPPORTED_STMT,
-                        ));
+                    if !(is_last && semi.is_none() && p.path.segments.len() == 1) {
+                        return Err(syn::Error::new_spanned(expr, UNSUPPORTED_STMT));
                     }
                     let name = p.path.segments[0].ident.to_string();
-                    output_task = Some(
-                        bindings.get(&name).cloned().ok_or_else(|| {
-                            syn::Error::new_spanned(
-                                expr,
-                                format!(
-                                    "`{name}` is returned but isn't a \
+                    output_task = Some(bindings.get(&name).cloned().ok_or_else(|| {
+                        syn::Error::new_spanned(
+                            expr,
+                            format!(
+                                "`{name}` is returned but isn't a \
                                      binding from a `let = template(...)`."
-                                ),
-                            )
-                        })?,
-                    );
+                            ),
+                        )
+                    })?);
                 } else {
                     let (base_expr, opts) = peel_builders(expr)?;
-                    let task = if let Some((recv, item, callee, raw)) =
-                        fan_parts(base_expr)
-                    {
+                    let task = if let Some((recv, item, callee, raw)) = fan_parts(base_expr) {
                         let fsrc = fan_src(&recv, &bindings, inputs)?;
                         let base = path_leaf(&callee);
                         push_call(
@@ -2293,23 +2168,10 @@ fn analyze_stmts(
                         )?
                     } else {
                         let (callee, raw) = call_parts(base_expr)
-                            .ok_or_else(|| {
-                                syn::Error::new_spanned(
-                                    expr,
-                                    UNSUPPORTED_STMT,
-                                )
-                            })?;
+                            .ok_or_else(|| syn::Error::new_spanned(expr, UNSUPPORTED_STMT))?;
                         let base = path_leaf(&callee);
                         push_call(
-                            callee,
-                            raw,
-                            &base,
-                            opts,
-                            None,
-                            None,
-                            &mut used,
-                            &mut nodes,
-                            &bindings,
+                            callee, raw, &base, opts, None, None, &mut used, &mut nodes, &bindings,
                             inputs,
                         )?
                     };
@@ -2345,10 +2207,8 @@ fn analyze_workflow(
     func: &ItemFn,
     parent_argo: &str,
 ) -> syn::Result<(Vec<Node>, Option<String>, Vec<SynthWf>)> {
-    let inputs: std::collections::HashSet<String> = fn_args(func)
-        .iter()
-        .map(|(i, _)| i.to_string())
-        .collect();
+    let inputs: std::collections::HashSet<String> =
+        fn_args(func).iter().map(|(i, _)| i.to_string()).collect();
     let want_output = matches!(func.sig.output, syn::ReturnType::Type(..));
     let mut ctx = SynthCtx {
         synth: Vec::new(),
@@ -2455,13 +2315,10 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
         // strings & nested structs). Bracket form is hyphen/keyword-safe.
         Arg::Json { src, path } => {
             let scope = if steps { "steps" } else { "tasks" };
-            let accessor: String =
-                path.iter().map(|f| format!("['{f}']")).collect();
+            let accessor: String = path.iter().map(|f| format!("['{f}']")).collect();
             let (refexpr, dep_push) = match src {
                 JsonSrc::Task(dep) => {
-                    let r = format!(
-                        "{scope}['{dep}'].outputs.parameters['return']"
-                    );
+                    let r = format!("{scope}['{dep}'].outputs.parameters['return']");
                     let dp = if steps {
                         quote! {}
                     } else {
@@ -2469,12 +2326,9 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                     };
                     (r, dp)
                 }
-                JsonSrc::Input(name) => {
-                    (format!("inputs.parameters['{name}']"), quote! {})
-                }
+                JsonSrc::Input(name) => (format!("inputs.parameters['{name}']"), quote! {}),
             };
-            let value =
-                format!("{{{{=toJSON(fromJSON({refexpr}){accessor})}}}}");
+            let value = format!("{{{{=toJSON(fromJSON({refexpr}){accessor})}}}}");
             quote! {
                 {
                     let __name = __inputs.get(#i).copied().unwrap_or_default().to_string();
@@ -2584,15 +2438,9 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                 when => {
                     hook_n += 1;
                     let expr = match when {
-                        HookWhen::Success => format!(
-                            "{scope}['{task}'].status == \"Succeeded\""
-                        ),
-                        HookWhen::Failure => format!(
-                            "{scope}['{task}'].status == \"Failed\""
-                        ),
-                        HookWhen::Error => format!(
-                            "{scope}['{task}'].status == \"Error\""
-                        ),
+                        HookWhen::Success => format!("{scope}['{task}'].status == \"Succeeded\""),
+                        HookWhen::Failure => format!("{scope}['{task}'].status == \"Failed\""),
+                        HookWhen::Error => format!("{scope}['{task}'].status == \"Error\""),
                         HookWhen::Raw(s) => s.clone(),
                         HookWhen::Exit => unreachable!(),
                     };
@@ -2636,19 +2484,14 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                 // no DAG dependency.
                 Arg::Json { src, path } => {
                     let s = if steps { "steps" } else { "tasks" };
-                    let accessor: String =
-                        path.iter().map(|f| format!("['{f}']")).collect();
+                    let accessor: String = path.iter().map(|f| format!("['{f}']")).collect();
                     let refexpr = match src {
-                        JsonSrc::Task(dep) => format!(
-                            "{s}['{dep}'].outputs.parameters['return']"
-                        ),
+                        JsonSrc::Task(dep) => format!("{s}['{dep}'].outputs.parameters['return']"),
                         JsonSrc::Input(name) => {
                             format!("inputs.parameters['{name}']")
                         }
                     };
-                    let value = format!(
-                        "{{{{=toJSON(fromJSON({refexpr}){accessor})}}}}"
-                    );
+                    let value = format!("{{{{=toJSON(fromJSON({refexpr}){accessor})}}}}");
                     quote! {
                         __hp.push(::cargo_athena::api::Parameter {
                             name: __hin.get(#i).copied().unwrap_or_default().to_string(),
@@ -2740,9 +2583,7 @@ fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                 quote! { __deps.push(#dep.to_string()); }
             },
         ),
-        Some(FanSrc::Input(name)) => {
-            (format!("{{{{inputs.parameters.{name}}}}}"), quote! {})
-        }
+        Some(FanSrc::Input(name)) => (format!("{{{{inputs.parameters.{name}}}}}"), quote! {}),
         None => (String::new(), quote! {}),
     };
 
@@ -2806,8 +2647,7 @@ fn emit_synth(s: &SynthWf) -> TokenStream2 {
     let ident = &s.ident;
     let argo = &s.argo_name;
     let inputs_slice = str_slice(&s.inputs);
-    let node_blocks: Vec<_> =
-        s.nodes.iter().map(|n| node_tokens(n, false)).collect();
+    let node_blocks: Vec<_> = s.nodes.iter().map(|n| node_tokens(n, false)).collect();
     let names = &s.inputs;
     let inputs_tokens = if names.is_empty() {
         quote! { ::core::option::Option::None }
@@ -2827,8 +2667,7 @@ fn emit_synth(s: &SynthWf) -> TokenStream2 {
     let outputs_tokens = match &s.output {
         SynthOut::None => quote! {},
         SynthOut::Terminal(t) => {
-            let refstr =
-                format!("{{{{tasks.{t}.outputs.parameters.return}}}}");
+            let refstr = format!("{{{{tasks.{t}.outputs.parameters.return}}}}");
             quote! {
                 outputs: ::core::option::Option::Some(
                     ::cargo_athena::api::Outputs {
@@ -2948,18 +2787,13 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         .to_compile_error()
         .into();
     }
-    let (nodes, output_task, synths) =
-        match analyze_workflow(&func, &argo_name) {
-            Ok(v) => v,
-            Err(e) => return e.to_compile_error().into(),
-        };
-    let node_blocks: Vec<_> = nodes
-        .iter()
-        .map(|n| node_tokens(n, steps_mode))
-        .collect();
+    let (nodes, output_task, synths) = match analyze_workflow(&func, &argo_name) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let node_blocks: Vec<_> = nodes.iter().map(|n| node_tokens(n, steps_mode)).collect();
     // Synthesized `if` wrappers/arms, emitted flat as sibling items.
-    let synth_items: Vec<TokenStream2> =
-        synths.iter().map(emit_synth).collect();
+    let synth_items: Vec<TokenStream2> = synths.iter().map(emit_synth).collect();
 
     // A returned value bubbles the terminal task's `return` up as this
     // template's own `outputs.parameters.return`, so a parent can wire
@@ -2968,8 +2802,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
     let outputs_tokens = match &output_task {
         Some(t) => {
             let scope = if steps_mode { "steps" } else { "tasks" };
-            let refstr =
-                format!("{{{{{scope}.{t}.outputs.parameters.return}}}}");
+            let refstr = format!("{{{{{scope}.{t}.outputs.parameters.return}}}}");
             quote! {
                 outputs: ::core::option::Option::Some(
                     ::cargo_athena::api::Outputs {
@@ -2998,18 +2831,12 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut seen_callees = std::collections::HashSet::new();
     let callee_paths: Vec<&Path> = nodes
         .iter()
-        .flat_map(|n| {
-            std::iter::once(&n.callee)
-                .chain(n.hooks.iter().map(|h| &h.template))
-        })
+        .flat_map(|n| std::iter::once(&n.callee).chain(n.hooks.iter().map(|h| &h.template)))
         .chain(cfg.on_exit_if_root.iter())
         .filter(|p| seen_callees.insert(quote!(#p).to_string()))
         .collect();
 
-    let arg_names: Vec<String> = fn_args(&func)
-        .iter()
-        .map(|(i, _)| i.to_string())
-        .collect();
+    let arg_names: Vec<String> = fn_args(&func).iter().map(|(i, _)| i.to_string()).collect();
     let inputs_slice = str_slice(&arg_names);
     // Stringified arg types, parallel to INPUTS — `workflow ls` shows
     // them (same as `container ls`).

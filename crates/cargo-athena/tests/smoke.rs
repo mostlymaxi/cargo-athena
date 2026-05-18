@@ -3,7 +3,7 @@
 //! the home for "does the compiler lower things right" coverage (it
 //! supersedes the old `examples/basic` inline tests and adds more).
 
-use cargo_athena::{container, fragment, workflow, Collector, Template};
+use cargo_athena::{Collector, Template, container, fragment, workflow};
 
 // --- a representative graph ------------------------------------------------
 

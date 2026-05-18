@@ -208,12 +208,7 @@ fn cargo_run(package: Option<&str>, bin: Option<&str>) -> Command {
 
 // ---- emit -----------------------------------------------------------------
 
-fn emit(
-    package: Option<&str>,
-    bin: Option<&str>,
-    out: Option<&str>,
-    with_workflow: bool,
-) {
+fn emit(package: Option<&str>, bin: Option<&str>, out: Option<&str>, with_workflow: bool) {
     let mut cmd = cargo_run(package, bin);
     if with_workflow {
         cmd.env("CARGO_ATHENA_WITH_WORKFLOW", "1");
@@ -288,9 +283,7 @@ fn preflight_zig() {
          which is missing:\n",
     );
     if no_zigbuild {
-        msg.push_str(
-            "  - cargo-zigbuild  ->  cargo install cargo-zigbuild\n",
-        );
+        msg.push_str("  - cargo-zigbuild  ->  cargo install cargo-zigbuild\n");
     }
     if no_zig {
         msg.push_str(
@@ -306,15 +299,8 @@ fn preflight_zig() {
     exit(1);
 }
 
-fn build(
-    package: Option<&str>,
-    bin: Option<&str>,
-    cli_targets: &[String],
-    print: bool,
-) {
-    if let Some((tarball, _s3, dest)) =
-        build_tarball(package, bin, cli_targets, print)
-    {
+fn build(package: Option<&str>, bin: Option<&str>, cli_targets: &[String], print: bool) {
+    if let Some((tarball, _s3, dest)) = build_tarball(package, bin, cli_targets, print) {
         eprintln!("packaged {tarball}  ->  {dest}");
         eprintln!(
             "(`build` packages only — `cargo athena publish` does \
@@ -327,12 +313,7 @@ fn build(
 /// `athena.toml` (so an upload lands where the injected bootstrap reads
 /// it) + a human `dest` string. `AWS_ENDPOINT_URL` can override the
 /// endpoint at upload time without changing what `emit` injects.
-fn artifact_s3(
-    cfg: &AthenaConfig,
-    krate: &str,
-    version: &str,
-    bin: &str,
-) -> (S3Ref, String) {
+fn artifact_s3(cfg: &AthenaConfig, krate: &str, version: &str, bin: &str) -> (S3Ref, String) {
     let key = render_key(&cfg.artifact.key, krate, version, bin);
     let repo = &cfg.artifact_repository.s3;
     // Same field mapping core uses to emit the binary artifact.
@@ -382,9 +363,7 @@ fn build_tarball(
     eprintln!("crate={krate} version={version} bin={bin}");
     eprintln!("targets: {}", targets.join(", "));
     for t in &targets {
-        eprintln!(
-            "  cargo zigbuild --release --target {t} -p {krate} --bin {bin}  ->  app-{t}"
-        );
+        eprintln!("  cargo zigbuild --release --target {t} -p {krate} --bin {bin}  ->  app-{t}");
     }
     eprintln!("tarball: {tarball}");
     eprintln!("upload key: {}", s3.key);
@@ -472,9 +451,7 @@ fn publish(
         do_upload(&s3, p, &dest);
         return;
     }
-    let Some((tarball, s3, dest)) =
-        build_tarball(package, bin, cli_targets, print)
-    else {
+    let Some((tarball, s3, dest)) = build_tarball(package, bin, cli_targets, print) else {
         return; // --print dry run: nothing built, nothing to upload
     };
     do_upload(&s3, std::path::Path::new(&tarball), &dest);

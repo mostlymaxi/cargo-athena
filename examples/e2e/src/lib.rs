@@ -71,7 +71,6 @@ pub fn audit(msg: String) {
     println!("audit:{msg}");
 }
 
-
 /// Nested workflow that RETURNS a value (tail call's `return` becomes
 /// this template's own `outputs.parameters.return`).
 #[workflow]
@@ -129,7 +128,10 @@ pub struct Bag {
 }
 
 fn bag(tag: &str, vals: Vec<i64>) -> Bag {
-    Bag { tag: tag.to_string(), vals }
+    Bag {
+        tag: tag.to_string(),
+        vals,
+    }
 }
 
 #[container]
@@ -182,7 +184,11 @@ pub fn is_even(s: String) -> bool {
 
 #[container]
 pub fn count_true(bs: Vec<bool>) {
-    assert_eq!(bs, vec![false, true, false], "fan_out bool aggregate mis-decoded");
+    assert_eq!(
+        bs,
+        vec![false, true, false],
+        "fan_out bool aggregate mis-decoded"
+    );
     println!("OK count_true {bs:?}");
 }
 
@@ -191,8 +197,14 @@ pub fn count_true(bs: Vec<bool>) {
 #[container]
 pub fn pair(s: String) -> Vec<Bag> {
     vec![
-        Bag { tag: s.clone(), vals: vec![1] },
-        Bag { tag: s, vals: vec![2] },
+        Bag {
+            tag: s.clone(),
+            vals: vec![1],
+        },
+        Bag {
+            tag: s,
+            vals: vec![2],
+        },
     ]
 }
 

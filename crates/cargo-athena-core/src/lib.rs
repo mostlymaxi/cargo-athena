@@ -62,8 +62,7 @@ macro_rules! __athena_injectable {
     ($($t:ty),* $(,)?) => { $( impl Injectable for $t {} )* };
 }
 __athena_injectable!(
-    String, str, i8, i16, i32, i64, i128, isize, u8, u16, u32, u64,
-    u128, usize, f32, f64,
+    String, str, i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize, f32, f64,
 );
 
 /// `host!("/lit/path")` — declare a hostPath volume for the enclosing
@@ -119,8 +118,12 @@ macro_rules! load_artifact {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __cargo_athena_load_artifact {
-    ($name:literal) => { $crate::rt::load_artifact($name) };
-    ($($t:tt)*) => { ::core::compile_error!("load_artifact!(\"name\")") };
+    ($name:literal) => {
+        $crate::rt::load_artifact($name)
+    };
+    ($($t:tt)*) => {
+        ::core::compile_error!("load_artifact!(\"name\")")
+    };
 }
 
 /// Declare an Argo *input* artifact port and read it (UTF-8) at runtime.
@@ -136,8 +139,12 @@ macro_rules! load_artifact_str {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __cargo_athena_load_artifact_str {
-    ($name:literal) => { $crate::rt::load_artifact_str($name) };
-    ($($t:tt)*) => { ::core::compile_error!("load_artifact_str!(\"name\")") };
+    ($name:literal) => {
+        $crate::rt::load_artifact_str($name)
+    };
+    ($($t:tt)*) => {
+        ::core::compile_error!("load_artifact_str!(\"name\")")
+    };
 }
 
 /// Declare an Argo *output* artifact port and write bytes to it at runtime.
@@ -153,8 +160,12 @@ macro_rules! save_artifact {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __cargo_athena_save_artifact {
-    ($name:literal, $data:expr) => { $crate::rt::save_artifact($name, $data) };
-    ($($t:tt)*) => { ::core::compile_error!("save_artifact!(\"name\", data)") };
+    ($name:literal, $data:expr) => {
+        $crate::rt::save_artifact($name, $data)
+    };
+    ($($t:tt)*) => {
+        ::core::compile_error!("save_artifact!(\"name\", data)")
+    };
 }
 
 /// Declare an Argo *output* artifact port and write a string at runtime.
@@ -170,8 +181,12 @@ macro_rules! save_artifact_str {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __cargo_athena_save_artifact_str {
-    ($name:literal, $data:expr) => { $crate::rt::save_artifact_str($name, $data) };
-    ($($t:tt)*) => { ::core::compile_error!("save_artifact_str!(\"name\", data)") };
+    ($name:literal, $data:expr) => {
+        $crate::rt::save_artifact_str($name, $data)
+    };
+    ($($t:tt)*) => {
+        ::core::compile_error!("save_artifact_str!(\"name\", data)")
+    };
 }
 
 /// Runtime shims referenced by the declaration macros. Artifact ports are
@@ -264,7 +279,10 @@ pub trait Template {
     /// Run-mode body — overridden by `#[container]`; never called on a
     /// `#[workflow]`.
     fn run(_input: serde_json::Value) -> serde_json::Value {
-        panic!("`{}` is not a #[container]; nothing to run", Self::ARGO_NAME)
+        panic!(
+            "`{}` is not a #[container]; nothing to run",
+            Self::ARGO_NAME
+        )
     }
 
     /// Push self + the transitive callee closure into `out`. The macro
@@ -634,7 +652,11 @@ pub fn container_delivery(
     let mut arms = String::new();
     for triple in &cfg.bootstrap.targets {
         let arch = triple.split('-').next().unwrap_or(triple);
-        let pat = if arch == "aarch64" { "aarch64|arm64" } else { arch };
+        let pat = if arch == "aarch64" {
+            "aarch64|arm64"
+        } else {
+            arch
+        };
         arms.push_str(&format!("  {pat}) __t={triple} ;;\n"));
     }
 
@@ -891,11 +913,7 @@ impl Collector {
         }
     }
 
-    pub fn add_runner(
-        &mut self,
-        argo_name: &str,
-        run: fn(serde_json::Value) -> serde_json::Value,
-    ) {
+    pub fn add_runner(&mut self, argo_name: &str, run: fn(serde_json::Value) -> serde_json::Value) {
         self.runners.insert(argo_name.to_string(), run);
     }
 
@@ -1010,7 +1028,10 @@ impl Collector {
 }
 
 fn name_of(t: &api::WorkflowTemplate) -> String {
-    t.metadata.as_ref().map(|m| m.name.clone()).unwrap_or_default()
+    t.metadata
+        .as_ref()
+        .map(|m| m.name.clone())
+        .unwrap_or_default()
 }
 
 /// Wrap one inner Argo `template` as a standalone `WorkflowTemplate` whose
@@ -1124,8 +1145,8 @@ pub fn entrypoint<E: Template>() {
             for (k, v) in std::env::vars() {
                 if let Some(name) = k.strip_prefix("ATHENA_PARAM_") {
                     // A param is JSON if it parses, else a bare string.
-                    let val = serde_json::from_str(&v)
-                        .unwrap_or(serde_json::Value::String(v.clone()));
+                    let val =
+                        serde_json::from_str(&v).unwrap_or(serde_json::Value::String(v.clone()));
                     map.insert(name.to_string(), val);
                 }
             }
@@ -1201,8 +1222,7 @@ pub fn entrypoint<E: Template>() {
     // `cargo athena emit --with-workflow` sets this on the child so the
     // convenience runnable Workflow is appended (default: templates
     // only — deterministic, `kubectl apply`-able, GitOps-clean).
-    let with_workflow = std::env::var_os("CARGO_ATHENA_WITH_WORKFLOW")
-        .is_some_and(|v| v == "1");
+    let with_workflow = std::env::var_os("CARGO_ATHENA_WITH_WORKFLOW").is_some_and(|v| v == "1");
     print!("{}", collector.emit::<E>(with_workflow));
 }
 

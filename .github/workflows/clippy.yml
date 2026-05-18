@@ -1,7 +1,7 @@
 name: clippy
 
-# Strict clippy gate on every PR to main and on main. Separate workflow
-# (not a job in a combined `ci`) so it has its own status badge.
+# Strict format + clippy gate on every PR to main and on main. Separate
+# workflow (not a job in a combined `ci`) so it has its own status badge.
 on:
   pull_request:
     branches: [main]
@@ -51,5 +51,7 @@ jobs:
             target
           key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
+      # Formatting gate: stock rustfmt (rustfmt.toml pins only `edition`).
+      - run: nix develop .#ci -c cargo fmt --all -- --check
       # `-D warnings`: any clippy lint fails the build (strict).
       - run: nix develop .#ci -c cargo clippy --workspace --all-targets -- -D warnings
