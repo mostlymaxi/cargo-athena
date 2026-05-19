@@ -279,6 +279,13 @@ pub trait Template {
     /// Workflow-scoped pod GC strategy, from `#[…(pod_gc(strategy=..))]`.
     /// `build_templates` puts it on this template's own `spec.podGC`.
     const POD_GC: ::core::option::Option<&'static str> = None;
+    /// Root-only whole-workflow runtime cap (seconds), from
+    /// `#[…(active_deadline_if_root=..)]`. `build_templates` stamps it
+    /// on this template's own `spec.activeDeadlineSeconds` (same per-WT,
+    /// root-only plumbing as `TTL`/`POD_GC`). This is the *only* working
+    /// whole-workflow timeout: Argo applies neither `Template.timeout`
+    /// nor `Template.activeDeadlineSeconds` to dag/steps templates.
+    const ACTIVE_DEADLINE_IF_ROOT: ::core::option::Option<i64> = None;
 
     /// Build this template's inner Argo `template` object.
     fn build(ctx: &BuildCtx) -> api::Template;
@@ -874,6 +881,10 @@ pub struct Collector {
     /// `<argo name> -> podGC strategy` for every template with
     /// `pod_gc(..)`. Stamped onto that WT's `spec.podGC`.
     pod_gc: HashMap<String, String>,
+    /// `<argo name> -> activeDeadlineSeconds` for every template with
+    /// `active_deadline_if_root(..)`. Stamped onto that WT's
+    /// `spec.activeDeadlineSeconds` (same per-WT, root-only as `ttl`).
+    active_deadline: HashMap<String, i64>,
     /// `<argo name> -> stringified input types` (parallel to the
     /// template's INPUTS), for `container emulate` arg type-checking.
     types: HashMap<String, &'static [&'static str]>,
@@ -897,6 +908,7 @@ impl Collector {
             exits: HashMap::new(),
             ttl: HashMap::new(),
             pod_gc: HashMap::new(),
+            active_deadline: HashMap::new(),
             types: HashMap::new(),
             synthetic: HashSet::new(),
         }
@@ -926,6 +938,9 @@ impl Collector {
         }
         if let Some(s) = T::POD_GC {
             self.pod_gc.insert(T::ARGO_NAME.to_string(), s.to_string());
+        }
+        if let Some(s) = T::ACTIVE_DEADLINE_IF_ROOT {
+            self.active_deadline.insert(T::ARGO_NAME.to_string(), s);
         }
         if !T::INPUT_TYPES.is_empty() {
             self.types.insert(T::ARGO_NAME.to_string(), T::INPUT_TYPES);
@@ -1007,6 +1022,15 @@ impl Collector {
                     strategy: s.clone(),
                 });
             }
+            // `active_deadline_if_root` is the genuine whole-workflow
+            // runtime cap (Argo applies `Template.timeout` /
+            // `Template.activeDeadlineSeconds` to neither dag nor steps);
+            // root-only, same per-WT plumbing as `ttl`/`pod_gc`.
+            if let Some(s) = self.active_deadline.get(&name)
+                && let Some(spec) = t.spec.as_mut()
+            {
+                spec.active_deadline_seconds = Some(*s);
+            }
         }
         tpls
     }
@@ -1057,9 +1081,11 @@ impl Collector {
                         m
                     })
                     .unwrap_or_default(),
-                // Only the emit root's ttl/pod_gc reaches the runnable
-                // Workflow (same workflow-scoped reasoning as the hook).
+                // Only the emit root's ttl/pod_gc/active_deadline reaches
+                // the runnable Workflow (same workflow-scoped reasoning
+                // as the hook).
                 ttl_strategy: E::TTL,
+                active_deadline_seconds: E::ACTIVE_DEADLINE_IF_ROOT,
                 pod_gc: E::POD_GC.map(|s| api::PodGc {
                     strategy: s.to_string(),
                 }),

@@ -331,10 +331,13 @@ pub fn pipeline_ns() {
     transform(raw, 3);
 }
 
-// --- #[container]/#[workflow] retry + timeout -----------------------------
+// --- #[container]/#[workflow] retry + container timeout -------------------
 
-/// `retry(limit = N, policy = ..., backoff = "<dur>")` + `timeout` lower
-/// to template-level Argo `retryStrategy`/`timeout`.
+/// `retry(limit = N, policy = ..., backoff = <dur>)` + `timeout` lower
+/// to template-level Argo `retryStrategy`/`timeout`. Every duration
+/// (`backoff`, `timeout`) takes an int (seconds) or a humantime string
+/// and is normalized to canonical `"<n>s"`. `timeout` is
+/// `#[container]`-only (Argo no-op on dag/steps); `retry` is on both.
 #[container(retry(limit = 3, policy = "OnError", backoff = "30s"), timeout = "5m")]
 pub fn flaky() -> String {
     "ok".to_string()
@@ -368,18 +371,32 @@ pub fn pipeline_ttl() {
     cleanup();
 }
 
-// --- #[container]/#[workflow] active_deadline (per-template) --------------
+// --- timeouts: pod_running_timeout + active_deadline_if_root -------------
 
-/// `active_deadline = <secs | "1h30m">` lowers to **per-template**
-/// `Template.activeDeadlineSeconds` (per-pod; applies even when this
-/// template is `templateRef`'d — NOT root-only, unlike `ttl_if_root`).
-/// Int = seconds; string = a humantime duration.
-#[container(active_deadline = 600)]
+/// `pod_running_timeout = <secs | "1h30m">` → the pod's
+/// `Template.activeDeadlineSeconds` (kubelet hard-kills the pod after
+/// that long *running*). `#[container]`-only (Argo applies it only to
+/// container/script templates). Int = seconds; string = humantime.
+#[container(pod_running_timeout = 600)]
 pub fn slowtask() {
     println!("slowtask");
 }
 
-#[workflow(active_deadline = "1h30m")]
+/// Both timeouts on one container: `pod_running_timeout` →
+/// `Template.activeDeadlineSeconds` (5400s); `active_deadline_if_root`
+/// → this WT's own `WorkflowSpec.activeDeadlineSeconds` (3600s,
+/// root-only — the genuine whole-workflow cap).
+#[container(pod_running_timeout = "1h30m", active_deadline_if_root = 3600)]
+pub fn slowtask2() {
+    println!("slowtask2");
+}
+
+/// `active_deadline_if_root = "2h"` → this workflow's
+/// `WorkflowSpec.activeDeadlineSeconds` (7200s). The only working
+/// whole-workflow timeout — `timeout`/`pod_running_timeout` are Argo
+/// no-ops on dag/steps, so they aren't accepted on `#[workflow]`.
+#[workflow(active_deadline_if_root = "2h")]
 pub fn pipeline_deadline() {
     slowtask();
+    slowtask2();
 }
