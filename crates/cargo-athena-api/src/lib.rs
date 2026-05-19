@@ -141,6 +141,12 @@ argo! {
         /// `rename_all`, so it wins.
         #[serde(rename = "podGC")]
         pub pod_gc: Option<PodGc>,
+        /// Root-scoped Argo `WorkflowSpec.activeDeadlineSeconds` — the
+        /// genuine whole-workflow runtime cap, from
+        /// `#[…(active_deadline_if_root=..)]`. (`int64` in Argo;
+        /// camelCase of the field name already matches.) skip-empty ⇒
+        /// existing goldens stay byte-identical.
+        pub active_deadline_seconds: Option<i64>,
     }
 
     /// Argo `ttlStrategy`: delete the finished Workflow after the given

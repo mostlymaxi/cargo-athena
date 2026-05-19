@@ -234,12 +234,50 @@ README is intentionally lean (user-facing); the *why* lives here.
   referenced WT's spec. So any field in a WT's `.spec` applies ONLY
   when that WT is the submitted run; inert when `templateRef`'d as a
   sub-workflow. **Convention: spec-scoped attrs carry the `_if_root`
-  suffix** (`on_exit_if_root`, `ttl_if_root`, `pod_gc_if_root`);
-  **template-level** attrs (`retry`, `timeout`, `active_deadline` →
+  suffix** (`on_exit_if_root`, `ttl_if_root`, `pod_gc_if_root`,
+  `active_deadline_if_root`); **template-level** attrs (`retry` →
   `Template.*`) take effect per-pod even when nested and get NO
-  suffix. ttl/podGC use the same Collector plumbing as ON_EXIT
-  (`Template::TTL`/`POD_GC` consts → Collector maps keyed by
-  `ARGO_NAME` → per-WT `spec` post-pass in `build_templates`).
+  suffix. ttl/podGC/active_deadline use the same Collector plumbing as
+  ON_EXIT (`Template::TTL`/`POD_GC`/`ACTIVE_DEADLINE_IF_ROOT` consts →
+  Collector maps keyed by `ARGO_NAME` → per-WT `spec` post-pass in
+  `build_templates`).
+- **The three timeout knobs (proven from Argo v4.0.5 source, NOT
+  assumed) — final design, post-v0.3.0.** Argo reuses
+  `activeDeadlineSeconds` at TWO scopes and adds a separate
+  `Template.timeout`; we disambiguate by our `_if_root` suffix
+  convention. (1) **`timeout`** → `Template.timeout` (Go-duration
+  string). `workflow_types.go:795-797`: *"may not be applied to Step
+  or DAG templates"*; `checkTemplateTimeout` (`operator.go:2547`)
+  only fires while `node.Phase == NodePending`, and a dag/steps node
+  never meaningfully sits Pending → **silent no-op on `#[workflow]`**.
+  ⇒ **`#[container]`-only.** (2) **`pod_running_timeout`** (renamed
+  from `active_deadline` 2026-05-18, user-directed) → the pod's
+  `Template.activeDeadlineSeconds`. `workflow_types.go:730-733`:
+  *"only applicable to container and script templates"*;
+  `workflowpod.go:171-188` sets the pod's `.spec.activeDeadlineSeconds
+  = min(remaining wf deadline, tmpl)`. ⇒ **`#[container]`-only.**
+  (3) **`active_deadline_if_root`** → `WorkflowSpec
+  .activeDeadlineSeconds` (`workflow_types.go:398`, `*int64`;
+  `getWorkflowDeadline` `operator.go:610-619` reads
+  `woc.execWf.Spec.ActiveDeadlineSeconds`) = **the ONLY working
+  whole-workflow timeout**; spec-scoped ⇒ root-only, on BOTH
+  `#[container]`/`#[workflow]`, `_if_root` plumbing. So
+  `#[workflow(timeout=…)]`/`#[workflow(pod_running_timeout=…)]` are
+  rejected (deluxe unknown-field — not accepted, not a silent no-op).
+  Fixed the latent PR-#18 `#[workflow(timeout)]` no-op in the same
+  pass. **All duration attrs share ONE macro parser
+  (`parse_duration_secs`): int = seconds OR a `humantime` string
+  (`"1h30m"`/`"2d"`), `> 0`, normalized to whole seconds; emitted as
+  the int (i32/i64) or canonical `"<n>s"` Go-string (`Template.timeout`
+  uses Go `time.ParseDuration`, `retry(backoff)` uses
+  `ParseStringToDuration` — both accept `"<n>s"`, and humantime
+  days/weeks normalize so `"2d"` works even though Go has no day
+  unit). `retry(backoff)`/`ttl_if_root(after_*)` migrated off
+  bespoke parsers to this shared one (`ttl` now also takes humantime;
+  uniform `> 0`). Goldens: only `pipeline_deadline.yaml` (new spec
+  field + rename) and `pipeline_retry.yaml` (`timeout: 5m`→`300s`
+  canonicalization) churn — all other emit goldens byte-identical
+  (`argo!` skips `Option::None`/empty-string).**
 - **`nodeSelector` DOES cascade (empirical, real Argo v4.0.5,
   2026-05-16).** A parent DAG/steps template's `nodeSelector` is merged
   by the Argo controller onto the pods of templates it calls via

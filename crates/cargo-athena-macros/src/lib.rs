@@ -257,7 +257,7 @@ fn check_yaml_safe_names(func: &ItemFn, name_override: &Option<String>) -> Resul
 struct RetryArgs {
     limit: Option<syn::Expr>,
     policy: Option<String>,
-    backoff: Option<String>,
+    backoff: Option<syn::Expr>,
 }
 
 impl RetryArgs {
@@ -273,9 +273,7 @@ impl RetryArgs {
                 "policy" => {
                     out.policy = Some(input.parse::<syn::LitStr>()?.value());
                 }
-                "backoff" => {
-                    out.backoff = Some(input.parse::<syn::LitStr>()?.value());
-                }
+                "backoff" => out.backoff = Some(input.parse::<syn::Expr>()?),
                 other => {
                     return Err(syn::Error::new_spanned(
                         &key,
@@ -451,14 +449,23 @@ struct ContainerArgs {
     on_exit_if_root: Option<syn::Path>,
     /// Template-level `retryStrategy` (`limit` required when present).
     retry: Option<RetryArgs>,
-    /// Template-level `timeout` duration string (e.g. `"5m"`).
-    timeout: Option<String>,
-    /// Template-level `active_deadline = <secs | "1h30m">` (per-pod).
-    active_deadline: Option<syn::Expr>,
+    /// `timeout = <secs | "1h30m">` → Argo `Template.timeout`
+    /// (controller-enforced node timeout, counts Pending time). Int =
+    /// seconds, or a humantime string. `#[container]`-only — Argo
+    /// documents it as a no-op on dag/steps templates.
+    timeout: Option<syn::Expr>,
+    /// `pod_running_timeout = <secs | "1h30m">` → the pod's
+    /// `Template.activeDeadlineSeconds` (kubelet hard-kills the pod
+    /// once Running). `#[container]`-only (Argo: container/script only).
+    pod_running_timeout: Option<syn::Expr>,
     /// Root-only WorkflowSpec TTL GC (`ttl_if_root(after_completion=…)`).
     ttl_if_root: Option<TtlArgs>,
     /// Root-only WorkflowSpec pod GC (`pod_gc_if_root(strategy=…)`).
     pod_gc_if_root: Option<PodGcArgs>,
+    /// Root-only whole-workflow runtime cap →
+    /// `WorkflowSpec.activeDeadlineSeconds` (`active_deadline_if_root =
+    /// <secs | "2h">`). The only real workflow timeout.
+    active_deadline_if_root: Option<syn::Expr>,
 }
 
 /// `#[workflow(name = "...", steps, node_selector = { "k" = "v", ... },
@@ -488,14 +495,16 @@ struct WorkflowArgs {
     on_exit_if_root: Option<syn::Path>,
     /// Template-level `retryStrategy` (`limit` required when present).
     retry: Option<RetryArgs>,
-    /// Template-level `timeout` duration string (e.g. `"5m"`).
-    timeout: Option<String>,
-    /// Template-level `active_deadline = <secs | "1h30m">` (per-pod).
-    active_deadline: Option<syn::Expr>,
     /// Root-only WorkflowSpec TTL GC (`ttl_if_root(after_completion=…)`).
     ttl_if_root: Option<TtlArgs>,
     /// Root-only WorkflowSpec pod GC (`pod_gc_if_root(strategy=…)`).
     pod_gc_if_root: Option<PodGcArgs>,
+    /// Root-only whole-workflow runtime cap →
+    /// `WorkflowSpec.activeDeadlineSeconds` (`active_deadline_if_root =
+    /// <secs | "2h">`). `timeout`/`pod_running_timeout` are
+    /// `#[container]`-only (Argo no-ops on dag/steps), so this is the
+    /// only way to time-bound a `#[workflow]`.
+    active_deadline_if_root: Option<syn::Expr>,
 }
 
 /// Parse attribute args into `T`, or return a `compile_error!`.
@@ -564,14 +573,19 @@ fn retry_strategy_tokens(
             quote! { #p.to_string() }
         }
     };
-    let backoff_tok = match &r.backoff {
+    let backoff_tok = match parse_opt_duration_secs(&r.backoff, span, "retry(backoff)")? {
         None => quote! { ::core::option::Option::None },
-        Some(d) => quote! {
-            ::core::option::Option::Some(::cargo_athena::api::Backoff {
-                duration: #d.to_string(),
-                ..::core::default::Default::default()
-            })
-        },
+        Some(secs) => {
+            // Argo `Backoff.Duration` is a Go-duration string; emit
+            // canonical `"<n>s"` so humantime days/weeks normalize too.
+            let dur = format!("{secs}s");
+            quote! {
+                ::core::option::Option::Some(::cargo_athena::api::Backoff {
+                    duration: #dur.to_string(),
+                    ..::core::default::Default::default()
+                })
+            }
+        }
     };
     Ok(quote! {
         ::core::option::Option::Some(::cargo_athena::api::RetryStrategy {
@@ -582,31 +596,21 @@ fn retry_strategy_tokens(
     })
 }
 
-/// Lower the `timeout = "<dur>"` attr to a `String` token expr.
-fn timeout_tokens(timeout: &Option<String>) -> proc_macro2::TokenStream {
-    match timeout {
-        Some(s) => quote! { #s.to_string() },
-        None => quote! { ::std::string::String::new() },
-    }
-}
-
-/// Lower `active_deadline = <secs | "1h30m">` to an `Option<i32>` token
-/// (seconds) for `Template.active_deadline_seconds`. Int literal =
-/// seconds; string literal = a `humantime` duration. Must be `> 0` and
-/// fit i32, else a targeted compile error. Per-template (NOT root-only).
-fn active_deadline_tokens(
-    e: &Option<Expr>,
-    span: proc_macro2::Span,
-) -> Result<proc_macro2::TokenStream, syn::Error> {
-    let e = match e {
-        None => return Ok(quote! { ::core::option::Option::None }),
-        Some(e) => e,
-    };
+/// The one duration parser shared by **every** duration-bearing
+/// attribute (`timeout`, `pod_running_timeout`, `active_deadline_if_root`,
+/// `ttl_if_root(..)`, `retry(backoff)`) so the accepted syntax is
+/// uniform everywhere. An **integer literal = whole seconds**; a
+/// **string literal = a [`humantime`] duration** (`"90s"`, `"1h30m"`,
+/// `"2d"`). Returns whole seconds, enforced `> 0`. `attr` names the
+/// attribute in diagnostics.
+fn parse_duration_secs(e: &Expr, span: proc_macro2::Span, attr: &str) -> Result<u64, syn::Error> {
     let bad = || {
         syn::Error::new(
             span,
-            "`active_deadline`: expected a positive integer (seconds) or \
-             a duration string like \"1h30m\" / \"2d\" (humantime)",
+            format!(
+                "`{attr}`: expected a positive integer (seconds) or a \
+                 duration string like \"1h30m\" / \"2d\" (humantime)"
+            ),
         )
     };
     let secs: u64 = match e {
@@ -623,34 +627,83 @@ fn active_deadline_tokens(
         _ => {
             return Err(syn::Error::new(
                 span,
-                "`active_deadline`: expected an integer or a duration string",
+                format!("`{attr}`: expected an integer or a duration string"),
             ));
         }
     };
-    if secs == 0 || secs > i32::MAX as u64 {
+    if secs == 0 {
         return Err(bad());
     }
-    let n = secs as i32;
-    Ok(quote! { ::core::option::Option::Some(#n) })
+    Ok(secs)
 }
 
-/// One `after_* = <secs>` field → `Some(<n> i32)` / `None`. Only a
-/// non-negative integer literal is accepted (seconds).
-fn ttl_secs_tok(e: &Option<Expr>) -> Result<proc_macro2::TokenStream, syn::Error> {
+/// `None` → `Ok(None)`; else `parse_duration_secs`.
+fn parse_opt_duration_secs(
+    e: &Option<Expr>,
+    span: proc_macro2::Span,
+    attr: &str,
+) -> Result<Option<u64>, syn::Error> {
     match e {
+        None => Ok(None),
+        Some(e) => Ok(Some(parse_duration_secs(e, span, attr)?)),
+    }
+}
+
+/// Whole seconds → an `Option<i32>` token (Argo int-seconds fields:
+/// `Template.activeDeadlineSeconds`, `ttlStrategy.secondsAfter*`).
+fn secs_i32_tok(
+    e: &Option<Expr>,
+    span: proc_macro2::Span,
+    attr: &str,
+) -> Result<proc_macro2::TokenStream, syn::Error> {
+    match parse_opt_duration_secs(e, span, attr)? {
         None => Ok(quote! { ::core::option::Option::None }),
-        Some(Expr::Lit(syn::ExprLit {
-            lit: syn::Lit::Int(i),
-            ..
-        })) => {
-            let n: u32 = i.base10_parse()?;
-            let n = n as i32;
+        Some(s) if s <= i32::MAX as u64 => {
+            let n = s as i32;
             Ok(quote! { ::core::option::Option::Some(#n) })
         }
-        Some(e) => Err(syn::Error::new_spanned(
-            e,
-            "`ttl_if_root(...)` seconds must be a non-negative integer literal",
+        Some(_) => Err(syn::Error::new(
+            span,
+            format!("`{attr}`: duration is too large (max ~68 years)"),
         )),
+    }
+}
+
+/// Whole seconds → an `Option<i64>` token (Argo
+/// `WorkflowSpec.activeDeadlineSeconds`, an `int64`).
+fn secs_i64_tok(
+    e: &Option<Expr>,
+    span: proc_macro2::Span,
+    attr: &str,
+) -> Result<proc_macro2::TokenStream, syn::Error> {
+    match parse_opt_duration_secs(e, span, attr)? {
+        None => Ok(quote! { ::core::option::Option::None }),
+        Some(s) if s <= i64::MAX as u64 => {
+            let n = s as i64;
+            Ok(quote! { ::core::option::Option::Some(#n) })
+        }
+        Some(_) => Err(syn::Error::new(
+            span,
+            format!("`{attr}`: duration is too large"),
+        )),
+    }
+}
+
+/// Lower the container `timeout = <secs | "1h30m">` attr to a `String`
+/// token (Argo `Template.timeout`, a Go `time.ParseDuration` string).
+/// We emit canonical `"<n>s"` — Go always accepts it, and humantime
+/// days/weeks normalize to seconds so `"2d"` works even though Go has
+/// no day unit. `None` ⇒ empty string (skip-serialized field default).
+fn timeout_tokens(
+    e: &Option<Expr>,
+    span: proc_macro2::Span,
+) -> Result<proc_macro2::TokenStream, syn::Error> {
+    match parse_opt_duration_secs(e, span, "timeout")? {
+        None => Ok(quote! { ::std::string::String::new() }),
+        Some(s) => {
+            let v = format!("{s}s");
+            Ok(quote! { #v.to_string() })
+        }
     }
 }
 
@@ -672,9 +725,9 @@ fn ttl_const_tokens(
              after_completion/after_success/after_failure",
         ));
     }
-    let comp = ttl_secs_tok(&t.after_completion)?;
-    let succ = ttl_secs_tok(&t.after_success)?;
-    let fail = ttl_secs_tok(&t.after_failure)?;
+    let comp = secs_i32_tok(&t.after_completion, span, "ttl_if_root(after_completion)")?;
+    let succ = secs_i32_tok(&t.after_success, span, "ttl_if_root(after_success)")?;
+    let fail = secs_i32_tok(&t.after_failure, span, "ttl_if_root(after_failure)")?;
     Ok(quote! {
         ::core::option::Option::Some(::cargo_athena::api::TtlStrategy {
             seconds_after_completion: #comp,
@@ -983,8 +1036,25 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };
-    let timeout_tok = timeout_tokens(&cfg.timeout);
-    let active_deadline_tok = match active_deadline_tokens(&cfg.active_deadline, ident.span()) {
+    let timeout_tok = match timeout_tokens(&cfg.timeout, ident.span()) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let pod_running_timeout_tok = match secs_i32_tok(
+        &cfg.pod_running_timeout,
+        ident.span(),
+        "pod_running_timeout",
+    ) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    // Root-only WorkflowSpec runtime cap (stamped per-WT by `Collector`
+    // like `ON_EXIT`/`TTL`; the only real whole-workflow timeout).
+    let active_deadline_if_root_tok = match secs_i64_tok(
+        &cfg.active_deadline_if_root,
+        ident.span(),
+        "active_deadline_if_root",
+    ) {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };
@@ -1064,6 +1134,8 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
             #on_exit_const
             const TTL: ::core::option::Option<::cargo_athena::api::TtlStrategy> = #ttl_tok;
             const POD_GC: ::core::option::Option<&'static str> = #podgc_tok;
+            const ACTIVE_DEADLINE_IF_ROOT: ::core::option::Option<i64> =
+                #active_deadline_if_root_tok;
 
             fn run(__in: ::cargo_athena::serde_json::Value)
                 -> ::cargo_athena::serde_json::Value
@@ -1159,7 +1231,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                     },
                     retry_strategy: #retry_tok,
                     timeout: #timeout_tok,
-                    active_deadline_seconds: #active_deadline_tok,
+                    active_deadline_seconds: #pod_running_timeout_tok,
                     ..::core::default::Default::default()
                 }
             }
@@ -3327,15 +3399,21 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };
-    let timeout_tok = timeout_tokens(&cfg.timeout);
-    let active_deadline_tok = match active_deadline_tokens(&cfg.active_deadline, ident.span()) {
+    let active_deadline_if_root_tok = match secs_i64_tok(
+        &cfg.active_deadline_if_root,
+        ident.span(),
+        "active_deadline_if_root",
+    ) {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };
-    let retry_timeout_tokens = quote! {
+    // A `#[workflow]` lowers to a dag/steps template, where Argo applies
+    // neither `Template.timeout` nor `Template.activeDeadlineSeconds`
+    // (both documented no-ops on dag/steps) — so a workflow template
+    // only carries `retryStrategy`. The whole-workflow runtime cap is
+    // `active_deadline_if_root` (WorkflowSpec-scoped, below).
+    let retry_tokens = quote! {
         retry_strategy: #retry_tok,
-        timeout: #timeout_tok,
-        active_deadline_seconds: #active_deadline_tok,
     };
     // WorkflowSpec-scoped `ttlStrategy` / `podGC` trait consts (stamped
     // per-WT by `Collector` like `ON_EXIT`; never on synthetic `if`
@@ -3362,7 +3440,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
                 inputs: #inputs_tokens,
                 steps: __steps,
                 #node_selector_tokens
-                #retry_timeout_tokens
+                #retry_tokens
                 #outputs_tokens
                 ..::core::default::Default::default()
             }
@@ -3378,7 +3456,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
                 dag: ::core::option::Option::Some(
                     ::cargo_athena::api::DagTemplate { tasks: __tasks }),
                 #node_selector_tokens
-                #retry_timeout_tokens
+                #retry_tokens
                 #outputs_tokens
                 ..::core::default::Default::default()
             }
@@ -3425,6 +3503,8 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
             #on_exit_const
             const TTL: ::core::option::Option<::cargo_athena::api::TtlStrategy> = #ttl_tok;
             const POD_GC: ::core::option::Option<&'static str> = #podgc_tok;
+            const ACTIVE_DEADLINE_IF_ROOT: ::core::option::Option<i64> =
+                #active_deadline_if_root_tok;
 
             fn build(_ctx: &::cargo_athena::BuildCtx)
                 -> ::cargo_athena::api::Template

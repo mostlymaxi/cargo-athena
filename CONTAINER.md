@@ -49,9 +49,10 @@ All athena paths live under a pod-scoped `emptyDir` at `/athena`.
     on_exit_if_root = path::to::template,
     retry(limit = 3, policy = "OnError", backoff = "30s"),
     timeout = "5m",
-    active_deadline = 600,
+    pod_running_timeout = 600,
     ttl_if_root(after_completion = 86400, after_success = 3600, after_failure = 7200),
     pod_gc_if_root(strategy = "OnWorkflowSuccess"),
+    active_deadline_if_root = "2h",
 )]
 ```
 
@@ -62,14 +63,41 @@ All athena paths live under a pod-scoped `emptyDir` at `/athena`.
 | `service_account = "…"` | Pod `ServiceAccount`. Default: `[defaults].service_account` from `athena.toml`. |
 | `node_selector = { "k" = "v", … }` | Template-level `nodeSelector` (the Argo controller cascades it onto this template's pods). Keys are literal; values may be injected (below). |
 | `on_exit_if_root = t` | Whole-workflow exit handler on this template's own `spec.hooks.exit` — Argo fires it only for the workflow you actually submit (workflow-scoped). Same semantics as `#[workflow(on_exit_if_root)]`; distinct from the per-task `.on_exit(t)` builder. |
-| `retry(limit = N \| unlimited, policy = "…", backoff = "<dur>")` | Template-level Argo `retryStrategy`. `limit` is **required** (`unlimited` ⇒ unbounded, no `limit` field); `policy` ∈ `Always\|OnFailure\|OnError\|OnTransientError` (optional; Argo defaults to `OnFailure`); `backoff` a duration string (optional). |
-| `timeout = "<dur>"` | Template-level Argo `timeout` (e.g. `"5m"`). Optional. |
-| `active_deadline = <secs \| "1h30m">` | **Template-level** Argo `Template.activeDeadlineSeconds` (kill this template's pod after this long). Int literal = seconds, or a [humantime](https://docs.rs/humantime) duration string (`"90s"`, `"1h30m"`, `"2d"`) — `> 0`, parsed to integer seconds at compile time. **Per-pod — applies even when this template is `templateRef`'d** (NOT root-only, unlike `ttl_if_root`). |
-| `ttl_if_root(after_completion = <s>, after_success = <s>, after_failure = <s>)` | WorkflowSpec-scoped Argo `ttlStrategy` (GC the finished Workflow after the given seconds). All three optional ints but **≥1 required**. **Root-only — applies only when this WorkflowTemplate is the workflow you actually submit; inert when used as a nested `templateRef`'d sub-workflow** (proven on real Argo v4.0.5; identical mechanism to `on_exit_if_root`). |
+| `retry(limit = N \| unlimited, policy = "…", backoff = <dur>)` | Template-level Argo `retryStrategy`. `limit` is **required** (`unlimited` ⇒ unbounded, no `limit` field); `policy` ∈ `Always\|OnFailure\|OnError\|OnTransientError` (optional; Argo defaults to `OnFailure`); `backoff` an int (seconds) or a [humantime](https://docs.rs/humantime) string like `"30s"`/`"1h30m"` (optional). |
+| `timeout = <secs \| "5m">` | Argo `Template.timeout` — the Argo **controller** fails this step's node after this long, counting from node start (**includes** time queued/Pending). `#[container]`-only (a documented Argo no-op on dag/steps). Int = seconds, or a humantime string; normalized to canonical `"<n>s"`. See [Timeouts](#timeouts). |
+| `pod_running_timeout = <secs \| "1h30m">` | Argo `Template.activeDeadlineSeconds` — set as the **pod's own** `.spec.activeDeadlineSeconds`, so the **kubelet** hard-kills the pod after this long *running* (does **not** count Pending/queue time; Argo also min's it with the remaining whole-workflow deadline). `#[container]`-only (Argo: container/script templates only). Int = seconds, or a humantime string; `> 0`. See [Timeouts](#timeouts). |
+| `ttl_if_root(after_completion = <s>, after_success = <s>, after_failure = <s>)` | WorkflowSpec-scoped Argo `ttlStrategy` (GC the finished Workflow after the given duration). All three optional (int seconds or a humantime string) but **≥1 required**. **Root-only — applies only when this WorkflowTemplate is the workflow you actually submit; inert when used as a nested `templateRef`'d sub-workflow** (proven on real Argo v4.0.5; identical mechanism to `on_exit_if_root`). |
 | `pod_gc_if_root(strategy = "<S>")` | WorkflowSpec-scoped Argo `podGC`. `strategy` **required**, ∈ `OnPodCompletion\|OnPodSuccess\|OnWorkflowCompletion\|OnWorkflowSuccess`. **Root-only** (same as `ttl_if_root`): applies only to the submitted top-level workflow; inert when nested via `templateRef`. |
+| `active_deadline_if_root = <secs \| "2h">` | WorkflowSpec-scoped Argo `WorkflowSpec.activeDeadlineSeconds` — the **whole-workflow** runtime cap (the only timeout Argo enforces at workflow scope; `timeout`/`pod_running_timeout` are pod-level). Int = seconds, or a humantime string. **Root-only** (same mechanism as `ttl_if_root`): caps only the workflow you actually submit; inert when nested via `templateRef`. See [Timeouts](#timeouts). |
 
 All optional. As with `#[workflow]`, an argument *name* or a `name = "…"`
 value that a YAML 1.1 parser reads as a boolean/null is a compile error.
+
+### Timeouts
+
+Argo has **three** overlapping "stop after a while" knobs (its naming,
+not ours). For a container:
+
+| Attribute | Argo field | Who enforces / when | Scope |
+|---|---|---|---|
+| `timeout` | `Template.timeout` | Argo **controller**; from node start, **includes** Pending/queue time | this step (`#[container]` only) |
+| `pod_running_timeout` | `Template.activeDeadlineSeconds` | Kubernetes **kubelet** (pod `.spec.activeDeadlineSeconds`); only time **Running** | this step (`#[container]` only) |
+| `active_deadline_if_root` | `WorkflowSpec.activeDeadlineSeconds` | Argo controller; the **whole workflow** | root-only |
+
+The practical difference between the two pod-level ones: a pod stuck
+**Pending** (no node free) trips `timeout` but never
+`pod_running_timeout` — the latter's clock only starts once the pod is
+actually running. `timeout`/`pod_running_timeout` are `#[container]`-only
+because Argo's own field docs state `Template.timeout` "may not be
+applied to Step or DAG templates" and `activeDeadlineSeconds` is "only
+applicable to container and script templates" — setting either on a
+`#[workflow]` would be a silent no-op, so it's a compile error. The
+only timeout Argo enforces at workflow scope is
+`active_deadline_if_root` (verified against Argo v4.0.5 source).
+
+Every duration value accepts an integer (seconds) or a
+[humantime](https://docs.rs/humantime) string (`"90s"`, `"1h30m"`,
+`"2d"`); `> 0`, normalized to whole seconds at compile time.
 
 ### Parameter injection
 

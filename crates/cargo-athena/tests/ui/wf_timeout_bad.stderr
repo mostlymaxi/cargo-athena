@@ -1,0 +1,5 @@
+error: unknown field `timeout`
+ --> tests/ui/wf_timeout_bad.rs:5:26
+  |
+5 | #[cargo_athena::workflow(timeout = "5m")]
+  |                          ^^^^^^^
