@@ -19,6 +19,7 @@ const BIN_NS: &str = env!("CARGO_BIN_EXE_smoke-ns");
 const BIN_RETRY: &str = env!("CARGO_BIN_EXE_smoke-retry");
 const BIN_TTL: &str = env!("CARGO_BIN_EXE_smoke-ttl");
 const BIN_DEADLINE: &str = env!("CARGO_BIN_EXE_smoke-deadline");
+const BIN_ASYNC: &str = env!("CARGO_BIN_EXE_smoke-async");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -226,6 +227,29 @@ fn run_mode_transform() {
         ],
     );
     assert_golden("run_transform.txt", &out);
+}
+
+/// `async fn` `#[container]` — emitted YAML is identical to a sync
+/// container (asyncness only affects the in-pod execution path, not
+/// the WorkflowTemplate shape).
+#[test]
+fn emit_pipeline_async() {
+    assert_golden("pipeline_async.yaml", &run_bin(BIN_ASYNC, &[]));
+}
+
+/// Run mode: drives the async-fn container body via the macro-built
+/// `cargo_athena::__async::block_on` (single-thread tokio runtime).
+/// Proves the runtime is wired correctly + the body's `.await` lands.
+#[test]
+fn run_mode_async_delay() {
+    let out = run_bin(
+        BIN_ASYNC,
+        &[
+            ("CARGO_ATHENA_TEMPLATE", "cargo-athena-example-smoke-delay"),
+            ("CARGO_ATHENA_INPUT", r#"{"label":"hi"}"#),
+        ],
+    );
+    assert_golden("run_async_delay.txt", &out);
 }
 
 /// Run mode: a container whose real body branches and uses `host!`.

@@ -400,3 +400,20 @@ pub fn pipeline_deadline() {
     slowtask();
     slowtask2();
 }
+
+// --- async fn #[container] -------------------------------------------------
+
+/// `async fn` container — the macro wraps the body in
+/// `cargo_athena::__async::block_on` (a single-thread tokio runtime
+/// built per pod invocation). The emitted YAML is identical to a sync
+/// container; only the in-pod execution path differs.
+#[container]
+pub async fn delay(label: String) -> String {
+    cargo_athena::tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    format!("delayed:{label}")
+}
+
+#[workflow]
+pub fn pipeline_async() {
+    let _ = delay("hello".to_string());
+}

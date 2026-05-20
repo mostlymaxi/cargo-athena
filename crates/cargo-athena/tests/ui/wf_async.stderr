@@ -1,0 +1,5 @@
+error: `#[workflow]` cannot be `async fn` — workflow bodies are statically analyzed, not executed. Use a regular `fn`. (Only `#[container]` bodies actually run; they may be `async fn` with the `cargo-athena` `async` feature.)
+ --> tests/ui/wf_async.rs:6:1
+  |
+6 | async fn pipeline() {}
+  | ^^^^^

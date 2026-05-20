@@ -253,6 +253,25 @@ Operands are an argument or a named struct field of one, and must be
 `String`/`&str`/number. See
 [`#[container]` → Parameter injection](container.md).
 
+## Async `#[container]` fns
+
+Mark a container `async fn` and the macro wraps the body in a tokio
+runtime (current-thread, built per invocation). Enable the `async`
+feature on `cargo-athena` to opt in — `tokio` is re-exported.
+
+```rust,ignore
+// Cargo.toml: cargo-athena = { …, features = ["async"] }
+
+#[container]
+async fn fetch(url: String) -> String {
+    cargo_athena::tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    format!("data-from:{url}")
+}
+```
+
+`#[workflow]` bodies are statically analyzed, so `#[workflow] async fn`
+is a compile error — `.await` is meaningless there.
+
 ## Shared pod resources via `#[fragment]`
 
 A `#[fragment]` is a normal helper that runs inside the calling
