@@ -44,18 +44,20 @@ pub use cargo_athena_core::{
 // Attribute macros.
 pub use cargo_athena_macros::{container, fragment, workflow};
 
-// `async fn` `#[container]` support. The macro detects `async fn` and
-// wraps the body's call in `__async::block_on`, so user code stays
-// plain `async fn` with no runtime boilerplate. Off by default to keep
-// the lean (sync) library tree small — opt in with
-// `cargo-athena = { features = ["async"] }`. `tokio` is re-exported
-// (`cargo_athena::tokio`) so most async bodies need no extra dep;
-// users can bring their own `tokio = { features = […] }` for more —
-// cargo unions features across the dep graph.
-#[cfg(feature = "async")]
+// `async fn` `#[container]` support, driven by Tokio. The macro
+// detects `async fn` and wraps the body's call in `__async::block_on`,
+// so user code stays plain `async fn` with no runtime boilerplate.
+// Off by default to keep the lean (sync) library tree small — opt in
+// with `cargo-athena = { features = ["tokio"] }`. `tokio` is
+// re-exported (`cargo_athena::tokio`) so most async bodies need no
+// extra dep; users can bring their own `tokio = { features = […] }`
+// for more — cargo unions features across the dep graph. Named for
+// the runtime (not the keyword) so other runtimes can land later as
+// separate features without colliding.
+#[cfg(feature = "tokio")]
 pub use tokio;
 
-#[cfg(feature = "async")]
+#[cfg(feature = "tokio")]
 #[doc(hidden)]
 pub mod __async {
     use std::future::Future;
