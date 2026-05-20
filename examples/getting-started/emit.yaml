@@ -1,0 +1,214 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-getting-started-fetch
+spec:
+  entrypoint: cargo-athena-example-getting-started-fetch
+  templates:
+  - name: cargo-athena-example-getting-started-fetch
+    inputs:
+      parameters:
+      - name: url
+      artifacts:
+      - name: athena-dist
+        path: /athena/bin
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: athena/bin/example/0.1.0/app.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          path: /athena/result
+    container:
+      image: ghcr.io/acme/app:latest
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-getting-started-fetch
+      env:
+      - name: ATHENA_PARAM_url
+        value: '{{inputs.parameters.url}}'
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-getting-started-pipeline
+spec:
+  entrypoint: cargo-athena-example-getting-started-pipeline
+  templates:
+  - name: cargo-athena-example-getting-started-pipeline
+    dag:
+      tasks:
+      - name: raw
+        arguments:
+          parameters:
+          - name: url
+            value: '"https://example.com/data"'
+        templateRef:
+          name: cargo-athena-example-getting-started-fetch
+          template: cargo-athena-example-getting-started-fetch
+      - name: summary
+        dependencies:
+        - raw
+        arguments:
+          parameters:
+          - name: data
+            value: '{{tasks.raw.outputs.parameters.return}}'
+          - name: top_n
+            value: '3'
+        templateRef:
+          name: cargo-athena-example-getting-started-summarize
+          template: cargo-athena-example-getting-started-summarize
+      - name: publish
+        dependencies:
+        - summary
+        arguments:
+          parameters:
+          - name: report
+            value: '{{tasks.summary.outputs.parameters.return}}'
+        templateRef:
+          name: cargo-athena-example-getting-started-publish
+          template: cargo-athena-example-getting-started-publish
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-getting-started-publish
+spec:
+  entrypoint: cargo-athena-example-getting-started-publish
+  templates:
+  - name: cargo-athena-example-getting-started-publish
+    inputs:
+      parameters:
+      - name: report
+      artifacts:
+      - name: athena-dist
+        path: /athena/bin
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: athena/bin/example/0.1.0/app.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          path: /athena/result
+    container:
+      image: busybox:1.36-musl
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-getting-started-publish
+      env:
+      - name: ATHENA_PARAM_report
+        value: '{{inputs.parameters.report}}'
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-getting-started-summarize
+spec:
+  entrypoint: cargo-athena-example-getting-started-summarize
+  templates:
+  - name: cargo-athena-example-getting-started-summarize
+    inputs:
+      parameters:
+      - name: data
+      - name: top_n
+      artifacts:
+      - name: athena-dist
+        path: /athena/bin
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: athena/bin/example/0.1.0/app.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          path: /athena/result
+    container:
+      image: busybox:1.36-musl
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-getting-started-summarize
+      env:
+      - name: ATHENA_PARAM_data
+        value: '{{inputs.parameters.data}}'
+      - name: ATHENA_PARAM_top_n
+        value: '{{inputs.parameters.top_n}}'
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default
