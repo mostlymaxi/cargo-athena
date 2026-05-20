@@ -967,9 +967,29 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_fn.sig.ident = impl_ident.clone();
     impl_fn.vis = syn::Visibility::Inherited;
 
+    // `async fn` bodies: wrap the call in our `block_on`. The hidden
+    // impl-fn keeps its `async` (returns a Future); `run` is sync, so
+    // it builds a single-thread tokio runtime once per invocation.
+    // Requires the `async` feature on cargo-athena; without it the
+    // `__async` path doesn't exist and the user gets a missing-module
+    // error pointing at the feature.
+    let is_async = func.sig.asyncness.is_some();
+
     let args = fn_args(&func);
     let arg_idents: Vec<_> = args.iter().map(|(i, _)| i.clone()).collect();
     let arg_types: Vec<_> = args.iter().map(|(_, t)| t.clone()).collect();
+    // The `run`-body call expression. Sync = bare call; async = wrap
+    // the returned Future in `block_on` (drives the body on a fresh
+    // current-thread runtime — see `cargo_athena::__async`).
+    let call_expr = if is_async {
+        quote! {
+            ::cargo_athena::__async::block_on(
+                #impl_ident( #( #arg_idents ),* )
+            )
+        }
+    } else {
+        quote! { #impl_ident( #( #arg_idents ),* ) }
+    };
     let arg_names: Vec<String> = arg_idents.iter().map(|i| i.to_string()).collect();
 
     // Argo delivers params via container env so the binary can read them.
@@ -1149,7 +1169,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                         ).expect(concat!(
                             "deserialize container input `", #arg_names, "`"));
                 )*
-                let __out = #impl_ident( #( #arg_idents ),* );
+                let __out = #call_expr;
                 ::cargo_athena::serde_json::to_value(__out)
                     .expect("serialize container output")
             }
@@ -3277,6 +3297,21 @@ fn emit_synth(s: &SynthWf) -> TokenStream2 {
 #[proc_macro_attribute]
 pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = syn::parse_macro_input!(item as ItemFn);
+    // A `#[workflow]` body is statically analyzed (read), not executed
+    // — `.await` is meaningless here, and an `async fn` would just
+    // return a Future from the never-run body. Reject up front with a
+    // pointed error rather than a confusing downstream type mismatch.
+    if let Some(async_kw) = &func.sig.asyncness {
+        return syn::Error::new_spanned(
+            async_kw,
+            "`#[workflow]` cannot be `async fn` — workflow bodies are \
+             statically analyzed, not executed. Use a regular `fn`. \
+             (Only `#[container]` bodies actually run; they may be \
+             `async fn` with the `cargo-athena` `async` feature.)",
+        )
+        .to_compile_error()
+        .into();
+    }
     let cfg: WorkflowArgs = match parse_attr(attr) {
         Ok(c) => c,
         Err(e) => return e,

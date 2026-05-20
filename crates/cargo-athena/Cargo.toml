@@ -32,6 +32,11 @@ cli = [
     "dep:tar",
     "dep:flate2",
 ]
+# Enable `async fn` bodies on `#[container]`. Pulls a minimal `tokio`
+# (workspace features = ["rt", "net", "time"]) and re-exports it as
+# `cargo_athena::tokio`. Users who need more (e.g. `tokio::macros`,
+# `tokio::process`) add tokio themselves — cargo unions features.
+async = ["dep:tokio"]
 
 [dependencies]
 cargo-athena-core = { workspace = true }

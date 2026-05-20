@@ -66,6 +66,11 @@ path = "src/bin/ttl_main.rs"
 name = "smoke-deadline"
 path = "src/bin/deadline_main.rs"
 
+[[bin]]
+name = "smoke-async"
+path = "src/bin/async_main.rs"
+
 [dependencies]
-cargo-athena = { workspace = true }
+# `async` enables `async fn` `#[container]` bodies (re-exports tokio).
+cargo-athena = { workspace = true, features = ["async"] }
 serde = { version = "1", features = ["derive"] }
