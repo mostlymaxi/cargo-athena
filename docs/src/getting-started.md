@@ -14,13 +14,11 @@ nix profile install github:mostlymaxi/cargo-athena   # install
 nix run github:mostlymaxi/cargo-athena -- athena …   # one-off
 ```
 
-> ⚠️ **Library: `--no-default-features`.** Your workflow crate needs
-> only the macros + runtime. The default `cli` feature (shipped by
-> `cargo install`) drags in the whole CLI tree — `kube`/`k8s-openapi`,
-> `reqwest`, `object_store`, `tokio`, `clap`. Disabling default
-> features keeps your dependency graph (and build) lean; the
-> `cargo athena` *binary* keeps `cli` on, so nothing about the
-> subcommand changes.
+> ⚠️ **Library: `--no-default-features`.** A workflow crate needs only
+> the macros + runtime. The default `cli` feature pulls a large tree
+> (`kube`, `reqwest`, `object_store`, `tokio`, `clap`); disabling it
+> keeps your build lean. The installed `cargo athena` binary keeps
+> `cli` on, so the subcommand is unaffected.
 
 `emit` needs nothing but an `athena.toml`. `build` additionally needs
 the Zig cross toolchain — `cargo install cargo-zigbuild` plus
@@ -106,11 +104,11 @@ binary is pulled from S3; `--build` packages a local one instead. See
 
 ## 3. Build & upload the binary
 
-`publish` cross-compiles a static-musl binary per `athena.toml` target,
-packages them into one tarball, and uploads it to the exact key `emit`
-references — one step (S3 credentials: `AWS_*` env vars or an EC2/ECS
-instance role — **not** `~/.aws` profiles;
-[details](cli.md#cargo-athena-publish)):
+`publish` cross-compiles a static-musl binary per `athena.toml` target
+and uploads it to the exact key `emit` references — one step.
+Credentials come from `AWS_*` env vars or instance-role identity
+(`~/.aws` profiles are **not** read; see
+[publish details](cli.md#cargo-athena-publish)):
 
 ```sh
 cargo athena publish --package my-workflows

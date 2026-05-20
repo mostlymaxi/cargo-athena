@@ -56,7 +56,7 @@ template as an Argo `s3{}` artifact source.
 | Key | Meaning |
 |---|---|
 | `targets` | The static-musl target triples to cross-compile. Each becomes `app-<triple>` in the tarball; in-pod the bootstrap picks the one matching `uname`. |
-| `default_image` | (optional) Image for `#[container]`s with no explicit `image`. A multi-arch base with POSIX `sh`/`uname` (the binary tarball is extracted by Argo's executor init container, not your image — no `tar` needed). |
+| `default_image` | (optional) Image for `#[container]`s with no explicit `image`. Needs only POSIX `sh` and `uname` (distroless works). |
 
 ## `[defaults]`
 
