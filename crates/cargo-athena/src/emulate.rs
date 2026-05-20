@@ -240,12 +240,19 @@ pub fn container_emulate(a: EmulateArgs) {
         }
     };
     if let Some(ba) = &meta.binary_artifact {
+        // Argo's executor init container auto-extracts the input tarball
+        // into the artifact `path`. Mimic Argo's `unpack` semantics 1:1
+        // on the host bind-mount so the emulated bootstrap finds
+        // `app-<triple>` at the same paths it would in-pod (zero-drift).
+        // Pure-Rust tar+flate2 — no host `tar` dependency.
         let dst = host_of(&ba.path);
-        mkparent(&dst);
-        if dst != tarball {
-            std::fs::copy(&tarball, &dst)
-                .unwrap_or_else(|e| die(&format!("stage binary tarball: {e}")));
-        }
+        crate::tarball::extract_argo_compat(&tarball, &dst).unwrap_or_else(|e| {
+            die(&format!(
+                "extract {} into {}: {e}",
+                tarball.display(),
+                dst.display()
+            ))
+        });
     }
 
     // Input artifact ports ← S3.
@@ -766,20 +773,16 @@ fn build_local(package: Option<&str>, bin: Option<&str>) -> PathBuf {
     let stage = std::env::temp_dir().join(format!("athena-build-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&stage);
     std::fs::create_dir_all(&stage).ok();
-    let from = format!("target/{triple}/release/{bin}");
-    std::fs::copy(&from, stage.join(format!("app-{triple}")))
-        .unwrap_or_else(|e| die(&format!("copy {from}: {e}")));
+    let from = std::path::PathBuf::from(format!("target/{triple}/release/{bin}"));
+    let staged_bin = stage.join(format!("app-{triple}"));
+    std::fs::copy(&from, &staged_bin)
+        .unwrap_or_else(|e| die(&format!("copy {}: {e}", from.display())));
+    // Pure-Rust pack — same `bin/<entry>` layout as `cargo athena
+    // publish` (`tarball::create`), so the emulated tarball survives
+    // Argo's single-entry-rename `unpack` quirk.
     let tb = stage.join("dist.tar.gz");
-    let st = Command::new("tar")
-        .arg("-czf")
-        .arg(&tb)
-        .arg("-C")
-        .arg(&stage)
-        .arg(format!("app-{triple}"))
-        .status()
-        .unwrap_or_else(|e| die(&format!("tar: {e}")));
-    if !st.success() {
-        die("tar failed");
-    }
+    let name = format!("app-{triple}");
+    crate::tarball::create(&tb, &[(staged_bin.as_path(), name.as_str())])
+        .unwrap_or_else(|e| die(&format!("create tarball: {e}")));
     tb
 }

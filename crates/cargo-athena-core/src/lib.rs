@@ -460,10 +460,17 @@ impl AthenaConfig {
 /// (distroless / read-only rootfs) and shared with Argo's init/wait
 /// containers for artifact load/collect.
 pub const ATHENA_DIR: &str = "/athena";
-/// Where the bootstrap extracts the per-arch binary.
+/// Where Argo's executor (init container) extracts the per-arch
+/// binaries from our `.tar.gz` input artifact. We rely on Argo's
+/// built-in tarball auto-extraction (no `archive: none`, no `tar` in
+/// the main container's image — see `container_delivery`).
 pub const ATHENA_BIN_DIR: &str = "/athena/bin";
-/// Where the binary tarball is delivered (under [`ATHENA_DIR`]).
-pub const ARTIFACT_PATH: &str = "/athena/dist.tar.gz";
+/// The in-pod arch-resolving + exec bootstrap, kept in a separate
+/// `bootstrap.sh` so it can be read, edited, and `shellcheck`'d as a
+/// plain shell file rather than buried in a Rust `format!`. `@@ARMS@@`
+/// / `@@BIN_DIR@@` / `@@TEMPLATE@@` are substituted at emit time in
+/// `container_delivery`.
+const BOOTSTRAP_TEMPLATE: &str = include_str!("bootstrap.sh");
 /// Name of the scratch `emptyDir` volume.
 pub const SCRATCH_VOLUME: &str = "athena-work";
 /// Argo input-artifact name of the binary tarball `emit` injects.
@@ -648,10 +655,16 @@ pub struct ContainerDelivery {
 /// template. Called from macro-generated `Template::build` (emit only).
 ///
 /// Runs inside the container's *arbitrary, user-chosen* image (it only
-/// needs a POSIX `sh`/`tar`/`uname`). The image is multi-arch (kubelet
-/// picks the node arch); the bootstrap `uname`s and `exec`s the matching
-/// `app-<triple>` from the Argo-delivered tarball, replacing the shell so
-/// the Rust binary is the container's main process.
+/// needs a POSIX `sh` and `uname` — **no `tar`**). The binary `.tar.gz`
+/// is delivered as an Argo input artifact at [`ATHENA_BIN_DIR`]; with
+/// the default `Archive` (no `archive: none`) Argo's executor init
+/// container **auto-detects tarballs and untars them into the artifact
+/// path** (proven from `workflow/executor/executor.go:262–289`,
+/// `untar` ibid., real v4.0.5 source). So by the time our bootstrap
+/// runs the per-arch `app-<triple>` files already exist under
+/// [`ATHENA_BIN_DIR`]; the script just `uname`s, `chmod +x`'s, and
+/// `exec`s — replacing the shell so the Rust binary is the container's
+/// main process. Works whether the tarball has one entry or many.
 pub fn container_delivery(
     ctx: &BuildCtx,
     argo_name: &str,
@@ -674,25 +687,23 @@ pub fn container_delivery(
         arms.push_str(&format!("  {pat}) __t={triple} ;;\n"));
     }
 
-    // Extract into the `/athena` emptyDir (always writable, even on a
-    // distroless / read-only-rootfs image) — no `mktemp`/`/tmp` dependency.
-    let script = format!(
-        "set -e\n\
-         case \"$(uname -m)\" in\n\
-         {arms}  *) echo \"athena: unsupported arch $(uname -m)\" >&2; exit 1 ;;\n\
-         esac\n\
-         mkdir -p {ATHENA_BIN_DIR}\n\
-         tar -xzf {ARTIFACT_PATH} -C {ATHENA_BIN_DIR}\n\
-         chmod +x {ATHENA_BIN_DIR}/app-$__t\n\
-         export CARGO_ATHENA_OUTPUT=/athena/result\n\
-         exec {ATHENA_BIN_DIR}/app-$__t --cargo-athena-template {argo_name}\n"
-    );
+    // Argo's executor (init container) auto-extracts the `.tar.gz` into
+    // ATHENA_BIN_DIR, so the bootstrap just picks + execs. The template
+    // lives in a sibling `bootstrap.sh` file (legible / greppable /
+    // shellcheck-able); we just substitute the @@-delimited slots.
+    let script = BOOTSTRAP_TEMPLATE
+        .replace("@@ARMS@@", &arms)
+        .replace("@@BIN_DIR@@", ATHENA_BIN_DIR)
+        .replace("@@TEMPLATE@@", argo_name);
 
+    // `archive: None` (NOT `archive: none`) lets Argo auto-detect the
+    // input as a tarball and untar it into `path` (`ATHENA_BIN_DIR`).
+    // See `container_delivery` doc above.
     let artifact = api::Artifact {
         name: "athena-dist".to_string(),
-        path: ARTIFACT_PATH.to_string(),
+        path: ATHENA_BIN_DIR.to_string(),
         s3: Some(s3_loc(s3, &cfg.artifact.key)),
-        archive: Some(archive_none()),
+        archive: None,
         mode: None,
     };
 

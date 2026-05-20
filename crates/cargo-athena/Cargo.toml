@@ -29,6 +29,8 @@ cli = [
     "dep:kube",
     "dep:k8s-openapi",
     "dep:reqwest",
+    "dep:tar",
+    "dep:flate2",
 ]
 
 [dependencies]
@@ -40,6 +42,8 @@ tokio = { workspace = true, optional = true }
 kube = { workspace = true, optional = true }
 k8s-openapi = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
+tar = { workspace = true, optional = true }
+flate2 = { workspace = true, optional = true }
 
 [dev-dependencies]
 # trybuild builds tests/ui/*.rs as crates that depend on this package, so

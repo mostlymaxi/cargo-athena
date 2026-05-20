@@ -33,6 +33,12 @@ proc-macro2 = "1"
 deluxe = "0.5"
 # Small, zero-dep duration parser — `active_deadline = "1h30m"` at macro time.
 humantime = "2"
+# Pure-Rust tar + gzip — the CLI packs/unpacks the binary tarball
+# without shelling out to a host `tar` (single-source-of-truth tarball
+# layout, deterministic output, portable to Windows). Both are tiny,
+# well-maintained, MIT-licensed.
+tar = "0.4"
+flate2 = "1"
 
 # protobuf / serialization
 prost = "0.13"

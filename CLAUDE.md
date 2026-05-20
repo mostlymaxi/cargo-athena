@@ -386,18 +386,32 @@ README is intentionally lean (user-facing); the *why* lives here.
   the old hardcoded-key drift) and sets `AWS_ENDPOINT_URL` to the
   port-forwarded MinIO.
 - `cargo athena emit` injects, into every container template: the binary
-  as an input artifact (`s3{}` from `athena.toml`, `archive: none`) + an
-  `sh` bootstrap (`uname` → pick `app-<triple>` → `exec … --cargo-athena-
-  template <name>`; deserialize inputs → run real body → serialize
-  outputs). One template runs on any node arch (resolved at pod start).
+  tarball as an input artifact (`s3{}` from `athena.toml`, **path
+  `/athena/bin`, NO `archive: none`**) + an `sh` bootstrap (`uname` →
+  `chmod +x app-<triple>` → `exec … --cargo-athena-template <name>`;
+  deserialize inputs → run real body → serialize outputs). One template
+  runs on any node arch (resolved at pod start). **No-tar bootstrap
+  (proven from Argo v4.0.5 source `workflow/executor/executor.go:259-289`
+  `untar`):** Argo's executor init container `isTarball`-detects an
+  input artifact whose `Archive` is *not* `none` and, if it's a `.tgz`,
+  `untar`s it INTO the artifact `path` directory. We exploit that: drop
+  `archive: none`, set `path=/athena/bin`, and the per-arch
+  `app-<triple>` files materialize before the main container runs — so
+  the image needs only POSIX `sh`/`uname` (no `tar`). Works for both
+  single-entry and multi-entry tarballs (untar iterates every entry into
+  `dest/<header.Name>` regardless of count; empirically verified on real
+  Argo v4.0.5 against both the default 2-arch tarball and a forced
+  single-target tarball). `load_artifact!`/`save_artifact!` artifacts
+  KEEP `archive: none` (they're arbitrary user S3 keys, not tarballs —
+  auto-detect would mis-extract a happenstance-tarball user object).
 - Pod-scoped `emptyDir` mounted at `/athena` (`athena-work`): all athena
-  paths live under it (tarball, `/athena/bin`, artifact ports,
+  paths live under it (`/athena/bin` binaries, artifact ports,
   `/athena/result`) so it works on distroless/read-only-rootfs images with
   no `/tmp` dependency, and is shared with Argo init/wait containers.
   `host!` hostPaths are appended after it. `athena.toml` is never read
   in-pod.
 - `#[container(image=…)]` is arbitrary/per-container; just needs POSIX
-  `sh`/`tar`/`uname`.
+  `sh`/`uname` (no `tar` — Argo's init container does the extraction).
 - **`cargo athena container emulate <name>` (2026-05-17, user-directed;
   renamed from `run`).** Realizes ONE `#[container]` locally under
   docker/podman *exactly as Argo would* — same image, the **emitted
@@ -415,7 +429,12 @@ README is intentionally lean (user-facing); the *why* lives here.
   Binary source: **default `--pull`** the deployed tarball from the
   `athena.toml` S3 repo (smoke-test what's live, no source on node) via
   `object_store`+lean current-thread `tokio` (both behind the `cli`
-  feature); `--build` = host-arch musl only; `--tarball` verbatim. S3
+  feature); `--build` = host-arch musl only; `--tarball` verbatim.
+  **Tarball staging (matches no-tar bootstrap):** since the bootstrap
+  no longer untars in-pod, `emulate` runs host `tar -xzf` into the
+  bind-mounted `/athena/bin` directory before docker-running — mimics
+  Argo's executor init container 1:1 so the bootstrap script sees the
+  same `app-<triple>` files at the same paths. S3
   creds from `AWS_*` env. The old top-level in-process `run` was
   **removed** (superseded). **Limitation (documented):** no k8s context
   — `service_account`/podSpec (RBAC/`nodeSelector`/podSpecPatch) are NOT
