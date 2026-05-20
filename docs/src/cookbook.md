@@ -39,6 +39,20 @@ fn parent() {
 }
 ```
 
+## Nested calls
+
+`foo(bar())` lowers `bar` to its own task and wires `foo`'s arg to its
+output — a shorthand for `let x = bar(); foo(x);`:
+
+```rust,ignore
+#[workflow]
+fn pipeline() {
+    publish(transform(fetch("u".to_string()), 7));
+}
+```
+
+Recursive: `foo(bar(baz()))` works the same way.
+
 ## Fan-out over a list
 
 ```rust,ignore
@@ -74,6 +88,44 @@ fn gated() {
 Conditions are a closed grammar (`== != < <= > >=`, `&& || !` over
 bindings/inputs/`a.field`/literals/nested calls).
 
+## Sequential `steps` mode
+
+The default workflow body is a DAG (edges from data deps). Add `steps`
+to emit an Argo `steps:` template — one statement per sequential
+group:
+
+```rust,ignore
+#[workflow(steps)]
+fn pipeline() {
+    let p = prepare("seed".to_string());
+    finalize(p);
+}
+```
+
+Same body, different emit shape.
+
+## Passing one field of a struct
+
+`a.field` (or `a.field.sub`) wires only that field to the next task —
+lowered to a JSON path on the producer's output:
+
+```rust,ignore
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Meta { id: String, n: i64 }
+
+#[container] fn make_meta() -> Meta { Meta { id: "abc".into(), n: 7 } }
+#[container] fn use_id(id: String) { println!("id={id}"); }
+
+#[workflow]
+fn pipeline() {
+    let m = make_meta();
+    use_id(m.id);                          // only `id` is wired through
+}
+```
+
+Named fields only (no `a.0` / `a[i]`). The ghost type-checks that the
+field exists and matches the consumer.
+
 ## Decoupled artifacts (no DAG edge)
 
 A producer and consumer that share only an S3 key — no ordering, no
@@ -90,6 +142,35 @@ fn consume() {
 }
 ```
 
+## Artifact chain (with a DAG dep)
+
+The recipe above has no ordering. To *chain* artifact-producing
+containers — explicit dependency, guaranteed ordering — bridge them
+with a return value:
+
+```rust,ignore
+#[container]
+fn produce() -> String {
+    cargo_athena::save_artifact_str!("report", "hello");
+    "ok".to_string()                       // return value creates the edge
+}
+
+#[container]
+fn consume(seq: String) {
+    let r = cargo_athena::load_artifact_str!("report");
+    println!("seq={seq}: {r}");
+}
+
+#[workflow]
+fn pipeline() {
+    let token = produce();
+    consume(token);                        // edge: produce must finish first
+}
+```
+
+The artifact key is still a literal; the return-value just orders the
+two tasks.
+
 ## Per-task hooks & resilience
 
 `.continue_on` / `.on_success` / `.on_failure` / `.on_error` /
@@ -105,6 +186,36 @@ fn resilient() {
         .on_exit(cleanup);     // runs when *this task* finishes
 }
 ```
+
+## Retry with backoff
+
+A flaky step retries itself:
+
+```rust,ignore
+#[container(retry(limit = 3, policy = "OnError", backoff = "30s"))]
+fn fetch(url: String) -> String { /* … */ "ok".into() }
+```
+
+`limit` is required (`unlimited` for no cap); `policy` ∈
+`Always|OnFailure|OnError|OnTransientError`; `backoff` is an int
+(seconds) or a humantime string. Works on `#[workflow]` too.
+
+## Timeouts
+
+Three knobs for three scopes — stack as many as you need:
+
+```rust,ignore
+#[container(
+    timeout = "5m",                       // controller; counts Pending time
+    pod_running_timeout = "2m",           // kubelet; only counts time Running
+)]
+fn long_step() { /* … */ }
+
+#[workflow(active_deadline_if_root = "1h")]   // whole-workflow cap (root-only)
+fn pipeline() { /* … */ }
+```
+
+Full distinctions: [Timeouts](container.md#timeouts).
 
 ## Whole-workflow cleanup
 
@@ -141,6 +252,30 @@ fn heavy(tag: String, tenant: String, profile: Profile) -> String { tag }
 Operands are an argument or a named struct field of one, and must be
 `String`/`&str`/number. See
 [`#[container]` → Parameter injection](container.md).
+
+## Shared pod resources via `#[fragment]`
+
+A `#[fragment]` is a normal helper that runs inside the calling
+container. Every `host!` / artifact decl it makes is carried onto
+each container that transitively calls it — share pod resources
+without a registry:
+
+```rust,ignore
+#[fragment]
+fn with_secrets() {
+    let _ = cargo_athena::host!("/secrets/db");
+    let _ = cargo_athena::host!("/secrets/api");
+}
+
+#[container]
+fn step_a() { with_secrets(); /* both /secrets paths land on step_a */ }
+
+#[container]
+fn step_b() { with_secrets(); /* …and on step_b */ }
+```
+
+Resources travel with the function; the calling containers don't have
+to know what's inside.
 
 ## Pitfalls
 
