@@ -256,11 +256,11 @@ Operands are an argument or a named struct field of one, and must be
 ## Async `#[container]` fns
 
 Mark a container `async fn` and the macro wraps the body in a tokio
-runtime (current-thread, built per invocation). Enable the `async`
+runtime (current-thread, built per invocation). Enable the `tokio`
 feature on `cargo-athena` to opt in — `tokio` is re-exported.
 
 ```rust,ignore
-// Cargo.toml: cargo-athena = { …, features = ["async"] }
+// Cargo.toml: cargo-athena = { …, features = ["tokio"] }
 
 #[container]
 async fn fetch(url: String) -> String {

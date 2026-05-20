@@ -71,6 +71,6 @@ name = "smoke-async"
 path = "src/bin/async_main.rs"
 
 [dependencies]
-# `async` enables `async fn` `#[container]` bodies (re-exports tokio).
-cargo-athena = { workspace = true, features = ["async"] }
+# `tokio` enables `async fn` `#[container]` bodies (re-exports tokio).
+cargo-athena = { workspace = true, features = ["tokio"] }
 serde = { version = "1", features = ["derive"] }

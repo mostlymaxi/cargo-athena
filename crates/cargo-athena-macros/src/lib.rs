@@ -970,7 +970,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     // `async fn` bodies: wrap the call in our `block_on`. The hidden
     // impl-fn keeps its `async` (returns a Future); `run` is sync, so
     // it builds a single-thread tokio runtime once per invocation.
-    // Requires the `async` feature on cargo-athena; without it the
+    // Requires the `tokio` feature on cargo-athena; without it the
     // `__async` path doesn't exist and the user gets a missing-module
     // error pointing at the feature.
     let is_async = func.sig.asyncness.is_some();
@@ -3307,7 +3307,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
             "`#[workflow]` cannot be `async fn` — workflow bodies are \
              statically analyzed, not executed. Use a regular `fn`. \
              (Only `#[container]` bodies actually run; they may be \
-             `async fn` with the `cargo-athena` `async` feature.)",
+             `async fn` with the `cargo-athena` `tokio` feature.)",
         )
         .to_compile_error()
         .into();
