@@ -1,72 +1,82 @@
 # Core Concepts
 
-Five ideas explain everything cargo-athena does.
+A few ideas explain everything cargo-athena does.
 
 ## 1. Templates are types
 
-Each `#[workflow]` / `#[container]` lowers to a unit-struct **type** that
-implements an internal `Template` trait. The name, inputs, and the
-emitted YAML are derived by the compiler — so cross-crate, cross-module
-references resolve through normal Rust name resolution and are
-collision-proof.
+Each `#[workflow]` / `#[container]` lowers to a unit-struct **type**
+implementing an internal `Template` trait. Names, inputs, and the
+emitted YAML are derived by the compiler.
 
-Merely *referencing* a template type force-links its defining crate, and
-emission walks the reachable closure from your entrypoint by direct,
-monomorphic calls. There is **no registry, no `inventory` for
-templates, no DCE concern** — nothing uncalled is emitted, and nothing
-called is missed.
+Referencing a template type force-links its defining crate; emission
+walks the reachable closure from your entrypoint via monomorphic
+calls. **No registry, no DCE concern** — nothing uncalled is emitted,
+nothing called is missed. Workflows compose across modules and crates
+through normal Rust name resolution.
 
 ## 2. `#[workflow]` is a statically analyzed DAG
 
-A workflow body is **read, not executed**. Each `let x = t(args);` /
-`t(args);` becomes an Argo task; data flow between them becomes
-`templateRef` wiring and DAG edges. Because it is analyzed, the body is
-also type-checked as ordinary Rust by a hidden, never-run "ghost" copy —
-so wrong types, arity, fields, or calling a non-template are compile
-errors.
+A workflow body is **read, not executed**. Each `let x = t(args);` or
+`t(args);` becomes an Argo task; data flow becomes `templateRef`
+wiring and DAG edges.
 
-The body contract is **strict and fail-loud**: only the lowered shapes
-(`let`/call statements and `if`/`else`) are accepted; anything else is a
-spanned `compile_error!`, never a silent mis-emit. Full details on the
+Because the body is *read*, it is also type-checked as ordinary Rust
+by a hidden, never-run "ghost" — wrong types, arity, fields, or
+calling a non-template are compile errors. Only the lowered shapes
+(`let`/call statements, `if`/`else`) are accepted; anything else is a
+spanned `compile_error!`. Full details on the
 [`#[workflow]`](workflow.md) page.
 
 ## 3. `#[container]` runs real Rust in a pod
 
-A container body genuinely executes. Arguments are Argo input
-parameters, deserialized (serde) at pod start; the return value is
-serialized to `outputs.parameters.return` for the next step. Container
-I/O is compile-time bound to `serde` — take and return owned types.
+A container body genuinely executes inside its pod. Arguments arrive
+as Argo input parameters; the return is captured as
+`outputs.parameters.return` for the next step. I/O is `serde`-bound
+at compile time — take and return owned types.
 
-Those same arguments can also be **spliced into the pod spec**:
-`image = "repo:" + tag` injects an argument into the image (likewise
-`service_account` and `node_selector` values). See
+Arguments can also be **spliced into the pod spec**: `image = "repo:"
++ tag` injects an argument into the image (and likewise into
+`service_account`, `node_selector`). See
 [`#[container]` → Parameter injection](container.md).
 
-## 4. `#[fragment]` carries pod resources
+## 4. Data flows as JSON parameters
 
-Pod resources (`host!` mounts, S3 artifact ports) are declared with
-macros that are only valid inside a container or a `#[fragment]`. A
-fragment is a normal helper function: it runs as real code inside the
-calling pod, and every resource it declares is collected onto each
-container that transitively calls it. This makes resource declarations
-composable without a global registry.
+Every value between steps is **JSON-encoded** into an Argo parameter
+and decoded by the receiver. The uniformity is what makes the DAG
+analysis tractable and what keeps a `String` `"7"` a string on the
+wire (never silently parsed as a number).
 
-## 5. One binary, delivered through S3
+It also makes more specialised plumbing fall out cleanly: `b.field`
+on a binding wires only that field via a JSON path on the producer's
+output, and `list.fan_out(|x| step(x))` lowers to Argo `withParam` —
+one task invocation per element of the list.
 
-There is a single multi-step binary. `cargo athena publish`
-cross-compiles it static-musl for each target in `athena.toml` and
-uploads them as one tarball to your S3 `ArtifactRepository` (`build`
-packages that tarball locally, without uploading). `emit`
-injects that tarball as an input artifact plus an `sh` bootstrap into
-every container template; in-pod the bootstrap `uname`s, picks
-`app-<triple>`, and execs it with `--cargo-athena-template <name>`.
+## 5. `#[fragment]` carries pod resources
 
-All athena paths live under a pod-scoped `emptyDir` at `/athena`. The
-image needs only POSIX `sh` and `uname` — distroless and
-read-only-rootfs images work fine.
+Pod resources (`host!` mounts, S3 artifact ports) are declared inside
+a `#[container]` or `#[fragment]`. A fragment is a normal helper that
+runs as real code in the calling pod; every resource it declares is
+collected onto each container that transitively calls it — composable
+resource decls, no global registry.
+
+## 6. The binary runs in two worlds
+
+The same compiled binary plays two roles:
+
+- **Emit-time**, on your machine — `cargo athena emit` /
+  `publish` / `submit` walks the template closure from your
+  entrypoint and prints one `WorkflowTemplate` per template.
+- **Pod-time**, in Argo — the binary deserializes the step's inputs,
+  calls the matching `#[container]` body, and serializes the return.
+
+`cargo athena publish` cross-compiles it static-musl per `athena.toml`
+target and uploads it to your S3 `ArtifactRepository`. `emit` adds it
+as an input artifact to every container template; a tiny `sh`
+bootstrap picks the matching `app-<triple>` and execs it. The image
+needs only `sh` and `uname` — distroless works.
 
 ---
 
-With these in mind, the reference pages are just the details:
+With these in mind, the reference pages are the details:
 [`#[workflow]`](workflow.md), [`#[container]`](container.md),
 [the CLI](cli.md), and [`athena.toml`](configuration.md).
