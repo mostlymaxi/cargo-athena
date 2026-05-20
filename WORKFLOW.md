@@ -29,14 +29,14 @@ runtime surprises.
 
 | Arg | Effect |
 |---|---|
-| `name = "my-name"` | Override the Argo template name. Default is `<crate>-<fn>` (kebab-case). |
-| `steps` | Emit an Argo `steps:` template (one sequential group per statement, refs via `{{steps.X…}}`, no `dependencies`) instead of the default data-dependency `dag:`. |
-| `node_selector = { "k" = "v" }` | Set `nodeSelector` on this dag/steps template. The Argo controller **cascades** it onto every task pod this workflow `templateRef`s. **Keys and values are literal strings only** — see [Node selector](#node-selector). |
-| `on_exit_if_root = t` | Whole-workflow exit handler. Every workflow that sets it carries it on **its own** `WorkflowTemplate`'s `spec.hooks.exit.templateRef`. Argo runs exit hooks workflow-scoped: only the workflow you actually **submit** fires its handler — so `argo submit --from workflowtemplate/X` runs *X*'s handler; *X*'s handler stays inert when *X* is just a `templateRef`'d sub-step of a bigger run (submit it directly to get it). Distinct from the per-task `.on_exit(t)` builder, which is a different, always-fires task hook. |
-| `retry(limit = N \| unlimited, policy = "…", backoff = "<dur>")` | Template-level Argo `retryStrategy` on this dag/steps template. `limit` is **required** (`unlimited` ⇒ unbounded, no `limit` field); `policy` ∈ `Always\|OnFailure\|OnError\|OnTransientError` (optional; Argo defaults to `OnFailure`); `backoff` an int (seconds) or a [humantime](https://docs.rs/humantime) string like `"30s"`/`"1h30m"` (optional). Not re-stamped on synthesized `if`-wrapper templates (workflow-scoped-attr policy). |
-| `ttl_if_root(after_completion = <s>, after_success = <s>, after_failure = <s>)` | WorkflowSpec-scoped Argo `ttlStrategy` (GC the finished Workflow after the given duration). All three optional (int seconds or a humantime string) but **≥1 required**. **Root-only — applies only when this WorkflowTemplate is the workflow you actually submit; inert when used as a nested `templateRef`'d sub-workflow** (proven on real Argo v4.0.5; identical mechanism to `on_exit_if_root`). Not re-stamped on synthesized `if`-wrapper templates. |
-| `pod_gc_if_root(strategy = "<S>")` | WorkflowSpec-scoped Argo `podGC`. `strategy` **required**, ∈ `OnPodCompletion\|OnPodSuccess\|OnWorkflowCompletion\|OnWorkflowSuccess`. **Root-only** (same as `ttl_if_root`): applies only to the submitted top-level workflow; inert when nested via `templateRef`. |
-| `active_deadline_if_root = <secs \| "2h">` | WorkflowSpec-scoped Argo `WorkflowSpec.activeDeadlineSeconds` — **the only working whole-workflow timeout** (Argo applies `Template.timeout`/`Template.activeDeadlineSeconds` to *neither* dag nor steps templates, so a plain `timeout` on a `#[workflow]` would be a silent no-op — it isn't accepted here). Int = seconds, or a humantime string (`"90m"`, `"2h"`, `"1d"`). **Root-only** (same mechanism as `ttl_if_root`): caps only the workflow you actually submit; inert when nested via `templateRef`. Not re-stamped on synthesized `if`-wrapper templates. |
+| `name = "my-name"` | Override the Argo template name. Default: `<crate>-<fn>` (kebab). |
+| `steps` | Emit an Argo `steps:` (sequential) template instead of the default data-dependency `dag:`. |
+| `node_selector = { "k" = "v" }` | `nodeSelector` on this dag/steps template; the controller cascades it onto every task pod this workflow runs. Keys and values are literal strings — see [Node selector](#node-selector). |
+| `on_exit_if_root = t` | Whole-workflow exit handler on this template's own `spec.hooks.exit`. Fires only when *this* template is the workflow you submit. Distinct from the per-task `.on_exit(t)` builder. |
+| `retry(limit = N \| unlimited, policy = "…", backoff = <dur>)` | Template-level Argo `retryStrategy`. `limit` is **required** (`unlimited` ⇒ no cap); `policy` ∈ `Always\|OnFailure\|OnError\|OnTransientError`; `backoff` is an int (seconds) or a [humantime](https://docs.rs/humantime) string. |
+| `ttl_if_root(after_completion = <s>, after_success = <s>, after_failure = <s>)` | WorkflowSpec `ttlStrategy`: GC the finished Workflow. ≥1 of the three is required (int seconds or humantime). **Root-only.** |
+| `pod_gc_if_root(strategy = "<S>")` | WorkflowSpec `podGC`. `strategy` ∈ `OnPodCompletion\|OnPodSuccess\|OnWorkflowCompletion\|OnWorkflowSuccess`. **Root-only.** |
+| `active_deadline_if_root = <secs \| "2h">` | WorkflowSpec `activeDeadlineSeconds` — the whole-workflow runtime cap. The only timeout that works on a `#[workflow]`. **Root-only.** See [Timeouts](#timeouts). |
 
 All are optional. A parameter *name* (i.e. a function argument) or a
 `name = "…"` value that a YAML 1.1 parser reads as a boolean/null
@@ -45,31 +45,19 @@ error — Argo's YAML→JSON parser would silently mis-type it.
 
 ## Timeouts
 
-Argo has **three** different "stop after a while" knobs with
-overlapping names (its naming, not ours). The cargo-athena story:
-
-| Attribute | Argo field | Who enforces / when | Where it's valid |
-|---|---|---|---|
-| `timeout = <d>` | `Template.timeout` | Argo controller; from the node's start, **including** time queued/Pending | **`#[container]` only** |
-| `pod_running_timeout = <d>` | `Template.activeDeadlineSeconds` | Kubernetes kubelet (the pod's own `.spec.activeDeadlineSeconds`); only counts time actually **Running** | **`#[container]` only** |
-| `active_deadline_if_root = <d>` | `WorkflowSpec.activeDeadlineSeconds` | Argo controller; caps the **whole workflow** run | `#[container]` + `#[workflow]`, **root-only** |
-
-Why no `timeout`/`pod_running_timeout` on `#[workflow]`: a `#[workflow]`
-compiles to a **dag/steps** template, and Argo's own field docs say
-`Template.timeout` "may not be applied to Step or DAG templates" and
-`Template.activeDeadlineSeconds` is "only applicable to container and
-script templates". Setting either on a workflow would be a **silent
-no-op**, so they're rejected at compile time. To time-bound a whole
-workflow, use **`active_deadline_if_root`** — the only mechanism Argo
-actually enforces at workflow scope (verified against Argo v4.0.5
-source). Every duration value accepts an integer (seconds) or a
-[humantime](https://docs.rs/humantime) string (`"90s"`, `"1h30m"`,
-`"2d"`); `> 0`, normalized to whole seconds at compile time.
+To time-bound a whole workflow, use **`active_deadline_if_root`** —
+the only mechanism Argo enforces at workflow scope. The other two
+knobs (`timeout`, `pod_running_timeout`) are per-pod and live on
+[`#[container]`](container.md#timeouts).
 
 `_if_root` is load-bearing: like `ttl_if_root`/`pod_gc_if_root`, the
 cap applies **only when this WorkflowTemplate is the workflow you
-actually submit** — it is inert when this template is `templateRef`'d
+actually submit**. It is inert when this template is `templateRef`'d
 as a nested sub-workflow.
+
+Every duration is an integer (seconds) or a
+[humantime](https://docs.rs/humantime) string (`"90s"`, `"1h30m"`,
+`"2d"`).
 
 ## Node selector
 
@@ -81,26 +69,16 @@ as a nested sub-workflow.
 fn pipeline() { /* ... */ }
 ```
 
-Unlike [`#[container(node_selector = …)]`](container.md), a workflow's
-keys **and values are literal strings only — no `"lit" + arg` parameter
-injection.** A `#[workflow]` is a DAG/steps template, not a pod: athena
-puts the selector on the template and the Argo controller cascades it
-onto every task pod the workflow `templateRef`s (proven on real Argo
-v4.0.5). Per-arg injection cannot work here, because:
+athena puts the selector on the dag/steps template; the Argo
+controller cascades it onto every task pod the workflow runs. Unlike
+[`#[container(node_selector = …)]`](container.md), keys **and values
+are literal strings only** — no `"lit" + arg` parameter injection.
 
-- a *template-scoped* `{{=fromJSON(inputs.parameters.…)}}` is cascaded
-  **raw** — the child pod receives the literal string and Kubernetes
-  rejects it as an invalid label value; and
-- the only interpolation that survives the parent→child cascade is
-  `{{workflow.parameters.<NAME>}}`, which **always** refers to the
-  *submitted root workflow's* parameters — never this workflow's own
-  inputs when it runs as a `templateRef`'d sub-step.
-
-So a dynamic value is an **eyes-open escape hatch**: write a literal
-containing `{{workflow.parameters.foo}}` yourself (as in `region` above)
-and own the root-scoping — supply `foo` as a parameter of the workflow
-you actually `argo submit`, not of this sub-workflow. Plain static
-labels need no special handling.
+For a dynamic value, drop in `{{workflow.parameters.<NAME>}}` as a
+literal (as in `region` above). That's the only interpolation Argo
+keeps through the cascade, and it always resolves against the
+**submitted root** — supply `<NAME>` to the workflow you actually
+submit, not to this sub-workflow.
 
 ## The body
 
