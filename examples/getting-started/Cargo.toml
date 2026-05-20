@@ -1,0 +1,13 @@
+[package]
+name = "cargo-athena-example-getting-started"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+# Mirrors the snippet on the Getting Started docs page — copy-pasteable
+# and verified to compile by the workspace `cargo test`. The emitted
+# YAML lives next to the source (`emit.yaml`).
+
+[dependencies]
+cargo-athena = { workspace = true }

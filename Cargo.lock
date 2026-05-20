@@ -190,6 +190,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "cargo-athena-example-getting-started"
+version = "0.4.0"
+dependencies = [
+ "cargo-athena",
+]
+
+[[package]]
 name = "cargo-athena-example-importing"
 version = "0.4.0"
 dependencies = [
