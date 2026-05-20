@@ -11,9 +11,9 @@ use cargo_athena::{workflow, container};
 
 #[workflow]
 fn pipeline() {
-    let raw = fetch("https://example.com/data".to_string());
+    let raw = fetch("https://example.com/data".to_string());   // a #[container]
     let clean = transform(raw, 3);
-    publish(clean);
+    publish(clean);                                            // a #[container]
 }
 
 #[container(image = "ghcr.io/acme/app:latest")]
@@ -24,9 +24,9 @@ fn transform(data: String, factor: i64) -> String {
 
 That `#[workflow]` becomes an Argo `WorkflowTemplate` whose DAG wires
 `fetch → transform → publish` by their data dependencies. `transform`
-becomes a container template; in-pod, your binary deserializes `data`
-and `factor`, runs the function body, and serializes the result for the
-next step.
+becomes a container template of its own. In-pod, your binary
+deserializes `data` and `factor`, runs the function body, and
+serializes the result for the next step.
 
 ```yaml
 # `cargo athena emit` → one WorkflowTemplate per fn, wired by name:
@@ -50,9 +50,9 @@ spec:
 - **Type-checked data flow.** Passing the wrong type between steps, a
   missing struct field, or consuming a step that returns nothing is a
   **compile error** — caught long before a cluster ever sees it.
-- **Composable.** A workflow is a Rust type. Referencing it from another
-  crate force-links it; workflows compose across modules and crates with
-  no registry, no `build.rs`, no codegen step you run by hand.
+- **Composable.** A workflow is a Rust type. Reference it from another
+  crate to force-link it — workflows compose across modules and crates
+  with no registry or hand-run codegen.
 - **Real Rust in any image.** Your binary is fetched at runtime, so
   each step runs your Rust *on top of* any image you pick — a vendor's
   `postgres:16`, a CUDA base, your team's tooling image — with no
@@ -65,7 +65,7 @@ spec:
 | `#[workflow] fn` | an Argo `WorkflowTemplate` (a DAG, or sequential `steps`) |
 | `#[container] fn` | an Argo `WorkflowTemplate` (a container step) that runs your real Rust |
 | `#[fragment] fn` | a plain helper that carries pod resources into its callers |
-| `fn main()` | the entrypoint — and the single multi-step binary |
+| `fn main()` | the entrypoint into your workflow binary |
 
 Ship and run it in two commands: `cargo athena publish` (cross-compile
 + upload the binary), then `cargo athena submit <workflow>` (registers
