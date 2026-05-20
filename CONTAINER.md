@@ -34,9 +34,12 @@ The image is arbitrary — it only needs a POSIX `sh`, `tar`, and `uname`
 `.tar.gz` and uploads it to the S3 `ArtifactRepository` from
 `athena.toml` (`build` packages it locally without uploading). `emit`
 injects, into every container template, that tarball as an input
-artifact plus a small `sh` bootstrap that `uname`s, picks the matching
-`app-<triple>`, and `exec`s it with `--cargo-athena-template <name>`.
-All athena paths live under a pod-scoped `emptyDir` at `/athena`.
+artifact at `/athena/bin`. **Argo's executor init container
+auto-detects tarball inputs and extracts them**, so the per-arch
+`app-<triple>` files are already in place when the container starts;
+a small `sh` bootstrap then `uname`s, picks the matching `app-<triple>`,
+and `exec`s it with `--cargo-athena-template <name>`. All athena paths
+live under a pod-scoped `emptyDir` at `/athena`.
 
 ## Attribute arguments
 

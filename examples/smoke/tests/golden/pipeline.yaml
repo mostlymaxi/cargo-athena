@@ -11,7 +11,7 @@ spec:
       - name: mode
       artifacts:
       - name: athena-dist
-        path: /athena/dist.tar.gz
+        path: /athena/bin
         s3:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
@@ -23,8 +23,6 @@ spec:
           secretKeySecret:
             name: athena-s3
             key: secretKey
-        archive:
-          none: {}
     outputs:
       parameters:
       - name: return
@@ -43,8 +41,6 @@ spec:
           aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
           *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
         esac
-        mkdir -p /athena/bin
-        tar -xzf /athena/dist.tar.gz -C /athena/bin
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
         exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-branchy
@@ -103,7 +99,7 @@ spec:
       - name: rhs
       artifacts:
       - name: athena-dist
-        path: /athena/dist.tar.gz
+        path: /athena/bin
         s3:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
@@ -115,8 +111,6 @@ spec:
           secretKeySecret:
             name: athena-s3
             key: secretKey
-        archive:
-          none: {}
     outputs:
       parameters:
       - name: return
@@ -135,8 +129,6 @@ spec:
           aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
           *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
         esac
-        mkdir -p /athena/bin
-        tar -xzf /athena/dist.tar.gz -C /athena/bin
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
         exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-combine
@@ -169,7 +161,7 @@ spec:
       - name: url
       artifacts:
       - name: athena-dist
-        path: /athena/dist.tar.gz
+        path: /athena/bin
         s3:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
@@ -181,8 +173,6 @@ spec:
           secretKeySecret:
             name: athena-s3
             key: secretKey
-        archive:
-          none: {}
     outputs:
       parameters:
       - name: return
@@ -201,8 +191,6 @@ spec:
           aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
           *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
         esac
-        mkdir -p /athena/bin
-        tar -xzf /athena/dist.tar.gz -C /athena/bin
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
         exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-fetch
@@ -334,7 +322,7 @@ spec:
       - name: report
       artifacts:
       - name: athena-dist
-        path: /athena/dist.tar.gz
+        path: /athena/bin
         s3:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
@@ -346,8 +334,6 @@ spec:
           secretKeySecret:
             name: athena-s3
             key: secretKey
-        archive:
-          none: {}
       - name: notes
         path: /athena/artifacts/in/notes
         s3:
@@ -397,8 +383,6 @@ spec:
           aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
           *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
         esac
-        mkdir -p /athena/bin
-        tar -xzf /athena/dist.tar.gz -C /athena/bin
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
         exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-publish
@@ -427,7 +411,7 @@ spec:
       - name: factor
       artifacts:
       - name: athena-dist
-        path: /athena/dist.tar.gz
+        path: /athena/bin
         s3:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
@@ -439,8 +423,6 @@ spec:
           secretKeySecret:
             name: athena-s3
             key: secretKey
-        archive:
-          none: {}
     outputs:
       parameters:
       - name: return
@@ -459,8 +441,6 @@ spec:
           aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
           *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
         esac
-        mkdir -p /athena/bin
-        tar -xzf /athena/dist.tar.gz -C /athena/bin
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
         exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-transform

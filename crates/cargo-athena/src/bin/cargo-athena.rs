@@ -18,6 +18,8 @@ use std::process::{Command, Stdio, exit};
 mod emulate;
 #[path = "../submit.rs"]
 mod submit;
+#[path = "../tarball.rs"]
+mod tarball;
 
 /// Cargo plugin shim: invoked as `cargo athena <cmd>` → argv
 /// `cargo-athena athena <cmd>`, so `athena` is the wrapper subcommand.
@@ -404,14 +406,22 @@ fn build_tarball(
             .unwrap_or_else(|e| panic!("copy {from} -> {}: {e}", to.display()));
     }
 
-    let status = Command::new("tar")
-        .args(["-czf", &tarball, "-C"])
-        .arg(stage)
-        .arg(".")
-        .status()
-        .expect("tar failed to start");
-    if !status.success() {
-        exit(status.code().unwrap_or(1));
+    // Pack with pure-Rust `tar`+`flate2` (no host `tar`) under a
+    // single top-level `bin/` subdir — see `tarball.rs` for why
+    // (Argo's executor `unpack` renames a single top-level entry to
+    // the destination path; wrapping in a subdir keeps `/athena/bin`
+    // a directory for BOTH single- and multi-arch tarballs).
+    let entries: Vec<(std::path::PathBuf, String)> = targets
+        .iter()
+        .map(|t| (stage.join(format!("app-{t}")), format!("app-{t}")))
+        .collect();
+    let refs: Vec<(&std::path::Path, &str)> = entries
+        .iter()
+        .map(|(p, n)| (p.as_path(), n.as_str()))
+        .collect();
+    if let Err(e) = tarball::create(std::path::Path::new(&tarball), &refs) {
+        eprintln!("tarball create failed: {e}");
+        exit(1);
     }
     Some((tarball, s3, dest))
 }

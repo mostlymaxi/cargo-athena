@@ -196,4 +196,31 @@ SUBPHASE=$(argo get -n "$NS" "$SUBWF" -o json 2>/dev/null | jq -r '.status.phase
   echo "FAIL: submitted workflow $SUBWF phase=$SUBPHASE"; exit 1; }
 echo "ok: submit -> $SUBWF Succeeded"
 
+say "single-arch tarball probe (resubmit one e2e step against a 1-entry tarball)"
+# Argo's executor `unpack` (`workflow/executor/executor.go:1177-1218`,
+# v4.0.5) RENAMES a tarball's single top-level entry to the artifact
+# path — instead of extracting INTO it. Our `cargo-athena/src/
+# tarball.rs::create` wraps every entry under `bin/`, so the rename
+# hits that subdir → `/athena/bin` stays a directory in BOTH single-
+# and multi-entry cases. This probe asserts the single-arch case still
+# works on a real cluster: repack the already-built multi-arch tarball
+# down to ONE top-level entry, overwrite the same MinIO key (main e2e
+# is done — side effects are fine), and resubmit one #[container]
+# already applied above (`cleanup` — smallest, no I/O). Phase=Succeeded
+# means the bootstrap found `/athena/bin/app-<triple>` (the fix held);
+# the regression mode is the container failing with
+# `chmod: /athena/bin/app-<triple>: Not a directory`.
+STAGE=$(mktemp -d -t athena-single.XXXXXX)
+tar -xzf "$TARBALL" -C "$STAGE"
+find "$STAGE/bin" -mindepth 1 ! -name 'app-x86_64-unknown-linux-musl' -delete
+SINGLE_TB="$STAGE/single.tar.gz"
+tar -czf "$SINGLE_TB" -C "$STAGE" bin/app-x86_64-unknown-linux-musl
+mc cp "$SINGLE_TB" "athena-e2e/athena-artifacts/athena/bin/e2e/0.1.0/e2e.tar.gz" >/dev/null
+PROBE=$(argo submit -n "$NS" --wait -o name \
+  --from "workflowtemplate/cargo-athena-example-e2e-cleanup" | head -1)
+PROBE_PHASE=$(argo get -n "$NS" "$PROBE" -o json | jq -r '.status.phase')
+[ "$PROBE_PHASE" = "Succeeded" ] || { echo "FAIL: single-arch probe $PROBE phase=$PROBE_PHASE"; exit 1; }
+echo "ok: single-arch probe $PROBE Succeeded"
+rm -rf "$STAGE"
+
 say "PASS — full e2e green"

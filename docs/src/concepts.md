@@ -63,7 +63,8 @@ every container template; in-pod the bootstrap `uname`s, picks
 
 All athena paths live under a pod-scoped `emptyDir` at `/athena`, so it
 works on distroless / read-only-rootfs images — the image only needs a
-POSIX `sh`, `tar`, and `uname`.
+POSIX `sh` and `uname` (Argo's executor init container untars the
+binary input artifact, so no `tar` in your image).
 
 ---
 
