@@ -18,13 +18,9 @@ nix run github:mostlymaxi/cargo-athena -- athena …   # one-off, no install
 ```
 
 > [!IMPORTANT]
-> **Library users: keep `default-features = false`.** Your workflow
-> crate only needs the proc macros + a tiny runtime. The default `cli`
-> feature (what `cargo install` ships) pulls a large tree —
-> `kube`/`k8s-openapi`, `reqwest`, `object_store`, `tokio`, `clap` — for
-> the `cargo athena` binary alone. `cargo add cargo-athena
-> --no-default-features` (or `default-features = false` in
-> `Cargo.toml`) drops all of it from your build.
+> **Library users: keep `default-features = false`.** A workflow crate
+> needs only the proc macros + runtime; the default `cli` feature pulls
+> a heavy CLI tree (`kube`, `reqwest`, `tokio`, …) it doesn't use.
 
 📖 **[Documentation](https://mostlymaxi.github.io/cargo-athena/)** — from
 zero to adept (the same `#[workflow]`/`#[container]` reference is also in
