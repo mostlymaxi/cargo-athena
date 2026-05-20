@@ -14,11 +14,9 @@ nix profile install github:mostlymaxi/cargo-athena
 nix run github:mostlymaxi/cargo-athena -- athena …
 ```
 
-> ⚠️ **Library: `--no-default-features`.** A workflow crate needs only
-> the macros + runtime. The default `cli` feature pulls a large tree
-> (`kube`, `reqwest`, `object_store`, `tokio`, `clap`); disabling it
-> keeps your build lean. The installed `cargo athena` binary keeps
-> `cli` on, so the subcommand is unaffected.
+> ⚠️ **Library users: `--no-default-features`.** A workflow crate needs
+> only the macros + runtime; the default `cli` feature pulls a heavy
+> CLI tree (`kube`, `reqwest`, `tokio`, …) it doesn't use.
 
 `emit` needs nothing but an `athena.toml`. `publish` also needs the
 Zig cross toolchain: `cargo install cargo-zigbuild` +
