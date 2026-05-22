@@ -256,10 +256,14 @@ argo! {
         pub mode: Option<i32>,
     }
 
-    /// Mirrors a k8s SecretKeySelector — a key in a Secret.
+    /// Mirrors a k8s SecretKeySelector — a key in a Secret. `optional`
+    /// is K8s's "don't fail pod-start if missing" flag, surfaced by
+    /// `cargo_athena::secret_opt!` (skip-serialized when false, so
+    /// existing S3Artifact users stay byte-identical).
     pub struct SecretKeySelector {
         pub name: String,
         pub key: String,
+        pub optional: bool,
     }
 
     /// Mirrors Argo's S3Artifact.
@@ -345,6 +349,15 @@ argo! {
     pub struct EnvVar {
         pub name: String,
         pub value: String,
+        /// Pulled from a `valueFrom` source instead of a literal. Used
+        /// by `cargo_athena::secret!`/`secret_opt!` (secretKeyRef).
+        pub value_from: Option<EnvVarSource>,
+    }
+
+    /// Argo `EnvVarSource`. Only `secretKeyRef` is exposed today; this
+    /// can grow as we surface more (configMapKeyRef, fieldRef, …).
+    pub struct EnvVarSource {
+        pub secret_key_ref: Option<SecretKeySelector>,
     }
 
     pub struct Volume {

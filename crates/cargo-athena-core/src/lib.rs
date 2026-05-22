@@ -189,6 +189,55 @@ macro_rules! __cargo_athena_save_artifact_str {
     };
 }
 
+/// Declare a K8s Secret-sourced env var and read it back at runtime as
+/// a `String`. Public form: `compile_error!` outside
+/// `#[container]`/`#[fragment]` (same gating as `host!`). Two literal
+/// args: `(secret_name, key)`. Panics at runtime if the env var the
+/// macro plants isn't set; pair with `secret_opt!` for the no-panic
+/// variant.
+#[macro_export]
+macro_rules! secret {
+    ($($t:tt)*) => {
+        ::core::compile_error!(
+            "`secret!` may only be used directly inside a \
+             `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn"
+        )
+    };
+}
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __cargo_athena_secret {
+    ($name:literal, $key:literal) => {
+        $crate::rt::secret_value($name, $key)
+    };
+    ($($t:tt)*) => {
+        ::core::compile_error!("secret!(\"secret-name\", \"key\")")
+    };
+}
+
+/// Same as [`secret!`] but returns `Option<String>` and emits
+/// `optional: true` on the Argo `secretKeyRef` — Argo skips the env
+/// entry instead of failing pod-start when the secret/key is missing.
+#[macro_export]
+macro_rules! secret_opt {
+    ($($t:tt)*) => {
+        ::core::compile_error!(
+            "`secret_opt!` may only be used directly inside a \
+             `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn"
+        )
+    };
+}
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __cargo_athena_secret_opt {
+    ($name:literal, $key:literal) => {
+        $crate::rt::secret_value_opt($name, $key)
+    };
+    ($($t:tt)*) => {
+        ::core::compile_error!("secret_opt!(\"secret-name\", \"key\")")
+    };
+}
+
 /// Runtime shims referenced by the declaration macros. Artifact ports are
 /// plain files at fixed paths; Argo moves them (no S3 from us).
 pub mod rt {
@@ -232,6 +281,47 @@ pub mod rt {
 
     pub fn save_artifact_str(name: &str, data: impl AsRef<str>) {
         save_artifact(name, data.as_ref().as_bytes());
+    }
+
+    /// `secret!(name, key)` runtime: read the env var the macro emits.
+    /// Panics if missing (use [`secret_value_opt`] for the no-panic
+    /// flavour, paired with `secret_opt!` on the declaration side).
+    pub fn secret_value(name: &str, key: &str) -> String {
+        let var = super::secret_env_name(name, key);
+        std::env::var(&var).unwrap_or_else(|e| {
+            panic!("athena: secret!({name:?}, {key:?}) env var `{var}` missing: {e}")
+        })
+    }
+
+    /// `secret_opt!(name, key)` runtime: `None` when the env var is
+    /// unset (e.g. Argo skipped the entry because the secret/key is
+    /// missing and `optional: true`).
+    pub fn secret_value_opt(name: &str, key: &str) -> Option<String> {
+        std::env::var(super::secret_env_name(name, key)).ok()
+    }
+}
+
+/// The pod env var name a `secret!`/`secret_opt!` decl gets, derived
+/// deterministically from the K8s `(secret_name, key)` pair so the
+/// emit-side and the run-side agree. Uppercased, non-alphanumerics
+/// flattened to `_`, separated by `__` so the two halves stay
+/// distinguishable. Both sides go through this function — never
+/// hard-code an env name elsewhere.
+pub fn secret_env_name(name: &str, key: &str) -> String {
+    let mut s = String::from("ATHENA_SEC_");
+    push_munged(&mut s, name);
+    s.push_str("__");
+    push_munged(&mut s, key);
+    s
+}
+
+fn push_munged(out: &mut String, input: &str) {
+    for c in input.chars() {
+        out.push(if c.is_ascii_alphanumeric() {
+            c.to_ascii_uppercase()
+        } else {
+            '_'
+        });
     }
 }
 
@@ -723,6 +813,9 @@ pub struct FragmentReg {
     pub host_paths: &'static [&'static str],
     pub in_artifacts: &'static [&'static str],
     pub out_artifacts: &'static [&'static str],
+    /// `(secret_name, key, optional)` triples from this fragment's
+    /// `secret!`/`secret_opt!` declarations.
+    pub secrets: &'static [(&'static str, &'static str, bool)],
     pub callees: &'static [&'static str],
 }
 inventory::collect!(FragmentReg);
@@ -800,6 +893,42 @@ impl BuildCtx {
     pub fn resolved_out_artifacts(&self, own: &[&str], callees: &[&str]) -> Vec<String> {
         self.resolved(own, callees, |f| f.out_artifacts)
     }
+
+    /// Env-var-sourced K8s secrets: own `secret!`/`secret_opt!` decls
+    /// ∪ the `#[fragment]` closure (deduped on the `(name, key)` pair —
+    /// optionality is preserved from the first occurrence). Same shape
+    /// as `resolved`, but the data are triples not strings, so this is
+    /// open-coded rather than going through the generic helper.
+    pub fn resolved_secrets(
+        &self,
+        own: &[(&str, &str, bool)],
+        own_callees: &[&str],
+    ) -> Vec<(String, String, bool)> {
+        let mut out: Vec<(String, String, bool)> = Vec::new();
+        let mut seen: HashSet<(String, String)> = HashSet::new();
+        let mut push = |n: &str, k: &str, opt: bool, out: &mut Vec<_>| {
+            if seen.insert((n.to_string(), k.to_string())) {
+                out.push((n.to_string(), k.to_string(), opt));
+            }
+        };
+        for (n, k, opt) in own {
+            push(n, k, *opt, &mut out);
+        }
+        let mut queue: Vec<&str> = own_callees.to_vec();
+        let mut visited: HashSet<&str> = HashSet::new();
+        while let Some(c) = queue.pop() {
+            if !visited.insert(c) {
+                continue;
+            }
+            if let Some(f) = self.fragments.get(c) {
+                for (n, k, opt) in f.secrets {
+                    push(n, k, *opt, &mut out);
+                }
+                queue.extend(f.callees.iter().copied());
+            }
+        }
+        out
+    }
 }
 
 fn archive_none() -> api::ArchiveStrategy {
@@ -820,10 +949,12 @@ pub fn s3_loc(s3: &S3Repo, key: &str) -> api::S3Artifact {
         access_key_secret: Some(api::SecretKeySelector {
             name: s3.access_key_secret.name.clone(),
             key: s3.access_key_secret.key.clone(),
+            ..Default::default()
         }),
         secret_key_secret: Some(api::SecretKeySelector {
             name: s3.secret_key_secret.name.clone(),
             key: s3.secret_key_secret.key.clone(),
+            ..Default::default()
         }),
     }
 }

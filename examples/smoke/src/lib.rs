@@ -417,3 +417,28 @@ pub async fn delay(label: String) -> String {
 pub fn pipeline_async() {
     let _ = delay("hello".to_string());
 }
+
+// --- secret! / secret_opt! -------------------------------------------------
+
+/// `#[fragment]` carrying a `secret!`. Every container that
+/// transitively calls this gets a `valueFrom.secretKeyRef` env var
+/// stamped on its template — same closure as `host!`/artifact ports.
+#[fragment]
+fn with_db_creds() {
+    let _pw = cargo_athena::secret!("db-creds", "password");
+}
+
+/// Direct `secret!` + optional `secret_opt!` + fragment-carried
+/// secret (`db-creds/password` propagated through `with_db_creds`).
+#[container]
+pub fn use_secrets(label: String) -> String {
+    let token = cargo_athena::secret!("api-tokens", "api");
+    let trace = cargo_athena::secret_opt!("debug-creds", "trace");
+    with_db_creds(); // pulls db-creds/password onto this template
+    format!("{label}:{token}:{trace:?}")
+}
+
+#[workflow]
+pub fn pipeline_secrets() {
+    use_secrets("hi".to_string());
+}

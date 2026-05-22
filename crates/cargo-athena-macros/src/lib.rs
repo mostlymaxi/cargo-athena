@@ -82,6 +82,12 @@ const DECL_MACROS: &[(&str, &str, DeclKind)] = &[
         "__cargo_athena_save_artifact_str",
         DeclKind::OutArtifact,
     ),
+    ("secret", "__cargo_athena_secret", DeclKind::Secret),
+    (
+        "secret_opt",
+        "__cargo_athena_secret_opt",
+        DeclKind::SecretOpt,
+    ),
 ]; // NB: keep in sync with the macro pairs in cargo-athena-core.
 
 #[derive(Clone, Copy, PartialEq)]
@@ -89,6 +95,12 @@ enum DeclKind {
     Host,
     InArtifact,
     OutArtifact,
+    /// `secret!(name, key)` — required env-sourced K8s secret. Two
+    /// string literals; collected into `BodyScan.secrets` with
+    /// `optional = false`.
+    Secret,
+    /// `secret_opt!(name, key)` — optional variant; `optional = true`.
+    SecretOpt,
 }
 
 fn decl_kind(mac: &syn::Macro) -> Option<(DeclKind, &'static str)> {
@@ -114,6 +126,24 @@ fn first_str_lit(mac: &syn::Macro) -> Option<String> {
     }
 }
 
+/// `secret!`/`secret_opt!` take two string literals
+/// (`(secret_name, key)`). Returns the pair when the call is
+/// well-formed; the public-form gate already errors on bad shape.
+fn two_str_lits(mac: &syn::Macro) -> Option<(String, String)> {
+    let args = mac
+        .parse_body_with(syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated)
+        .ok()?;
+    let mut it = args.into_iter();
+    let lit = |e: Expr| match e {
+        Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(s),
+            ..
+        }) => Some(s.value()),
+        _ => None,
+    };
+    Some((lit(it.next()?)?, lit(it.next()?)?))
+}
+
 /// Static collector: every decl-macro literal (across all branches) + every
 /// called ident, used for the cross-item `#[fragment]` closure.
 #[derive(Default)]
@@ -121,18 +151,42 @@ struct BodyScan {
     host_paths: Vec<String>,
     in_artifacts: Vec<String>,
     out_artifacts: Vec<String>,
+    /// `(secret_name, key, optional)` triples from `secret!` /
+    /// `secret_opt!` declarations. Same union/closure semantics as the
+    /// other decl buckets — propagated through `#[fragment]`.
+    secrets: Vec<(String, String, bool)>,
     callees: Vec<String>,
 }
 
 impl<'ast> Visit<'ast> for BodyScan {
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        if let Some((kind, _)) = decl_kind(mac)
-            && let Some(name) = first_str_lit(mac)
-        {
+        if let Some((kind, _)) = decl_kind(mac) {
             match kind {
-                DeclKind::Host => self.host_paths.push(name),
-                DeclKind::InArtifact => self.in_artifacts.push(name),
-                DeclKind::OutArtifact => self.out_artifacts.push(name),
+                DeclKind::Host => {
+                    if let Some(n) = first_str_lit(mac) {
+                        self.host_paths.push(n);
+                    }
+                }
+                DeclKind::InArtifact => {
+                    if let Some(n) = first_str_lit(mac) {
+                        self.in_artifacts.push(n);
+                    }
+                }
+                DeclKind::OutArtifact => {
+                    if let Some(n) = first_str_lit(mac) {
+                        self.out_artifacts.push(n);
+                    }
+                }
+                DeclKind::Secret => {
+                    if let Some((n, k)) = two_str_lits(mac) {
+                        self.secrets.push((n, k, false));
+                    }
+                }
+                DeclKind::SecretOpt => {
+                    if let Some((n, k)) = two_str_lits(mac) {
+                        self.secrets.push((n, k, true));
+                    }
+                }
             }
         }
         syn::visit::visit_macro(self, mac);
@@ -160,7 +214,19 @@ fn scan_body(func: &ItemFn) -> BodyScan {
         v.sort();
         v.dedup();
     }
+    s.secrets.sort();
+    s.secrets.dedup();
     s
+}
+
+/// Render a `BodyScan.secrets` list as a `&[(&'static str, &'static
+/// str, bool)]` token slice — the shape `FragmentReg.secrets` /
+/// `BuildCtx::resolved_secrets` expect.
+fn secret_slice_tokens(secrets: &[(String, String, bool)]) -> proc_macro2::TokenStream {
+    let entries = secrets.iter().map(|(n, k, opt)| {
+        quote! { (#n, #k, #opt) }
+    });
+    quote! { &[ #( #entries ),* ] }
 }
 
 fn str_slice(items: &[String]) -> TokenStream2 {
@@ -1009,6 +1075,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let host_slice = str_slice(&scan.host_paths);
     let in_art_slice = str_slice(&scan.in_artifacts);
     let out_art_slice = str_slice(&scan.out_artifacts);
+    let secret_slice = secret_slice_tokens(&scan.secrets);
     let callee_slice = str_slice(&scan.callees);
     // Lower the injectable attribute values (image / service_account /
     // node_selector values) — a string literal stays verbatim; a
@@ -1231,12 +1298,38 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                         image: __d.image,
                         command: __d.command,
                         args: __d.args,
-                        env: ::std::vec![
-                            #( ::cargo_athena::api::EnvVar {
-                                name: #param_env_names.to_string(),
-                                value: #param_env_vals.to_string(),
-                            } ),*
-                        ],
+                        env: {
+                            let mut __env: ::std::vec::Vec<::cargo_athena::api::EnvVar> = ::std::vec![
+                                #( ::cargo_athena::api::EnvVar {
+                                    name: #param_env_names.to_string(),
+                                    value: #param_env_vals.to_string(),
+                                    ..::core::default::Default::default()
+                                } ),*
+                            ];
+                            // Resolved `secret!`/`secret_opt!` decls (own ∪ #[fragment]
+                            // closure). Each becomes one `valueFrom.secretKeyRef` env;
+                            // run-mode reads it back via `rt::secret_value(name, key)`.
+                            for (__sn, __sk, __opt) in __ctx
+                                .resolved_secrets(#secret_slice, #callee_slice)
+                            {
+                                __env.push(::cargo_athena::api::EnvVar {
+                                    name: ::cargo_athena::secret_env_name(&__sn, &__sk),
+                                    value_from: ::core::option::Option::Some(
+                                        ::cargo_athena::api::EnvVarSource {
+                                            secret_key_ref: ::core::option::Option::Some(
+                                                ::cargo_athena::api::SecretKeySelector {
+                                                    name: __sn,
+                                                    key: __sk,
+                                                    optional: __opt,
+                                                },
+                                            ),
+                                        },
+                                    ),
+                                    ..::core::default::Default::default()
+                                });
+                            }
+                            __env
+                        },
                         volume_mounts: __mounts,
                         ..::core::default::Default::default()
                     }),
@@ -3330,11 +3423,12 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
     if !scan.host_paths.is_empty()
         || !scan.in_artifacts.is_empty()
         || !scan.out_artifacts.is_empty()
+        || !scan.secrets.is_empty()
     {
         return syn::Error::new_spanned(
             &func.sig.ident,
-            "`host!`/`load_artifact*!`/`save_artifact*!` cannot be used in a \
-             #[workflow]: a workflow is a DAG, not a pod. Declare them in the \
+            "`host!`/`load_artifact*!`/`save_artifact*!`/`secret*!` cannot be used \
+             in a #[workflow]: a workflow is a DAG, not a pod. Declare them in the \
              #[container] (or a #[fragment] it calls) that runs in-cluster.",
         )
         .to_compile_error()
@@ -3580,6 +3674,7 @@ pub fn fragment(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let host_slice = str_slice(&scan.host_paths);
     let in_art_slice = str_slice(&scan.in_artifacts);
     let out_art_slice = str_slice(&scan.out_artifacts);
+    let secret_slice = secret_slice_tokens(&scan.secrets);
     let callee_slice = str_slice(&scan.callees);
 
     let expanded = quote! {
@@ -3591,6 +3686,7 @@ pub fn fragment(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 host_paths: #host_slice,
                 in_artifacts: #in_art_slice,
                 out_artifacts: #out_art_slice,
+                secrets: #secret_slice,
                 callees: #callee_slice,
             }
         }

@@ -253,6 +253,39 @@ Operands are an argument or a named struct field of one, and must be
 `String`/`&str`/number. See
 [`#[container]` → Parameter injection](container.md).
 
+## Pull a K8s Secret as an env var
+
+`secret!("secret-name", "key")` declares a Kubernetes Secret env on
+the container template and reads it back at runtime as a `String`.
+`secret_opt!` is the no-panic flavour (returns `Option<String>`).
+
+```rust,ignore
+#[container]
+fn fetch(url: String) -> String {
+    let token = cargo_athena::secret!("api-tokens", "api");
+    let trace = cargo_athena::secret_opt!("debug-creds", "trace");
+    /* … use them … */
+    String::new()
+}
+```
+
+Like `host!`, declarations are collected statically and carried through
+`#[fragment]` callees, so a shared helper can stamp the same secret onto
+every container that uses it:
+
+```rust,ignore
+#[fragment]
+fn with_db_creds() { let _ = cargo_athena::secret!("db-creds", "password"); }
+
+#[container]
+fn migrate() { with_db_creds(); /* db-creds/password env now lives here */ }
+```
+
+Each declaration adds one `env` entry with `valueFrom.secretKeyRef`
+on the container template. `secret_opt!` adds `optional: true` so
+Argo skips the entry instead of failing pod-start when the secret/key
+is missing.
+
 ## Async `#[container]` fns
 
 Mark a container `async fn` and the macro wraps the body in a tokio
