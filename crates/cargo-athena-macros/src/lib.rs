@@ -561,6 +561,12 @@ struct ContainerArgs {
     /// Literal keys, injectable values (same grammar as `env` /
     /// `node_selector`).
     annotations: std::collections::BTreeMap<String, syn::Expr>,
+    /// `privileged = true` — K8s `securityContext.privileged: true` on
+    /// this container. Off by default; opt in only when you genuinely
+    /// need host devices / kernel-level access (mounting NVIDIA gear,
+    /// running `iptables`, …). The cluster's PodSecurityPolicy /
+    /// PodSecurity admission still has the final say.
+    privileged: bool,
 }
 
 /// `#[workflow(name = "...", steps, node_selector = { "k" = "v", ... },
@@ -1177,6 +1183,18 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let host_mount_hosts: Vec<&String> = cfg.host_mount.iter().map(|h| &h.host_path).collect();
     let host_mount_mounts: Vec<&String> = cfg.host_mount.iter().map(|h| &h.mount_path).collect();
     let host_mount_ro: Vec<bool> = cfg.host_mount.iter().map(|h| h.read_only).collect();
+    // `privileged = true` → K8s `securityContext.privileged: true`. Off
+    // → emit `security_context: None` so the empty struct is
+    // skip-serialized and existing goldens stay byte-identical.
+    let security_context_tok = if cfg.privileged {
+        quote! {
+            ::core::option::Option::Some(::cargo_athena::api::SecurityContext {
+                privileged: true,
+            })
+        }
+    } else {
+        quote! { ::core::option::Option::None }
+    };
     let image_opt = match &image_s {
         Some(s) => quote! { ::core::option::Option::Some(#s) },
         None => quote! { ::core::option::Option::None },
@@ -1391,6 +1409,7 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                         image: __d.image,
                         command: __d.command,
                         args: __d.args,
+                        security_context: #security_context_tok,
                         env: {
                             let mut __env: ::std::vec::Vec<::cargo_athena::api::EnvVar> = ::std::vec![
                                 #( ::cargo_athena::api::EnvVar {
