@@ -20,6 +20,7 @@ const BIN_RETRY: &str = env!("CARGO_BIN_EXE_smoke-retry");
 const BIN_TTL: &str = env!("CARGO_BIN_EXE_smoke-ttl");
 const BIN_DEADLINE: &str = env!("CARGO_BIN_EXE_smoke-deadline");
 const BIN_ASYNC: &str = env!("CARGO_BIN_EXE_smoke-async");
+const BIN_SECRETS: &str = env!("CARGO_BIN_EXE_smoke-secrets");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -235,6 +236,39 @@ fn run_mode_transform() {
 #[test]
 fn emit_pipeline_async() {
     assert_golden("pipeline_async.yaml", &run_bin(BIN_ASYNC, &[]));
+}
+
+/// `secret!`/`secret_opt!`: pin the `env[].valueFrom.secretKeyRef`
+/// entries on the container template (including the
+/// fragment-propagated `db-creds/password`).
+#[test]
+fn emit_pipeline_secrets() {
+    assert_golden("pipeline_secrets.yaml", &run_bin(BIN_SECRETS, &[]));
+}
+
+/// Run mode: with Argo's secretKeyRef env vars planted by the
+/// executor, `rt::secret_value` reads them back; `secret_opt!`
+/// returns `None` when the optional env is unset.
+#[test]
+fn run_mode_use_secrets() {
+    let out = run_bin(
+        BIN_SECRETS,
+        &[
+            (
+                "CARGO_ATHENA_TEMPLATE",
+                "cargo-athena-example-smoke-use-secrets",
+            ),
+            ("CARGO_ATHENA_INPUT", r#"{"label":"hi"}"#),
+            // The env names mirror what the macro emits in the WT —
+            // ATHENA_SEC_<munged-secret>__<munged-key> (uppercased,
+            // non-alphanumerics → _).
+            ("ATHENA_SEC_API_TOKENS__API", "tok123"),
+            ("ATHENA_SEC_DB_CREDS__PASSWORD", "dbpw"),
+            // ATHENA_SEC_DEBUG_CREDS__TRACE deliberately unset:
+            // `secret_opt!` returns None.
+        ],
+    );
+    assert_golden("run_use_secrets.txt", &out);
 }
 
 /// Run mode: drives the async-fn container body via the macro-built

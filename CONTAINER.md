@@ -174,6 +174,8 @@ and a `#[workflow]` using one is a hard error):
 | `load_artifact_str!("key")` | same, as text | `String` |
 | `save_artifact!("key", bytes)` | an Argo S3 **output** artifact port | writes `impl AsRef<[u8]>` |
 | `save_artifact_str!("key", text)` | same, as text | writes `impl AsRef<str>` |
+| `secret!("name", "key")` | a K8s Secret env on this container (`valueFrom.secretKeyRef`) | `String` (panics if unset) |
+| `secret_opt!("name", "key")` | same, but `optional: true` on the ref | `Option<String>` |
 
 ```rust,ignore
 #[container]

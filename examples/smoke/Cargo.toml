@@ -70,6 +70,10 @@ path = "src/bin/deadline_main.rs"
 name = "smoke-async"
 path = "src/bin/async_main.rs"
 
+[[bin]]
+name = "smoke-secrets"
+path = "src/bin/secrets_main.rs"
+
 [dependencies]
 # `tokio` enables `async fn` `#[container]` bodies (re-exports tokio).
 cargo-athena = { workspace = true, features = ["tokio"] }
