@@ -196,6 +196,22 @@ SUBPHASE=$(argo get -n "$NS" "$SUBWF" -o json 2>/dev/null | jq -r '.status.phase
   echo "FAIL: submitted workflow $SUBWF phase=$SUBPHASE"; exit 1; }
 echo "ok: submit -> $SUBWF Succeeded"
 
+say "submit pipeline_steps (#[workflow(steps)]) — live steps-mode assertion"
+# Macro/golden tests pin the emit shape; this asserts Argo actually
+# accepts the `steps:` template + cross-step `{{steps.X.outputs.…}}`
+# refs on a live cluster across the v4.0/v3.7/v3.6 matrix.
+STEPSWF=$( cd "$ROOT" && cargo run -q -p cargo-athena --bin cargo-athena -- \
+  athena submit cargo-athena-example-e2e-pipeline-steps \
+  --package "$PKG" --bin "$BIN" -n "$NS" --skip-binary-check -y \
+  2>/dev/null | tail -1 )
+echo "submit created: $STEPSWF"
+[ -n "$STEPSWF" ] || { echo "FAIL: steps submit printed no workflow name"; exit 1; }
+argo wait -n "$NS" "$STEPSWF" >/dev/null 2>&1 || true
+STEPSPHASE=$(argo get -n "$NS" "$STEPSWF" -o json 2>/dev/null | jq -r '.status.phase')
+[ "$STEPSPHASE" = "Succeeded" ] || {
+  echo "FAIL: pipeline_steps $STEPSWF phase=$STEPSPHASE"; exit 1; }
+echo "ok: pipeline_steps -> $STEPSWF Succeeded"
+
 say "single-arch tarball probe (resubmit one e2e step against a 1-entry tarball)"
 # Argo's executor `unpack` (`workflow/executor/executor.go:1177-1218`,
 # v4.0.5) RENAMES a tarball's single top-level entry to the artifact
