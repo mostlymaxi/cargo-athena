@@ -442,3 +442,40 @@ pub fn use_secrets(label: String) -> String {
 pub fn pipeline_secrets() {
     use_secrets("hi".to_string());
 }
+
+// --- env / host_mount / annotations (pod-spec attrs) -----------------------
+
+/// One container exercising all three new pod-spec attrs at once:
+///
+/// * `env = { K = "lit" + arg, … }` — extra env entries (literal keys,
+///   injectable values). The body reads them via `std::env::var(…)`.
+/// * `host_mount = [{ host_path, mount_path, read_only }, …]` — explicit
+///   hostPath mounts with chosen mount paths (the safe-by-construction
+///   `host!` always lands under `/athena/mounts/<munged>` instead).
+/// * `annotations = { k = "lit" + arg, … }` — pod template annotations.
+#[container(
+    image = "ghcr.io/acme/svc:" + tag,
+    env = {
+        "LOG_LEVEL" = "info",
+        "REGION"    = "us-" + zone,        // injected
+    },
+    host_mount = [
+        { host_path = "/dev/shm", mount_path = "/dev/shm" },
+        { host_path = "/etc/ca-certs", mount_path = "/certs", read_only = true },
+    ],
+    annotations = {
+        "team.athena/owner" = "platform",
+        "trace.athena/run"  = "run-" + tag,  // injected
+    },
+)]
+pub fn run_svc(tag: String, zone: String) {
+    println!("run_svc tag={tag} zone={zone}");
+}
+
+#[workflow(annotations = {
+    "team.athena/owner" = "platform",
+    "argo.io/wf-tier" = "{{workflow.parameters.tier}}",
+})]
+pub fn pipeline_pod_attrs() {
+    run_svc("42".to_string(), "east".to_string());
+}

@@ -273,7 +273,12 @@ pub fn container_emulate(a: EmulateArgs) {
         if !Path::new(hp).exists() {
             eprintln!("warning: host! path {hp} doesn't exist locally; binding anyway");
         }
-        c.arg("-v").arg(format!("{hp}:{hp}"));
+        // Mirror the in-pod mount path (safe-by-construction; see
+        // `cargo_athena::host_mount_path` / `ATHENA_MOUNTS_DIR`). Never
+        // bind a host path at the same in-container path — `host!("/")`
+        // would otherwise mount the host root over the container's.
+        let mount = cargo_athena::host_mount_path(hp);
+        c.arg("-v").arg(format!("{hp}:{mount}"));
     }
     for (name, json) in &values {
         c.arg("-e").arg(format!("{name}={json}"));
