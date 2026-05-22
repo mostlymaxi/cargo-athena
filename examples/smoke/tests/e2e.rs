@@ -21,6 +21,7 @@ const BIN_TTL: &str = env!("CARGO_BIN_EXE_smoke-ttl");
 const BIN_DEADLINE: &str = env!("CARGO_BIN_EXE_smoke-deadline");
 const BIN_ASYNC: &str = env!("CARGO_BIN_EXE_smoke-async");
 const BIN_SECRETS: &str = env!("CARGO_BIN_EXE_smoke-secrets");
+const BIN_POD_ATTRS: &str = env!("CARGO_BIN_EXE_smoke-pod-attrs");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -236,6 +237,16 @@ fn run_mode_transform() {
 #[test]
 fn emit_pipeline_async() {
     assert_golden("pipeline_async.yaml", &run_bin(BIN_ASYNC, &[]));
+}
+
+/// `env` + `host_mount` + `annotations` attrs (container) and
+/// `annotations` (workflow). Container side exercises all three with
+/// injection on env/annotations values; workflow side puts plain +
+/// `{{workflow.parameters.tier}}`-templated annotations on the dag
+/// template's `metadata.annotations`.
+#[test]
+fn emit_pipeline_pod_attrs() {
+    assert_golden("pipeline_pod_attrs.yaml", &run_bin(BIN_POD_ATTRS, &[]));
 }
 
 /// `secret!`/`secret_opt!`: pin the `env[].valueFrom.secretKeyRef`

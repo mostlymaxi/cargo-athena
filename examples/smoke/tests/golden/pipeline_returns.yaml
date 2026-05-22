@@ -51,7 +51,7 @@ spec:
       - name: athena-work
         mountPath: /athena
       - name: host-secrets-token
-        mountPath: /secrets/token
+        mountPath: /athena/mounts/secrets-token
     volumes:
     - name: athena-work
       emptyDir: {}

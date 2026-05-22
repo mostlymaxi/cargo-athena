@@ -243,9 +243,17 @@ macro_rules! __cargo_athena_secret_opt {
 pub mod rt {
     use std::path::PathBuf;
 
-    /// Identity: the volume is already mounted when the container runs.
-    pub const fn host_path(path: &'static str) -> &'static str {
-        path
+    /// Resolve a `host!("/p")` to its in-pod mount path. We deliberately
+    /// **do not** mount host paths at the same in-container path —
+    /// `host!("/")` would otherwise overlay-mount the host root over
+    /// the container's root, and `host!("/etc")` would shadow the
+    /// image's own `/etc`. Instead the hostPath is mounted under
+    /// `[/athena/mounts/<munged>]` and the macro returns that path, so
+    /// user code stays portable and can't accidentally clobber the
+    /// image's filesystem. Both emit and run sides go through
+    /// [`super::host_mount_path`] so they agree.
+    pub fn host_path(host: &str) -> String {
+        super::host_mount_path(host)
     }
 
     /// Where Argo drops/collects declared artifact ports inside the pod.
@@ -555,6 +563,14 @@ pub const ATHENA_DIR: &str = "/athena";
 /// built-in tarball auto-extraction (no `archive: none`, no `tar` in
 /// the main container's image — see `container_delivery`).
 pub const ATHENA_BIN_DIR: &str = "/athena/bin";
+/// Where every `host!`-declared hostPath gets mounted inside the
+/// container. Mounting at the host's own path (e.g. `host!("/")` →
+/// `/`) would overlay-mount the host filesystem on top of the image
+/// — a footgun and a security risk. Routing through this directory
+/// makes `host!` safe-by-construction; the `host_mount` `#[container]`
+/// attr is the explicit escape hatch for same-path / chosen-path
+/// mounts.
+pub const ATHENA_MOUNTS_DIR: &str = "/athena/mounts";
 /// The in-pod arch-resolving + exec bootstrap, kept in a separate
 /// `bootstrap.sh` so it can be read, edited, and `shellcheck`'d as a
 /// plain shell file rather than buried in a Rust `format!`. `@@ARMS@@`
@@ -1271,7 +1287,11 @@ pub fn kebab(s: &str) -> String {
     s.replace('_', "-").to_ascii_lowercase()
 }
 
-fn volume_name(path: &str) -> String {
+/// DNS-1123-ish slug for a host path (alphanumerics kept, others →
+/// `-`; trimmed; empty → `v`). Shared between `volume_name` and
+/// `host_mount_path` so the Volume name and the in-container mount
+/// path agree on the same suffix for a given hostPath.
+fn munge_host_path(path: &str) -> String {
     let mut n: String = path
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
@@ -1280,10 +1300,25 @@ fn volume_name(path: &str) -> String {
     if n.is_empty() {
         n.push('v');
     }
-    format!("host-{n}")
+    n
+}
+
+fn volume_name(path: &str) -> String {
+    format!("host-{}", munge_host_path(path))
+}
+
+/// In-container mount path for a `host!("/p")` declaration. Always
+/// rooted at [`ATHENA_MOUNTS_DIR`] — `host!` cannot land at the host's
+/// own path (see [`ATHENA_MOUNTS_DIR`] for why). Both emit
+/// (`host_path_volumes`) and run (`rt::host_path`) go through this
+/// helper, so they always agree.
+pub fn host_mount_path(host_path: &str) -> String {
+    format!("{ATHENA_MOUNTS_DIR}/{}", munge_host_path(host_path))
 }
 
 /// `volumes` + `volumeMounts` for a set of hostPaths (from `host!`).
+/// Each mounts at [`host_mount_path`] (`/athena/mounts/<munged>`),
+/// NOT at the host's own path — safe-by-construction.
 pub fn host_path_volumes(paths: &[String]) -> (Vec<api::Volume>, Vec<api::VolumeMount>) {
     let mut vols = Vec::new();
     let mut mounts = Vec::new();
@@ -1299,7 +1334,7 @@ pub fn host_path_volumes(paths: &[String]) -> (Vec<api::Volume>, Vec<api::Volume
         });
         mounts.push(api::VolumeMount {
             name,
-            mount_path: p.clone(),
+            mount_path: host_mount_path(p),
             read_only: false,
         });
     }
@@ -1307,10 +1342,23 @@ pub fn host_path_volumes(paths: &[String]) -> (Vec<api::Volume>, Vec<api::Volume
 }
 
 /// Every container template's volumes/mounts: the always-present
-/// `emptyDir` scratch at [`ATHENA_DIR`] (binary tarball, in/out artifact
-/// ports, extraction, result — all writable on any image) followed by the
-/// declared hostPaths.
-pub fn container_volumes(host_paths: &[String]) -> (Vec<api::Volume>, Vec<api::VolumeMount>) {
+/// `emptyDir` scratch at [`ATHENA_DIR`] + the declared hostPaths. Two
+/// hostPath sources:
+///
+/// - `host_paths` from `host!` — safe-by-construction, mounted at
+///   [`host_mount_path`] (`/athena/mounts/<munged>`).
+/// - `host_mounts` from `#[container(host_mount = [{…}])]` — explicit
+///   `host_path` + `mount_path` + `read_only`, the user's escape hatch
+///   for chosen mount paths (`/dev/shm`, sidecar data dirs, …).
+///
+/// If the same `host_path` appears in both, the `host_mount` entry
+/// wins — same Volume, explicit `mount_path`/`read_only`. Keeps the
+/// emit free of duplicate Volume names while preserving the user's
+/// "I asked for it explicitly" intent.
+pub fn container_volumes(
+    host_paths: &[String],
+    host_mounts: &[(String, String, bool)],
+) -> (Vec<api::Volume>, Vec<api::VolumeMount>) {
     let mut vols = vec![api::Volume {
         name: SCRATCH_VOLUME.to_string(),
         empty_dir: Some(api::EmptyDirVolumeSource {}),
@@ -1321,9 +1369,43 @@ pub fn container_volumes(host_paths: &[String]) -> (Vec<api::Volume>, Vec<api::V
         mount_path: ATHENA_DIR.to_string(),
         read_only: false,
     }];
-    let (hv, hm) = host_path_volumes(host_paths);
-    vols.extend(hv);
-    mounts.extend(hm);
+    // host_mount wins over host! on a shared host_path.
+    let overridden: HashSet<&str> = host_mounts.iter().map(|(h, _, _)| h.as_str()).collect();
+    for p in host_paths {
+        if overridden.contains(p.as_str()) {
+            continue;
+        }
+        let name = volume_name(p);
+        vols.push(api::Volume {
+            name: name.clone(),
+            host_path: Some(api::HostPathVolumeSource {
+                path: p.clone(),
+                r#type: String::new(),
+            }),
+            ..Default::default()
+        });
+        mounts.push(api::VolumeMount {
+            name,
+            mount_path: host_mount_path(p),
+            read_only: false,
+        });
+    }
+    for (host_path, mount_path, read_only) in host_mounts {
+        let name = volume_name(host_path);
+        vols.push(api::Volume {
+            name: name.clone(),
+            host_path: Some(api::HostPathVolumeSource {
+                path: host_path.clone(),
+                r#type: String::new(),
+            }),
+            ..Default::default()
+        });
+        mounts.push(api::VolumeMount {
+            name,
+            mount_path: mount_path.clone(),
+            read_only: *read_only,
+        });
+    }
     (vols, mounts)
 }
 

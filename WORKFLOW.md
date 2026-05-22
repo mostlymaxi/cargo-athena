@@ -32,6 +32,7 @@ runtime surprises.
 | `name = "my-name"` | Override the Argo template name. Default: `<crate>-<fn>` (kebab). |
 | `steps` | Emit an Argo `steps:` (sequential) template instead of the default data-dependency `dag:`. |
 | `node_selector = { "k" = "v" }` | `nodeSelector` on this dag/steps template; the controller cascades it onto every task pod this workflow runs. Keys and values are literal strings — see [Node selector](#node-selector). |
+| `annotations = { "k" = "v" }` | Template-level annotations (`metadata.annotations`) on the dag/steps template. Literal keys *and* values (drop in `{{workflow.parameters.X}}` as a literal for dynamic). |
 | `on_exit_if_root = t` | Whole-workflow exit handler on this template's own `spec.hooks.exit`. Fires only when *this* template is the workflow you submit. Distinct from the per-task `.on_exit(t)` builder. |
 | `retry(limit = N \| unlimited, policy = "…", backoff = <dur>)` | Template-level Argo `retryStrategy`. `limit` is **required** (`unlimited` ⇒ no cap); `policy` ∈ `Always\|OnFailure\|OnError\|OnTransientError`; `backoff` is an int (seconds) or a [humantime](https://docs.rs/humantime) string. |
 | `ttl_if_root(after_completion = <s>, after_success = <s>, after_failure = <s>)` | WorkflowSpec `ttlStrategy`: GC the finished Workflow. ≥1 of the three is required (int seconds or humantime). **Root-only.** |

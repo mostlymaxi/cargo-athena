@@ -51,17 +51,17 @@ spec:
       - name: athena-work
         mountPath: /athena
       - name: host-cache-fast
-        mountPath: /cache/fast
+        mountPath: /athena/mounts/cache-fast
       - name: host-cache-slow
-        mountPath: /cache/slow
+        mountPath: /athena/mounts/cache-slow
       - name: host-data-default
-        mountPath: /data/default
+        mountPath: /athena/mounts/data-default
       - name: host-data-empty
-        mountPath: /data/empty
+        mountPath: /athena/mounts/data-empty
       - name: host-var-lib-a
-        mountPath: /var/lib/a
+        mountPath: /athena/mounts/var-lib-a
       - name: host-var-lib-b
-        mountPath: /var/lib/b
+        mountPath: /athena/mounts/var-lib-b
     volumes:
     - name: athena-work
       emptyDir: {}
@@ -201,7 +201,7 @@ spec:
       - name: athena-work
         mountPath: /athena
       - name: host-secrets-token
-        mountPath: /secrets/token
+        mountPath: /athena/mounts/secrets-token
     volumes:
     - name: athena-work
       emptyDir: {}

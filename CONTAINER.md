@@ -62,6 +62,9 @@ All athena paths live under a pod-scoped `emptyDir` at `/athena`.
 | `name = "…"` | Override the Argo template name. Default: `<crate>-<fn>` (kebab). |
 | `service_account = "…"` | Pod `ServiceAccount`. Default: `[defaults].service_account`. |
 | `node_selector = { "k" = "v", … }` | Template-level `nodeSelector`; the controller cascades it onto this template's pods. Keys are literal; values may be injected (below). |
+| `env = { "K" = "v", … }` | Extra container `env` entries the body reads via `std::env::var(…)`. Literal keys; values follow the same `"lit" + arg + …` injection grammar as `image`. |
+| `host_mount = [{ host_path = "/h", mount_path = "/m", read_only = false }, …]` | Explicit hostPath mounts with **chosen mount paths**. Use when you really do want a specific in-container path (`/dev/shm`, sidecar data, …); `host!` is the safe form (always under `/athena/mounts/<munged>`). Both `host_path` and `mount_path` are literal strings; `read_only` defaults to false. Dedup'd against `host!` paths on the same `host_path`. |
+| `annotations = { "k" = "v", … }` | Pod-template annotations (`metadata.annotations`). Literal keys; values injectable like `env`. |
 | `on_exit_if_root = t` | Whole-workflow exit handler. Fires only when *this* template is the workflow you submit. Distinct from the per-task `.on_exit(t)` builder. |
 | `retry(limit = N \| unlimited, policy = "…", backoff = <dur>)` | Template-level Argo `retryStrategy`. `limit` is **required** (`unlimited` ⇒ no cap); `policy` ∈ `Always\|OnFailure\|OnError\|OnTransientError`; `backoff` is an int (seconds) or a [humantime](https://docs.rs/humantime) string. |
 | `timeout = <secs \| "5m">` | Argo `Template.timeout`. Controller-enforced node timeout, **counts Pending time**. See [Timeouts](#timeouts). |
@@ -169,7 +172,7 @@ and a `#[workflow]` using one is a hard error):
 
 | Macro | Effect | Runtime value |
 |---|---|---|
-| `host!("/abs/path")` | a `hostPath` volume mounted at that path | `&str` path |
+| `host!("/abs/path")` | a `hostPath` volume mounted safely under `/athena/mounts/<munged>` (never at the host's own path — `host!("/")` would otherwise overlay the host root over the container). For a chosen mount path, use `#[container(host_mount = …)]` above. | `String` path (the safe mount path; portable) |
 | `load_artifact!("key")` | an Argo S3 **input** artifact port at the exact `athena.toml` object key | `Vec<u8>` |
 | `load_artifact_str!("key")` | same, as text | `String` |
 | `save_artifact!("key", bytes)` | an Argo S3 **output** artifact port | writes `impl AsRef<[u8]>` |

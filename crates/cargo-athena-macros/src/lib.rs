@@ -501,6 +501,19 @@ impl deluxe::ParseMetaItem for PodGcArgs {
 /// literals and container args / their named fields (param injection —
 /// see `inject_lower`). `name` is the static Argo template name;
 /// `node_selector` *keys* are literal (the `String` type enforces it).
+/// `host_mount = [{ host_path = "/h", mount_path = "/m", read_only = false }]`
+/// — explicit, chosen-path hostPath mount. The pair to `host!`, which
+/// always lands at `/athena/mounts/<munged>` for safety. Use this
+/// when you really do want a specific in-container mount path
+/// (`/dev/shm`, a sidecar's data dir, etc.).
+#[derive(deluxe::ParseMetaItem)]
+struct HostMountEntry {
+    host_path: String,
+    mount_path: String,
+    #[deluxe(default)]
+    read_only: bool,
+}
+
 #[derive(deluxe::ParseMetaItem, Default)]
 #[deluxe(default)]
 struct ContainerArgs {
@@ -532,6 +545,22 @@ struct ContainerArgs {
     /// `WorkflowSpec.activeDeadlineSeconds` (`active_deadline_if_root =
     /// <secs | "2h">`). The only real workflow timeout.
     active_deadline_if_root: Option<syn::Expr>,
+    /// `env = { "KEY" = "lit" + arg, … }` — extra container `env` entries
+    /// the body can read via `std::env::var(…)`. Literal keys; values
+    /// follow the same `"lit" + arg + …` injection grammar as
+    /// `image`/`service_account`/`node_selector`.
+    env: std::collections::BTreeMap<String, syn::Expr>,
+    /// `host_mount = [{ host_path = "/h", mount_path = "/m", read_only =
+    /// false }]` — explicit, chosen-path hostPath mounts. Use when you
+    /// genuinely need a specific in-container path (`host!`'s safe
+    /// `/athena/mounts/<munged>` is the default). Volumes are deduped
+    /// against `host!`-declared paths so combining the two never
+    /// double-mounts.
+    host_mount: Vec<HostMountEntry>,
+    /// `annotations = { "key" = "lit" + arg, … }` — pod annotations.
+    /// Literal keys, injectable values (same grammar as `env` /
+    /// `node_selector`).
+    annotations: std::collections::BTreeMap<String, syn::Expr>,
 }
 
 /// `#[workflow(name = "...", steps, node_selector = { "k" = "v", ... },
@@ -571,6 +600,13 @@ struct WorkflowArgs {
     /// `#[container]`-only (Argo no-ops on dag/steps), so this is the
     /// only way to time-bound a `#[workflow]`.
     active_deadline_if_root: Option<syn::Expr>,
+    /// `annotations = { "key" = "value" }` — template-level annotations
+    /// on the dag/steps template. **Literal strings only** (keys *and*
+    /// values), same reason as `#[workflow(node_selector)]`: a workflow
+    /// has no args to inject from, and template-scoped templating
+    /// doesn't cascade. Drop in `{{workflow.parameters.X}}` as a
+    /// literal value if you need a dynamic annotation.
+    annotations: std::collections::BTreeMap<String, String>,
 }
 
 /// Parse attribute args into `T`, or return a `compile_error!`.
@@ -1110,6 +1146,37 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };
+    // `env = { "KEY" = "lit" + arg, … }`: extra container env entries.
+    // Literal keys (BTreeMap key type), injectable values (same
+    // lowering as image / node_selector / SA).
+    let env_keys: Vec<&String> = cfg.env.keys().collect();
+    let env_vals: Vec<String> = match cfg
+        .env
+        .values()
+        .map(|e| inject_lower(e, &argset, &mut inject_ops))
+        .collect::<syn::Result<Vec<_>>>()
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    // `annotations = { "k" = "lit" + arg, … }`: lands on
+    // `Template.metadata.annotations`. Same shape as env.
+    let ann_keys: Vec<&String> = cfg.annotations.keys().collect();
+    let ann_vals: Vec<String> = match cfg
+        .annotations
+        .values()
+        .map(|e| inject_lower(e, &argset, &mut inject_ops))
+        .collect::<syn::Result<Vec<_>>>()
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    // `host_mount = [{ host_path, mount_path, read_only }, …]`:
+    // literal-only triples, threaded into `container_volumes` so the
+    // dedup-against-`host!` lives in core.
+    let host_mount_hosts: Vec<&String> = cfg.host_mount.iter().map(|h| &h.host_path).collect();
+    let host_mount_mounts: Vec<&String> = cfg.host_mount.iter().map(|h| &h.mount_path).collect();
+    let host_mount_ro: Vec<bool> = cfg.host_mount.iter().map(|h| h.read_only).collect();
     let image_opt = match &image_s {
         Some(s) => quote! { ::core::option::Option::Some(#s) },
         None => quote! { ::core::option::Option::None },
@@ -1249,7 +1316,14 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                 // emptyDir scratch at /athena (+ host! volumes) so every
                 // athena path is writable on any image.
                 let (__vols, __mounts) =
-                    ::cargo_athena::container_volumes(&__paths);
+                    ::cargo_athena::container_volumes(
+                        &__paths,
+                        &[ #( (
+                            #host_mount_hosts.to_string(),
+                            #host_mount_mounts.to_string(),
+                            #host_mount_ro,
+                        ) ),* ],
+                    );
                 // Arbitrary user image + the arch-resolving bootstrap that
                 // pulls & exec's the athena binary delivered as an artifact.
                 let __d = ::cargo_athena::container_delivery(
@@ -1266,8 +1340,27 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                 let mut __in_artifacts = ::std::vec![ __d.artifact ];
                 __in_artifacts.extend(
                     ::cargo_athena::artifact_inputs(__ctx, &__in_names));
+                // `#[container(annotations = { "k" = "lit" + arg, … })]`
+                // lands on `Template.metadata.annotations`. Built-then-
+                // checked: when the BTreeMap stays empty (no attr) we
+                // emit `metadata: None`, so containers without
+                // annotations keep byte-identical goldens.
+                let mut __ann: ::std::collections::BTreeMap<
+                    ::std::string::String,
+                    ::std::string::String,
+                > = ::std::collections::BTreeMap::new();
+                #( __ann.insert(#ann_keys.to_string(), #ann_vals.to_string()); )*
+                let __metadata = if __ann.is_empty() {
+                    ::core::option::Option::None
+                } else {
+                    ::core::option::Option::Some(::cargo_athena::api::ObjectMeta {
+                        annotations: __ann,
+                        ..::core::default::Default::default()
+                    })
+                };
                 ::cargo_athena::api::Template {
                     name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
+                    metadata: __metadata,
                     inputs: ::core::option::Option::Some(::cargo_athena::api::Inputs {
                         parameters: ::std::vec![
                             #( ::cargo_athena::api::Parameter {
@@ -1306,6 +1399,14 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
                                     ..::core::default::Default::default()
                                 } ),*
                             ];
+                            // `#[container(env = { "K" = "lit" + arg, … })]` —
+                            // literal keys + already-injection-lowered values
+                            // (templated text or `{{=fromJSON(inputs.parameters['arg'])}}`).
+                            #( __env.push(::cargo_athena::api::EnvVar {
+                                name: #env_keys.to_string(),
+                                value: #env_vals.to_string(),
+                                ..::core::default::Default::default()
+                            }); )*
                             // Resolved `secret!`/`secret_opt!` decls (own ∪ #[fragment]
                             // closure). Each becomes one `valueFrom.secretKeyRef` env;
                             // run-mode reads it back via `rt::secret_value(name, key)`.
@@ -3521,6 +3622,30 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
             __ns
         },
     };
+    // `annotations` — literal keys + values, lands on
+    // `Template.metadata.annotations` of the dag/steps template. Same
+    // built-then-checked shape as the container side: keep
+    // `metadata: None` (skip-serialized) when the attr is absent so
+    // existing goldens stay byte-identical.
+    let ann_keys: Vec<&String> = cfg.annotations.keys().collect();
+    let ann_vals: Vec<&String> = cfg.annotations.values().collect();
+    let metadata_tokens = quote! {
+        metadata: {
+            let mut __ann: ::std::collections::BTreeMap<
+                ::std::string::String,
+                ::std::string::String,
+            > = ::std::collections::BTreeMap::new();
+            #( __ann.insert(#ann_keys.to_string(), #ann_vals.to_string()); )*
+            if __ann.is_empty() {
+                ::core::option::Option::None
+            } else {
+                ::core::option::Option::Some(::cargo_athena::api::ObjectMeta {
+                    annotations: __ann,
+                    ..::core::default::Default::default()
+                })
+            }
+        },
+    };
 
     // Template-level `retryStrategy` / `timeout` (real WT only — never
     // re-stamped on synthetic `if` wrapper/arm templates).
@@ -3566,6 +3691,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
             #( #node_blocks )*
             ::cargo_athena::api::Template {
                 name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
+                #metadata_tokens
                 inputs: #inputs_tokens,
                 steps: __steps,
                 #node_selector_tokens
@@ -3581,6 +3707,7 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
             #( #node_blocks )*
             ::cargo_athena::api::Template {
                 name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
+                #metadata_tokens
                 inputs: #inputs_tokens,
                 dag: ::core::option::Option::Some(
                     ::cargo_athena::api::DagTemplate { tasks: __tasks }),

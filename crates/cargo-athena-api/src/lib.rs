@@ -178,6 +178,11 @@ argo! {
 
     pub struct Template {
         pub name: String,
+        /// Argo `Template.metadata` — annotations + labels on the
+        /// pod/dag/steps template. Optional, skip-serialized when
+        /// empty, so existing goldens stay byte-identical for
+        /// templates that don't use the `annotations = {…}` attr.
+        pub metadata: Option<ObjectMeta>,
         pub inputs: Option<Inputs>,
         pub outputs: Option<Outputs>,
         // Exactly one of the following describes the template body.

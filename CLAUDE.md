@@ -410,6 +410,20 @@ README is intentionally lean (user-facing); the *why* lives here.
   no `/tmp` dependency, and is shared with Argo init/wait containers.
   `host!` hostPaths are appended after it. `athena.toml` is never read
   in-pod.
+- **`host!` is safe-by-construction (security fix, post-v0.5.0).**
+  Mounting a `host!("/p")` at the container's own `/p` is a footgun:
+  `host!("/")` overlay-mounts the host root over the container's root,
+  `host!("/etc")` shadows the image's own `/etc`, etc. So `host!` now
+  always lands at `/athena/mounts/<munged>` (rooted at
+  `ATHENA_MOUNTS_DIR`; munge = volume_name's logic), and `rt::host_path`
+  returns that path — the user code stays portable and can't clobber
+  the image fs. The new `#[container(host_mount = [{host_path,
+  mount_path, read_only}, …])]` attr is the explicit escape hatch for
+  same-path / chosen-path mounts; `container_volumes` dedups against
+  `host!` paths so the same `host_path` declared in both produces ONE
+  Volume with `host_mount`'s explicit `mount_path`/`read_only` winning.
+  `cargo athena container emulate` mirrors the in-pod mount path
+  (`{hp}:{host_mount_path(hp)}` bind) so emulate stays zero-drift.
 - `#[container(image=…)]` is arbitrary/per-container; just needs POSIX
   `sh`/`uname` (no `tar` — Argo's init container does the extraction).
 - **`cargo athena container emulate <name>` (2026-05-17, user-directed;
