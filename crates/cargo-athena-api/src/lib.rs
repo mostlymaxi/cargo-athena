@@ -343,6 +343,18 @@ argo! {
         pub env: Vec<EnvVar>,
         pub volume_mounts: Vec<VolumeMount>,
         pub working_dir: String,
+        /// K8s `securityContext` on this container. Only `privileged`
+        /// is exposed today (`#[container(privileged = true)]`); other
+        /// fields can join when there's a real use case. Skip-empty
+        /// keeps existing goldens byte-identical.
+        pub security_context: Option<SecurityContext>,
+    }
+
+    /// K8s `SecurityContext` on a container. Minimal: only the fields
+    /// we expose. Each field skip-serializes its default so the
+    /// produced YAML stays terse.
+    pub struct SecurityContext {
+        pub privileged: bool,
     }
 
     pub struct ScriptTemplate {

@@ -455,6 +455,7 @@ pub fn pipeline_secrets() {
 /// * `annotations = { k = "lit" + arg, … }` — pod template annotations.
 #[container(
     image = "ghcr.io/acme/svc:" + tag,
+    privileged = true,
     env = {
         "LOG_LEVEL" = "info",
         "REGION"    = "us-" + zone,        // injected

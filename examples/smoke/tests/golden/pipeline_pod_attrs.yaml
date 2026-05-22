@@ -91,6 +91,8 @@ spec:
       - name: host-etc-ca-certs
         mountPath: /certs
         readOnly: true
+      securityContext:
+        privileged: true
     volumes:
     - name: athena-work
       emptyDir: {}
