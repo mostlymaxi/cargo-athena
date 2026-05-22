@@ -351,4 +351,30 @@ pub fn pipeline() {
 
     let r = risky().continue_on(failed, error);
     finalize(r).on_exit(cleanup); // per-task exit hook
+
+    // Force-link the steps-mode workflow into this entrypoint's emit
+    // closure so its template registers + Argo executes it as a
+    // sub-workflow under the mega-pipeline (cross-template steps:
+    // semantics asserted live). The e2e script also submits it as a
+    // top-level root, separately.
+    pipeline_steps();
+}
+
+/// `#[workflow(steps)]` live coverage: emits an Argo `steps:` template
+/// (one sequential group per statement, cross-step refs as
+/// `{{steps.X.outputs.parameters.return}}`). The e2e script submits
+/// this against real Argo and asserts `Succeeded` — guards against the
+/// macro-only/golden-only steps coverage regressing on a real cluster.
+/// Reuses existing containers; nothing new needed in-pod.
+///
+/// `node_selector` is re-stated here so its sub-pods carry the same
+/// selector when this template is `templateRef`'d under `pipeline`
+/// (Argo's parent→child nodeSelector cascade is single-hop; the e2e
+/// script's pod-selector assertion picks an arbitrary pod via
+/// `.items[0]`, so every pod in the run needs the label).
+#[workflow(steps, node_selector = { "kubernetes.io/arch" = "amd64" })]
+pub fn pipeline_steps() {
+    let s = stamp();
+    let r = echo(s);
+    audit(r);
 }
