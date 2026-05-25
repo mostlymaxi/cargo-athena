@@ -7,12 +7,12 @@ subcommand. It drives your workflow crate's binary.
 cargo athena [-c F] init [PATH] [--name N] [--bucket B] [--endpoint E] [--region R] [-y]
 cargo athena [-c F] doctor [--check-s3]
 cargo athena [-c F] emit  [-p PKG] [--bin B] [--out F] [--with-workflow]
-cargo athena [-c F] container ls       [-p PKG] [--bin B] [--all]
+cargo athena [-c F] container ls       [-p PKG] [--bin B]
 cargo athena [-c F] container emulate  <name> [-a k=v].. [--input-file F] [-p PKG] [--bin B]
                                        [--build|--tarball F] [--runtime R] [--skip-artifacts]
-cargo athena [-c F] container describe <name> [-p PKG] [--bin B]
+cargo athena [-c F] container describe <name> [-p PKG] [--bin B] [--json]
 cargo athena [-c F] workflow  ls       [-p PKG] [--bin B] [--include-synthetic]
-cargo athena [-c F] workflow  describe <name> [-p PKG] [--bin B]
+cargo athena [-c F] workflow  describe <name> [-p PKG] [--bin B] [--json]
 cargo athena [-c F] submit <name> [-a k=v].. [-n NS] [--service-account SA]
                           [--node-selector k=v].. [--priority N]
                           [--argo-server URL] [-y] [--update]
@@ -91,8 +91,8 @@ Flags:
 Run a `#[workflow]` (or a single `#[container]`) on a real cluster.
 
 ```sh
-cargo athena submit my-crate-pipeline -a seed=hello
-W=$(cargo athena submit my-crate-pipeline -a seed=hello -y)   # scriptable
+cargo athena submit pipeline -a seed=hello
+W=$(cargo athena submit pipeline -a seed=hello -y)   # scriptable
 ```
 
 Before anything is created, `submit`:
@@ -161,9 +161,9 @@ Same flags as `publish` minus `--tarball` and the upload step.
 Runs one `#[container]` locally under docker or podman.
 
 ```sh
-cargo athena container emulate my-crate-transform -a data=hello -a factor=4
-cargo athena container emulate my-crate-fetch --input-file args.json
-cargo athena container emulate my-crate-fetch --build
+cargo athena container emulate transform -a data=hello -a factor=4
+cargo athena container emulate fetch --input-file args.json
+cargo athena container emulate fetch --build
 ```
 
 By default it pulls the deployed tarball from S3 so you smoke-test
@@ -184,29 +184,28 @@ Flags:
 
 ## `container describe` / `workflow describe`
 
-Prints one template's runner metadata as JSON: image, parameters
-and their Rust types, S3 ports, scratch paths. Used by `emulate`
-and scriptable.
+Shows what one template expects: its signature, image, mounts, and a
+copy-pasteable `submit` line.
 
 ```sh
-cargo athena container describe my-crate-transform
-cargo athena workflow  describe my-crate-pipeline
+cargo athena container describe transform
+cargo athena workflow  describe pipeline
 ```
+
+`container describe` is for `#[container]`s only; `workflow describe`
+takes either kind.
+
+`--json` prints the raw metadata instead (for scripting).
 
 ## `container ls` / `workflow ls`
 
-Lists the templates your workflow binary reports.
+Lists the templates your workflow binary exposes.
 
 ```sh
-cargo athena container ls            # #[container]s only
-cargo athena container ls --all      # + #[workflow]s and synthetic templates
-
-cargo athena workflow ls
-cargo athena workflow ls --include-synthetic   # + the if/else machinery
+cargo athena container ls    # #[container]s only
+cargo athena workflow ls     # both #[container]s and #[workflow]s
+cargo athena workflow ls --include-synthetic   # + if/else internals
 ```
-
-athena's synthesized `if` / `else` wrapper sub-workflows are an
-implementation detail and hidden unless you ask for them.
 
 ## Package selection
 

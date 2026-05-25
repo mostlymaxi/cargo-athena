@@ -643,6 +643,11 @@ pub struct ParamRef {
 pub struct ContainerRunMeta {
     /// Argo template name (`<crate>-<fn>`).
     pub name: String,
+    /// Source crate (CARGO_PKG_NAME of the user binary). Used for the
+    /// `PACKAGE` column in `container ls` / `workflow ls`; an empty
+    /// string means the caller didn't fill it in.
+    #[serde(default)]
+    pub package: String,
     /// `"container"`, `"workflow"`, or `"other"`.
     pub kind: String,
     /// athena-synthesized template (an `if`/`else` wrapper or arm) —
@@ -670,6 +675,41 @@ pub struct ContainerRunMeta {
     /// File the body writes its serialized return to
     /// (`outputs.parameters.return`); read it back from the bind mount.
     pub result_path: Option<String>,
+}
+
+/// Drop the spaces `quote!` puts around `<` / `>` / `,` so a type
+/// like `Vec < String >` round-trips as `Vec<String>` for human
+/// display. `validate_args` already strips ALL whitespace; this is the
+/// gentler variant for showing types verbatim (`Cow<'static, str>`
+/// stays readable).
+fn normalize_ty(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_open = false;
+    for ch in s.chars() {
+        match ch {
+            '<' | '>' => {
+                while out.ends_with(' ') {
+                    out.pop();
+                }
+                out.push(ch);
+                prev_open = ch == '<';
+            }
+            ',' => {
+                while out.ends_with(' ') {
+                    out.pop();
+                }
+                out.push(ch);
+                prev_open = false;
+            }
+            ' ' if prev_open => {}
+            ' ' if out.ends_with('<') || out.ends_with(',') => {}
+            _ => {
+                out.push(ch);
+                prev_open = false;
+            }
+        }
+    }
+    out
 }
 
 impl ContainerRunMeta {
@@ -708,6 +748,9 @@ impl ContainerRunMeta {
         let in_arts = t.inputs.as_ref().map(|i| &i.artifacts);
         ContainerRunMeta {
             name: t.name.clone(),
+            // Filled in by the caller from BuildCtx's artifact_key
+            // (encoded as `{crate}/{version}/{bin}.tar.gz`).
+            package: String::new(),
             kind: kind.to_string(),
             // set by the caller from the Collector (Template::SYNTHETIC
             // isn't visible through the type-erased builder fn here).
@@ -725,9 +768,12 @@ impl ContainerRunMeta {
                         .enumerate()
                         .map(|(idx, p)| ParamRef {
                             name: p.name.clone(),
+                            // `quote!(#ty).to_string()` spaces `<` and
+                            // `>`, e.g. `Vec < String >`. Strip those
+                            // (only inside generics) for display.
                             ty: input_types
                                 .get(idx)
-                                .map(|s| (*s).to_string())
+                                .map(|s| normalize_ty(s))
                                 .unwrap_or_default(),
                         })
                         .collect()
@@ -1566,6 +1612,7 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
                 let t = b(&ctx);
                 let it = collector.types.get(&t.name).copied().unwrap_or(&[]);
                 let mut m = ContainerRunMeta::from_template(&t, it);
+                m.package = krate.to_string();
                 m.synthetic = collector.synthetic.contains(&t.name);
                 m
             })
@@ -1584,15 +1631,22 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
     // image, bootstrap, env, volumes, and artifacts as `emit`.
     if let Ok(name) = std::env::var("CARGO_ATHENA_DESCRIBE") {
         let ctx = BuildCtx::collect(krate, version, bin);
+        // The default emitted name is `<crate>-<fn>`; the CLI already
+        // shows package + short name as separate columns, so accept
+        // either the full name or the short form (and fall back to the
+        // full name in error messages so the user sees what we tried).
+        let full = format!("{krate}-{name}");
         let tpl = collector
             .builders
             .iter()
             .map(|b| b(&ctx))
-            .find(|t| t.name == name)
-            .unwrap_or_else(|| panic!("no template named {name:?}"));
-        let input_types = collector.types.get(&name).copied().unwrap_or(&[]);
+            .find(|t| t.name == name || t.name == full)
+            .unwrap_or_else(|| panic!("no template named {name:?} (or {full:?})"));
+        let resolved = tpl.name.clone();
+        let input_types = collector.types.get(&resolved).copied().unwrap_or(&[]);
         let mut meta = ContainerRunMeta::from_template(&tpl, input_types);
-        meta.synthetic = collector.synthetic.contains(&name);
+        meta.package = krate.to_string();
+        meta.synthetic = collector.synthetic.contains(&resolved);
         println!(
             "{}",
             serde_json::to_string(&meta).expect("ContainerRunMeta is serializable")
