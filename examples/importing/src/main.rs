@@ -6,5 +6,5 @@
 //!   CARGO_ATHENA_INPUT='{"data":"x","factor":2}' ... --bin importing
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_importing::importing_pipeline>();
+    cargo_athena::entrypoint!(cargo_athena_example_importing::importing_pipeline);
 }

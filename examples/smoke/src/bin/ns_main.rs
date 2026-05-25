@@ -4,5 +4,5 @@
 //! `{{workflow.parameters.region}}` escape-hatch literal.
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline_ns>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline_ns);
 }

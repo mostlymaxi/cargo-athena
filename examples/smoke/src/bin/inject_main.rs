@@ -3,5 +3,5 @@
 //! `{{=fromJSON(inputs.parameters['m'])['id']}}`.
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline_inject>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline_inject);
 }

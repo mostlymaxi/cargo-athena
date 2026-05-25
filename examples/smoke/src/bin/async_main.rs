@@ -3,5 +3,5 @@
 //! `cargo_athena::__async::block_on` (single-thread tokio runtime).
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline_async>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline_async);
 }

@@ -54,7 +54,7 @@ fn load_extra() {
 }
 
 fn main() {
-    cargo_athena::entrypoint::<run_foo>();
+    cargo_athena::entrypoint!(run_foo);
 }
 
 // Emit-semantics coverage lives in `crates/cargo-athena/tests/smoke.rs`

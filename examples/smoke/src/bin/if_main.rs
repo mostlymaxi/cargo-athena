@@ -3,5 +3,5 @@
 //! `outputs.parameters.return` selects the taken branch.
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline_if>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline_if);
 }

@@ -3,5 +3,5 @@
 //! ref + dep) and a call hoisted out of an `if` condition.
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline_nested>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline_nested);
 }

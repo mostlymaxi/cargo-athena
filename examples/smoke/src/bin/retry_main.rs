@@ -3,5 +3,5 @@
 //! and `#[workflow(retry(..))]`.
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline_retry>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline_retry);
 }

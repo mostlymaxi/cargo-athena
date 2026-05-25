@@ -4,5 +4,5 @@
 //! the proof that workflow→X data deps resolve.
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline_returns>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline_returns);
 }

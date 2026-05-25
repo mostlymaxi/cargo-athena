@@ -4,5 +4,5 @@
 //! onto every container that calls it).
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline_secrets>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline_secrets);
 }

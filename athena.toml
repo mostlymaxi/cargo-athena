@@ -14,10 +14,10 @@ insecure = false
 access_key_secret = { name = "athena-s3", key = "accessKey" }
 secret_key_secret = { name = "athena-s3", key = "secretKey" }
 
-[artifact]
-# The per-binary tarball object key. `cargo athena build` substitutes
-# {crate}/{version}/{bin}; a literal here keeps example goldens stable.
-key = "athena/bin/example/0.1.0/app.tar.gz"
+# Per-binary tarball key is hardcoded as `{crate}/{version}/{bin}.tar.gz`
+# (built from CARGO_PKG_NAME/_VERSION + CARGO_BIN_NAME at the user
+# binary's compile time; `cargo athena publish` derives the same from
+# `cargo metadata`). No `[artifact]` section needed.
 
 [bootstrap]
 # `default_image` omitted -> busybox:1.36-musl (multi-arch, sh+uname).

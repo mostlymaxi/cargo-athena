@@ -3,5 +3,5 @@
 //! per-task `.on_exit(record("done"))` hook *with arguments*.
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline_onexit>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline_onexit);
 }
