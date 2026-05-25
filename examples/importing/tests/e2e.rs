@@ -33,11 +33,12 @@ fn assert_golden(name: &str, actual: &str) {
     );
 }
 
-fn run_bin(envs: &[(&str, &str)]) -> String {
+fn run_bin(envs: &[(&str, &str)], argv: &[&str]) -> String {
     let mut cmd = Command::new(BIN);
     for (k, v) in envs {
         cmd.env(k, v);
     }
+    cmd.args(argv);
     let out = cmd.output().expect("failed to spawn importing binary");
     assert!(
         out.status.success(),
@@ -53,7 +54,7 @@ fn run_bin(envs: &[(&str, &str)]) -> String {
 /// `cargo-athena-example-smoke-*` template, all by reference.
 #[test]
 fn emit_importing_pipeline() {
-    let yaml = run_bin(&[]);
+    let yaml = run_bin(&[], &[]);
     assert!(
         yaml.contains("cargo-athena-example-smoke-pipeline") // cross-crate
             && yaml.contains("cargo-athena-example-smoke-fetch")
@@ -68,12 +69,14 @@ fn emit_importing_pipeline() {
 /// container — only possible if the smoke crate's impl was force-linked.
 #[test]
 fn run_upstream_container_via_importing() {
-    let out = run_bin(&[
-        (
+    // Argv is positional, in the template's INPUTS order:
+    // `fn transform(data: String, factor: i64)`.
+    let out = run_bin(
+        &[(
             "CARGO_ATHENA_TEMPLATE",
             "cargo-athena-example-smoke-transform",
-        ),
-        ("CARGO_ATHENA_INPUT", r#"{"data":"x","factor":2}"#),
-    ]);
+        )],
+        &[r#""x""#, "2"],
+    );
     assert_golden("run_transform_via_importing.txt", &out);
 }

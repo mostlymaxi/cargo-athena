@@ -121,7 +121,7 @@ enum Cmd {
 enum ContainerCmd {
     /// Emulate one `#[container]` locally under docker/podman, exactly
     /// as Argo would: same image, the injected bootstrap,
-    /// `ATHENA_PARAM_*` env, the `/athena` scratch dir, `host!` binds,
+    /// positional argv, the `/athena` scratch dir, `host!` binds,
     /// and S3 artifact ports. By default the binary is *pulled* from
     /// the deployed S3 tarball, so you can smoke-test what's live with
     /// no source on the node.

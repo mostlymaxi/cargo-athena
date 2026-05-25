@@ -412,9 +412,12 @@ pub trait Template {
     /// Build this template's inner Argo `template` object.
     fn build(ctx: &BuildCtx) -> api::Template;
 
-    /// Run-mode body — overridden by `#[container]`; never called on a
-    /// `#[workflow]`.
-    fn run(_input: serde_json::Value) -> serde_json::Value {
+    /// Run-mode body. Argv is the function's positional parameters in
+    /// `INPUTS` order, each JSON-encoded (string -> `"v"`, number/bool
+    /// bare). Returns the function's JSON-encoded return value, which
+    /// the entrypoint writes to `CARGO_ATHENA_OUTPUT`. Overridden by
+    /// `#[container]`; never called on a `#[workflow]`.
+    fn run(_argv: &[String]) -> String {
         panic!(
             "`{}` is not a #[container]; nothing to run",
             Self::ARGO_NAME
@@ -596,8 +599,10 @@ const BOOTSTRAP_TEMPLATE: &str = include_str!("bootstrap.sh");
 pub const SCRATCH_VOLUME: &str = "athena-work";
 /// Argo input-artifact name of the binary tarball `emit` injects.
 pub const ATHENA_DIST_ARTIFACT: &str = "athena-dist";
-/// Env-var prefix the in-pod bootstrap reads each input parameter from.
-pub const ATHENA_PARAM_PREFIX: &str = "ATHENA_PARAM_";
+/// Env var the in-pod entrypoint reads to pick which container template
+/// to run. Argv (positional, in `INPUTS` order) carries the function's
+/// own parameters.
+pub const CARGO_ATHENA_TEMPLATE_ENV: &str = "CARGO_ATHENA_TEMPLATE";
 
 /// Resolved S3 coordinates for one artifact (creds are supplied
 /// locally, e.g. via AWS env vars — `cargo athena container run` uses
@@ -618,12 +623,12 @@ pub struct ArtifactRef {
     pub path: String,
 }
 
-/// An input parameter, the env var the bootstrap reads it from, and its
-/// stringified Rust type (`""` if unknown — synthetic templates).
+/// An input parameter and its stringified Rust type (`""` if unknown,
+/// e.g. synthetic templates). The position in the enclosing `params`
+/// vector is the positional argv slot the parameter occupies in-pod.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct ParamRef {
     pub name: String,
-    pub env: String,
     pub ty: String,
 }
 
@@ -720,7 +725,6 @@ impl ContainerRunMeta {
                         .enumerate()
                         .map(|(idx, p)| ParamRef {
                             name: p.name.clone(),
-                            env: format!("{ATHENA_PARAM_PREFIX}{}", p.name),
                             ty: input_types
                                 .get(idx)
                                 .map(|s| (*s).to_string())
@@ -786,9 +790,19 @@ pub struct ContainerDelivery {
 /// [`ATHENA_BIN_DIR`]; the script just `uname`s, `chmod +x`'s, and
 /// `exec`s — replacing the shell so the Rust binary is the container's
 /// main process. Works whether the tarball has one entry or many.
+///
+/// The bootstrap forwards `"$@"` to the binary; the macro-generated
+/// `Template::build` appends `--` then one `{{inputs.parameters.<n>}}`
+/// per parameter as positional argv. The binary's runner reads them
+/// positionally in `INPUTS` order. (We used to deliver each parameter
+/// via an `ATHENA_PARAM_<n>` env var, but env vars are NOT eligible
+/// for Argo's automatic large-args offload to a ConfigMap, so any
+/// large parameter value would balloon the pod spec and could exceed
+/// the `E2BIG` exec limit. Argo offloads `container.args` once the
+/// total exceeds 128 KB.)
 pub fn container_delivery(
     ctx: &BuildCtx,
-    argo_name: &str,
+    param_names: &[&str],
     image_override: Option<&str>,
 ) -> ContainerDelivery {
     let cfg = ctx.config();
@@ -814,12 +828,17 @@ pub fn container_delivery(
     // shellcheck-able); we just substitute the @@-delimited slots.
     let script = BOOTSTRAP_TEMPLATE
         .replace("@@ARMS@@", &arms)
-        .replace("@@BIN_DIR@@", ATHENA_BIN_DIR)
-        .replace("@@TEMPLATE@@", argo_name);
+        .replace("@@BIN_DIR@@", ATHENA_BIN_DIR);
+
+    // `sh -c "<script>" -- arg1 arg2 ...` puts "--" in $0 (placeholder)
+    // and arg1/arg2 in "$@", which the bootstrap forwards to the binary.
+    let mut args = vec![script, "--".to_string()];
+    for name in param_names {
+        args.push(format!("{{{{inputs.parameters.{name}}}}}"));
+    }
 
     // `archive: None` (NOT `archive: none`) lets Argo auto-detect the
     // input as a tarball and untar it into `path` (`ATHENA_BIN_DIR`).
-    // See `container_delivery` doc above.
     let artifact = api::Artifact {
         name: "athena-dist".to_string(),
         path: ATHENA_BIN_DIR.to_string(),
@@ -831,7 +850,7 @@ pub fn container_delivery(
     ContainerDelivery {
         image,
         command: vec!["/bin/sh".to_string(), "-c".to_string()],
-        args: vec![script],
+        args,
         artifact,
     }
 }
@@ -1056,7 +1075,7 @@ pub struct Collector {
     seen: HashSet<String>,
     /// Deferred so `athena.toml` is read only at emit, never run-mode.
     builders: Vec<fn(&BuildCtx) -> api::Template>,
-    runners: HashMap<String, fn(serde_json::Value) -> serde_json::Value>,
+    runners: HashMap<String, fn(&[String]) -> String>,
     /// `<argo name> -> <on_exit handler argo name>` for *every* template
     /// with an `on_exit` (not just the root). Each WorkflowTemplate
     /// carries its own `spec.hooks.exit`; Argo only fires the hook of
@@ -1171,7 +1190,7 @@ impl Collector {
         }
     }
 
-    pub fn add_runner(&mut self, argo_name: &str, run: fn(serde_json::Value) -> serde_json::Value) {
+    pub fn add_runner(&mut self, argo_name: &str, run: fn(&[String]) -> String) {
         self.runners.insert(argo_name.to_string(), run);
     }
 
@@ -1514,38 +1533,21 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
     let mut collector = Collector::new();
     E::collect(&mut collector);
 
-    let args: Vec<String> = std::env::args().collect();
-    let target = args
-        .iter()
-        .position(|a| a == "--cargo-athena-template")
-        .and_then(|i| args.get(i + 1).cloned())
-        .or_else(|| std::env::var("CARGO_ATHENA_TEMPLATE").ok());
-
-    if let Some(t) = target {
+    // Run-mode: `CARGO_ATHENA_TEMPLATE=<name>` selects which template's
+    // body to run; the function's parameters arrive as positional argv
+    // in INPUTS order (JSON-encoded). The selector lives in env so the
+    // pod spec doesn't carry it as a per-template argv string, and so
+    // argv is 100% function data, eligible for Argo's automatic offload
+    // of large `container.args` to a ConfigMap (env vars are not).
+    if let Ok(t) = std::env::var("CARGO_ATHENA_TEMPLATE") {
         let run = *collector
             .runners
             .get(&t)
             .unwrap_or_else(|| panic!("no runnable container template named {t:?}"));
-        // Base inputs: `cargo athena run --input` (local), then overlay
-        // Argo-supplied params delivered as `ATHENA_PARAM_<name>` env vars
-        // (set on the container template from `{{inputs.parameters.*}}`).
-        let mut input = std::env::var("CARGO_ATHENA_INPUT")
-            .ok()
-            .map(|s| serde_json::from_str(&s).expect("CARGO_ATHENA_INPUT must be JSON"))
-            .unwrap_or(serde_json::Value::Object(Default::default()));
-        if let serde_json::Value::Object(map) = &mut input {
-            for (k, v) in std::env::vars() {
-                if let Some(name) = k.strip_prefix("ATHENA_PARAM_") {
-                    // A param is JSON if it parses, else a bare string.
-                    let val =
-                        serde_json::from_str(&v).unwrap_or(serde_json::Value::String(v.clone()));
-                    map.insert(name.to_string(), val);
-                }
-            }
-        }
-        let output = run(input);
+        let argv: Vec<String> = std::env::args().skip(1).collect();
+        let output = run(&argv);
         if let Ok(path) = std::env::var("CARGO_ATHENA_OUTPUT") {
-            std::fs::write(path, output.to_string()).expect("write CARGO_ATHENA_OUTPUT");
+            std::fs::write(path, &output).expect("write CARGO_ATHENA_OUTPUT");
         } else {
             println!("{output}");
         }
