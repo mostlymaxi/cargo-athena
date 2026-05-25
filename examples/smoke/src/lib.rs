@@ -311,37 +311,44 @@ pub fn pipeline_inject() {
 
 // --- #[workflow] boundary_node_selector + node_selector_if_root ------------
 
-/// Workflow-level node-selector attrs, literal-only (no `"lit" + arg`
-/// injection — a workflow has no args to inject from). Two distinct
-/// knobs because Argo's pod nodeSelector lookup is 3-tier
-/// (`tmpl → boundary → wfSpec`):
+/// Two distinct nodeSelector knobs because Argo's pod-creation
+/// fallback is 3-tier (`tmpl → boundary → wfSpec`; never walks the
+/// ancestor chain):
 ///
-/// * `boundary_node_selector` lands on this dag/steps's
-///   `Template.NodeSelector`. Argo uses it as the **boundary** value
-///   for pods whose IMMEDIATE enclosing dag/steps is this template —
-///   does NOT cascade through nested sub-workflows.
-/// * `node_selector_if_root` lands on this WT's
-///   `WorkflowSpec.NodeSelector`. Root-only (only applies when this
-///   WT is the submitted workflow; same family as `ttl_if_root`/
-///   `pod_gc_if_root`/`active_deadline_if_root`). Becomes the default
-///   for every pod that doesn't have its own template- or
-///   boundary-level override.
+/// * `boundary_node_selector` → `Template.NodeSelector` on this
+///   dag/steps. **Literal-only.** Reaches only pods whose IMMEDIATE
+///   enclosing dag/steps is this template (does NOT cascade through
+///   nested sub-workflows). Dynamic values would have to lower to
+///   `workflow.parameters` (root-scoped), which would silently
+///   resolve against the SUBMITTED ROOT's args even when this WT is
+///   `templateRef`'d — a footgun. Keep these static.
+/// * `node_selector_if_root` → `WorkflowSpec.NodeSelector`. Root-only
+///   default for every pod that doesn't have a tmpl- or boundary-level
+///   override (inert when this WT is `templateRef`'d as a sub —
+///   verified live on v4.0.5: the sub's spec.nodeSelector field isn't
+///   even read in that path). Supports `"lit" + arg` /
+///   `"lit" + arg.field` injection that lowers to
+///   `{{=fromJSON(workflow.parameters['arg'])}}`, the ONLY form Argo
+///   resolves at WorkflowSpec scope (proven on v4.0.5;
+///   `inputs.parameters` is empirically inert here).
 ///
-/// A template-scoped
-/// `{{=fromJSON(inputs.parameters…)}}` would be cascaded *raw* (k8s
-/// rejects the literal), so the only dynamic form is the eyes-open
-/// escape hatch below: a raw `{{workflow.parameters.region}}` literal —
-/// **always** the submitted root workflow's params, never this
-/// template's inputs when it's a sub-`templateRef` (proven on real Argo
-/// v4.0.5).
+/// `boundary_node_selector` also accepts a raw `{{workflow.parameters
+/// .region}}` literal as the documented eyes-open escape hatch for
+/// dynamic values — owns its own root-scoping.
 #[workflow(
     boundary_node_selector = {
         "kubernetes.io/arch" = "amd64",
         "topology.kubernetes.io/region" = "{{workflow.parameters.region}}",
     },
-    node_selector_if_root = { "tier" = "platform" },
+    node_selector_if_root = {
+        "tier" = "platform",
+        "env" = "prod-" + env,
+    },
 )]
-pub fn pipeline_ns() {
+pub fn pipeline_ns(env: String) {
+    // `env` is consumed by the `node_selector_if_root` injection above
+    // (via `workflow.parameters['env']`); the inject-check shim asserts
+    // it's `Injectable` (`String` ⇒ raw-scalar fromJSON form).
     let raw = fetch("https://example.com".to_string());
     transform(raw, 3);
 }

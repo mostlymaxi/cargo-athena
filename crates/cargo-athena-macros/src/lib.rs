@@ -569,24 +569,36 @@ struct ContainerArgs {
     privileged: bool,
 }
 
-/// `#[workflow(name = "...", steps, node_selector = { "k" = "v", ... },
+/// `#[workflow(name = "...", steps,
+///   boundary_node_selector = { "k" = "v", ... },
+///   node_selector_if_root = { "k" = "v", "k2" = "lit" + arg, ... },
 ///   on_exit_if_root = teardown)]` — bare `steps` opts into Argo
 /// `steps:` (sequential) vs the default `dag:`.
 ///
-/// Unlike `#[container]`, `node_selector` keys **and values** are
-/// *literal strings only* (no `"lit" + arg` param injection). A
-/// `#[workflow]` is a DAG/steps template, not a pod: its `nodeSelector`
-/// is set on the dag/steps template and the Argo controller **cascades**
-/// it onto every task pod it `templateRef`s (empirically proven, real
-/// Argo v4.0.5). But a template-scoped `{{=fromJSON(inputs.parameters…)}}`
-/// is cascaded *raw* (the child pod gets the literal, k8s rejects it), so
-/// per-arg injection cannot work here. The only thing that survives the
-/// cascade is `{{workflow.parameters.<NAME>}}` — and that is **always
-/// the submitted root workflow's** parameters, never this template's
-/// inputs when it runs as a sub-`templateRef` (empirically proven). So
-/// dynamic values are an *eyes-open escape hatch*: write a literal
-/// containing `{{workflow.parameters.foo}}` yourself and own the
-/// root-scoping.
+/// **Two nodeSelector knobs, different tiers** (Argo's pod-creation
+/// fallback at `workflow/controller/workflowpod.go:928-958`):
+///
+/// * `boundary_node_selector` → `Template.NodeSelector` on this
+///   dag/steps. Used only as the *immediate* boundary fallback — does
+///   NOT cascade through nested sub-workflows. **Literal-only** by
+///   design: per-arg injection here would have to lower to
+///   `workflow.parameters` (root-scoped) and then a `templateRef`'d
+///   sub's value would surprise-resolve against the SUBMITTED ROOT's
+///   args, not this template's inputs. Keep boundary selectors static;
+///   use `node_selector_if_root` (below) for dynamic values.
+///
+/// * `node_selector_if_root` → `WorkflowSpec.NodeSelector`. Applies to
+///   every pod in the run by default. **Root-only** (inert when this
+///   WT is `templateRef`'d — same family as `ttl_if_root` /
+///   `pod_gc_if_root` / `active_deadline_if_root`). Supports the same
+///   `"lit" + arg` / `"lit" + arg.field` injection grammar as
+///   `#[container]`, but lowers to
+///   `{{=fromJSON(workflow.parameters['arg'])}}` (root-scoped — the
+///   ONLY form Argo resolves at WorkflowSpec scope on v4.0.5).
+///   `inputs.parameters` is empirically inert at WorkflowSpec scope
+///   and at Template.NodeSelector via boundary fallback (the raw
+///   string lands on the child pod before any per-template
+///   substitution can resolve it — proven 2026-05-24).
 #[derive(deluxe::ParseMetaItem, Default)]
 #[deluxe(default)]
 struct WorkflowArgs {
@@ -604,14 +616,20 @@ struct WorkflowArgs {
     /// `node_selector_if_root` (below). Renamed 2026-05-24 from
     /// the misleading `node_selector` after a real e2e bug.
     boundary_node_selector: std::collections::BTreeMap<String, String>,
-    /// `node_selector_if_root = { "k" = "v" }` — Argo
-    /// `WorkflowSpec.NodeSelector`. The third tier of Argo's 3-tier
+    /// `node_selector_if_root = { "k" = "v", "k2" = "lit" + arg, … }` —
+    /// Argo `WorkflowSpec.NodeSelector`. The third tier of Argo's 3-tier
     /// pod nodeSelector lookup: applies to every pod in the run that
     /// doesn't have its own template-level or boundary-level selector
     /// set. Root-only (same family as `ttl_if_root`/`pod_gc_if_root`/
     /// `active_deadline_if_root`); inert when this WT is `templateRef`'d
-    /// as a sub-workflow.
-    node_selector_if_root: std::collections::BTreeMap<String, String>,
+    /// as a sub-workflow. Values support the same `"lit" + arg` /
+    /// `"lit" + arg.field` injection grammar as `#[container]` attrs,
+    /// but lower to `{{=fromJSON(workflow.parameters['arg'])}}` — i.e.
+    /// the SUBMITTED ROOT workflow's `arguments.parameters` (always
+    /// root-scoped, never this template's inputs.parameters; the latter
+    /// is empirically inert at WorkflowSpec scope on v4.0.5). Keys are
+    /// literal-only.
+    node_selector_if_root: std::collections::BTreeMap<String, syn::Expr>,
     on_exit_if_root: Option<syn::Path>,
     /// Template-level `retryStrategy` (`limit` required when present).
     retry: Option<RetryArgs>,
@@ -990,23 +1008,37 @@ container arguments / their named fields — e.g. `\"repo:\" + tag` or \
 `\"repo:\" + meta.id + \"-x\"`. Method calls, other idents, tuple/index \
 fields, and other expressions aren't supported.";
 
-/// Lower a `#[container]` attribute value to an Argo string. A lone
-/// string literal is verbatim (so a hand-written `{{…}}` passes through
-/// untouched — the power-user escape hatch). A `+`-concatenation lowers
-/// each `arg` / `arg.named.field` operand to
-/// `{{=fromJSON(inputs.parameters['arg'](['f'])*)}}` (the raw value —
-/// no outer `toJSON`, since this injects into an Argo-native string
-/// field, not athena's run-side), literal segments verbatim. Injected
-/// operands are recorded for the `Display` type-guard.
+/// Lower a `#[container]`/`#[workflow]` attribute value to an Argo
+/// string. A lone string literal is verbatim (so a hand-written `{{…}}`
+/// passes through untouched — the power-user escape hatch). A
+/// `+`-concatenation lowers each `arg` / `arg.named.field` operand to
+/// `{{=fromJSON(<scope>['arg'](['f'])*)}}` (the raw value — no outer
+/// `toJSON`, since this injects into an Argo-native string field, not
+/// athena's run-side), literal segments verbatim.
+///
+/// `scope` is `"inputs.parameters"` for `#[container]` attrs (per-pod,
+/// substituted by `workflowpod.go:106` ProcessArgs against the
+/// container's own inputs) or `"workflow.parameters"` for
+/// `#[workflow]` attrs (root-scoped, substituted from the SUBMITTED
+/// root's `arguments.parameters` — empirically proven on v4.0.5 to
+/// resolve at both `Template.NodeSelector` and `WorkflowSpec
+/// .NodeSelector`, whereas `inputs.parameters` does NOT — the boundary
+/// fallback at `workflowpod.go:938` copies the raw template string
+/// before any per-template substitution can resolve it). `kind` is the
+/// macro name to thread into error messages.
+///
+/// Injected operands are recorded for the `Injectable` type-guard.
 fn inject_lower(
     e: &Expr,
     args: &std::collections::HashSet<String>,
     ops: &mut Vec<Expr>,
+    scope: &str,
+    kind: &str,
 ) -> syn::Result<String> {
     match unwrap_expr(e) {
         Expr::Binary(b) if matches!(b.op, syn::BinOp::Add(_)) => {
-            let mut s = inject_lower(&b.left, args, ops)?;
-            s.push_str(&inject_lower(&b.right, args, ops)?);
+            let mut s = inject_lower(&b.left, args, ops, scope, kind)?;
+            s.push_str(&inject_lower(&b.right, args, ops, scope, kind)?);
             Ok(s)
         }
         Expr::Lit(syn::ExprLit {
@@ -1019,13 +1051,13 @@ fn inject_lower(
                 return Err(syn::Error::new_spanned(
                     e,
                     format!(
-                        "`{id}` is not a parameter of this #[container] — \
+                        "`{id}` is not a parameter of this #[{kind}] — \
                          only its arguments can be injected."
                     ),
                 ));
             }
             ops.push(unwrap_expr(e).clone());
-            Ok(format!("{{{{=fromJSON(inputs.parameters['{id}'])}}}}"))
+            Ok(format!("{{{{=fromJSON({scope}['{id}'])}}}}"))
         }
         Expr::Field(_) => {
             let mut path: Vec<String> = Vec::new();
@@ -1054,14 +1086,12 @@ fn inject_lower(
             if !args.contains(&root) {
                 return Err(syn::Error::new_spanned(
                     cur,
-                    format!("`{root}` is not a parameter of this #[container]."),
+                    format!("`{root}` is not a parameter of this #[{kind}]."),
                 ));
             }
             ops.push(unwrap_expr(e).clone());
             let acc: String = path.iter().map(|f| format!("['{f}']")).collect();
-            Ok(format!(
-                "{{{{=fromJSON(inputs.parameters['{root}']){acc}}}}}"
-            ))
+            Ok(format!("{{{{=fromJSON({scope}['{root}']){acc}}}}}"))
         }
         other => Err(syn::Error::new_spanned(other, UNSUPPORTED_INJECT)),
     }
@@ -1146,7 +1176,15 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let image_s = match cfg
         .image
         .as_ref()
-        .map(|e| inject_lower(e, &argset, &mut inject_ops))
+        .map(|e| {
+            inject_lower(
+                e,
+                &argset,
+                &mut inject_ops,
+                "inputs.parameters",
+                "container",
+            )
+        })
         .transpose()
     {
         Ok(v) => v,
@@ -1155,7 +1193,15 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let sa_s = match cfg
         .service_account
         .as_ref()
-        .map(|e| inject_lower(e, &argset, &mut inject_ops))
+        .map(|e| {
+            inject_lower(
+                e,
+                &argset,
+                &mut inject_ops,
+                "inputs.parameters",
+                "container",
+            )
+        })
         .transpose()
     {
         Ok(v) => v,
@@ -1165,7 +1211,15 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let ns_vals: Vec<String> = match cfg
         .node_selector
         .values()
-        .map(|e| inject_lower(e, &argset, &mut inject_ops))
+        .map(|e| {
+            inject_lower(
+                e,
+                &argset,
+                &mut inject_ops,
+                "inputs.parameters",
+                "container",
+            )
+        })
         .collect::<syn::Result<Vec<_>>>()
     {
         Ok(v) => v,
@@ -1178,7 +1232,15 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let env_vals: Vec<String> = match cfg
         .env
         .values()
-        .map(|e| inject_lower(e, &argset, &mut inject_ops))
+        .map(|e| {
+            inject_lower(
+                e,
+                &argset,
+                &mut inject_ops,
+                "inputs.parameters",
+                "container",
+            )
+        })
         .collect::<syn::Result<Vec<_>>>()
     {
         Ok(v) => v,
@@ -1190,7 +1252,15 @@ pub fn container(attr: TokenStream, item: TokenStream) -> TokenStream {
     let ann_vals: Vec<String> = match cfg
         .annotations
         .values()
-        .map(|e| inject_lower(e, &argset, &mut inject_ops))
+        .map(|e| {
+            inject_lower(
+                e,
+                &argset,
+                &mut inject_ops,
+                "inputs.parameters",
+                "container",
+            )
+        })
         .collect::<syn::Result<Vec<_>>>()
     {
         Ok(v) => v,
@@ -3669,10 +3739,58 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
     // boundary-level override. Emitted as the `NODE_SELECTOR_IF_ROOT`
     // trait const → Collector → per-WT spec post-pass (mirrors
     // `TTL`/`POD_GC`/`ACTIVE_DEADLINE_IF_ROOT`).
+    //
+    // Values: lone string literals are verbatim; `"lit" + arg` /
+    // `"lit" + arg.field` lowers to `{{=fromJSON(workflow.parameters[..])}}`
+    // — root-scoped substitution (the only form Argo resolves at
+    // WorkflowSpec scope on v4.0.5; `inputs.parameters` is inert here).
+    // `_if_root` semantic ⇒ injection is safe by construction: this attr
+    // is inert when the WT is `templateRef`'d, and the workflow's own
+    // args coincide with `workflow.parameters` when submitted as root.
+    let argset: std::collections::HashSet<String> = arg_names.iter().cloned().collect();
+    let mut wf_inject_ops: Vec<Expr> = Vec::new();
     let nsi_keys: Vec<&String> = cfg.node_selector_if_root.keys().collect();
-    let nsi_vals: Vec<&String> = cfg.node_selector_if_root.values().collect();
+    let nsi_vals: Vec<String> = match cfg
+        .node_selector_if_root
+        .values()
+        .map(|e| {
+            inject_lower(
+                e,
+                &argset,
+                &mut wf_inject_ops,
+                "workflow.parameters",
+                "workflow",
+            )
+        })
+        .collect::<syn::Result<Vec<_>>>()
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
     let node_selector_if_root_tok = quote! {
         &[ #( (#nsi_keys, #nsi_vals) ),* ]
+    };
+    // Type-guard for every injected workflow operand — same shape as the
+    // container guard (a hidden never-run fn asserting `Injectable`).
+    let wf_inject_check = if wf_inject_ops.is_empty() {
+        quote! {}
+    } else {
+        let orig_inputs = &func.sig.inputs;
+        let chk = format_ident!("__athena_inject_check_{}", ident);
+        quote! {
+            #[doc(hidden)]
+            #[allow(dead_code, unused, clippy::all)]
+            fn #chk(#orig_inputs) {
+                fn __athena_assert<T>(_: &T)
+                where
+                    T: ?Sized + ::cargo_athena::Injectable,
+                {
+                }
+                #(
+                    __athena_assert(&#wf_inject_ops);
+                )*
+            }
+        }
     };
     // `annotations` — literal keys + values, lands on
     // `Template.metadata.annotations` of the dag/steps template. Same
@@ -3794,9 +3912,11 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         // Typed signature shim + never-run ghost: rustc type-checks the
         // analyzed body's data flow (arg/field/return types) even though
-        // the body itself isn't compiled.
+        // the body itself isn't compiled. The inject-check shim asserts
+        // any `node_selector_if_root` operand is `Injectable`.
         #sig_block
         #ghost
+        #wf_inject_check
 
         // Synthesized `if` wrappers + arm sub-workflows (force-linked via
         // this workflow's `collect`, since its `if` nodes name them).

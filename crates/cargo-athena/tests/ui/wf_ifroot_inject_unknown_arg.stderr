@@ -1,0 +1,5 @@
+error: `missing` is not a parameter of this #[workflow] — only its arguments can be injected.
+ --> tests/ui/wf_ifroot_inject_unknown_arg.rs:6:70
+  |
+6 | #[cargo_athena::workflow(node_selector_if_root = { "env" = "prod-" + missing })]
+  |                                                                      ^^^^^^^

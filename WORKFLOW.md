@@ -20,7 +20,7 @@ runtime surprises.
 ```rust,ignore
 #[workflow(name = "...", steps,
            boundary_node_selector = { "k" = "v" },
-           node_selector_if_root = { "k" = "v" },
+           node_selector_if_root = { "k" = "v", "k2" = "lit" + arg },
            on_exit_if_root = path::to::template,
            retry(limit = 2, policy = "OnError", backoff = "30s"),
            ttl_if_root(after_completion = 86400, after_success = 3600, after_failure = 7200),
@@ -32,8 +32,8 @@ runtime surprises.
 |---|---|
 | `name = "my-name"` | Override the Argo template name. Default: `<crate>-<fn>` (kebab). |
 | `steps` | Emit an Argo `steps:` (sequential) template instead of the default data-dependency `dag:`. |
-| `boundary_node_selector = { "k" = "v" }` | `nodeSelector` on this dag/steps template (`Template.NodeSelector`). Argo applies it to pods whose **immediate enclosing dag/steps is this template** — does NOT cascade through nested sub-workflows. For "every pod in the run", use `node_selector_if_root`. Literal keys *and* values. See [Node selector](#node-selector). |
-| `node_selector_if_root = { "k" = "v" }` | `nodeSelector` on this WT's `WorkflowSpec.NodeSelector`. **Root-only**: applies to every pod in the run that doesn't have a template- or boundary-level override. Inert when this WT is `templateRef`'d as a sub-workflow. Same `_if_root` family as `ttl_if_root`/`pod_gc_if_root`/`active_deadline_if_root`. Literal keys *and* values. |
+| `boundary_node_selector = { "k" = "v" }` | `nodeSelector` on this dag/steps template (`Template.NodeSelector`). Argo applies it only to pods whose **immediate enclosing dag/steps is this template** — does NOT cascade through nested sub-workflows. **Literal keys *and* values** (no per-arg injection — would be a root-scoping footgun, see [Node selector](#node-selector)). For dynamic / "every pod" cases, use `node_selector_if_root`. |
+| `node_selector_if_root = { "k" = "v", "k2" = "lit" + arg }` | `nodeSelector` on this WT's `WorkflowSpec.NodeSelector`. **Root-only**: applies to every pod in the run that doesn't have a template- or boundary-level override. Inert when this WT is `templateRef`'d as a sub-workflow. Same `_if_root` family as `ttl_if_root`/`pod_gc_if_root`/`active_deadline_if_root`. Literal keys; **values support `"lit" + arg` / `"lit" + arg.field` injection** (lowers to `{{=fromJSON(workflow.parameters['arg'])}}`). |
 | `annotations = { "k" = "v" }` | Template-level annotations (`metadata.annotations`) on the dag/steps template. Literal keys *and* values (drop in `{{workflow.parameters.X}}` as a literal for dynamic). |
 | `on_exit_if_root = t` | Whole-workflow exit handler on this template's own `spec.hooks.exit`. Fires only when *this* template is the workflow you submit. Distinct from the per-task `.on_exit(t)` builder. |
 | `retry(limit = N \| unlimited, policy = "…", backoff = <dur>)` | Template-level Argo `retryStrategy`. `limit` is **required** (`unlimited` ⇒ no cap); `policy` ∈ `Always\|OnFailure\|OnError\|OnTransientError`; `backoff` is an int (seconds) or a [humantime](https://docs.rs/humantime) string. |
@@ -68,35 +68,66 @@ Argo's nodeSelector lookup at pod-creation time is **3-tier** —
 `tmpl.NodeSelector → boundary.NodeSelector → wfSpec.NodeSelector` —
 and Argo **never walks the ancestor chain**, only the immediate
 boundary (`workflow/controller/workflowpod.go:928-958`). That gives
-us three distinct knobs, each at a different tier:
+three distinct knobs, each at a different tier and with different
+substitution rules:
 
-| Where you put it | Argo field | Reaches |
-|---|---|---|
-| [`#[container(node_selector = …)]`](container.md) | `Template.NodeSelector` on the container | **This pod only.** Wins over both other tiers. |
-| `#[workflow(boundary_node_selector = …)]` | `Template.NodeSelector` on the dag/steps | Pods whose **immediate** enclosing dag/steps is this template. Does NOT cascade through nested sub-workflows. |
-| `#[workflow(node_selector_if_root = …)]` | `WorkflowSpec.NodeSelector` | **Every pod in the run** that doesn't have a tmpl- or boundary-level override. Root-only (inert when this WT is `templateRef`'d). |
+| Where you put it | Argo field | Reaches | Dynamic values |
+|---|---|---|---|
+| [`#[container(node_selector = …)]`](container.md) | `Template.NodeSelector` on the container | **This pod only.** Wins over both other tiers. | `"lit" + arg` → `{{=fromJSON(inputs.parameters['arg'])}}` (per-pod, resolved by container's own inputs). |
+| `#[workflow(boundary_node_selector = …)]` | `Template.NodeSelector` on the dag/steps | Pods whose **immediate** enclosing dag/steps is this template. Does NOT cascade through nested sub-workflows. | **Literal only.** Hand-written `{{workflow.parameters.X}}` is an eyes-open escape hatch — see warnings below. |
+| `#[workflow(node_selector_if_root = …)]` | `WorkflowSpec.NodeSelector` | **Every pod in the run** that doesn't have a tmpl- or boundary-level override. Root-only (inert when this WT is `templateRef`'d). | `"lit" + arg` → `{{=fromJSON(workflow.parameters['arg'])}}` (root-scoped — *the only* substitution Argo resolves at WorkflowSpec scope). |
 
-The "boundary-only / no cascade" behavior of the middle tier is
-genuinely surprising — a `pipeline → sub → container` chain where
-only `pipeline` sets `boundary_node_selector` does **not** carry the
-selector down to `container`'s pod. Use `node_selector_if_root` when
-you want a default for every pod regardless of nesting.
+### Two surprising things about boundary_node_selector
+
+1. **It doesn't cascade.** A `pipeline → sub → container` chain where
+   only `pipeline` sets `boundary_node_selector` does **not** carry the
+   selector down to `container`'s pod (its boundary is `sub`, which has
+   none → fallback continues to `wfSpec`, also empty → no selector).
+   Use `node_selector_if_root` if you want a default for every pod.
+
+2. **`inputs.parameters` is inert here.** Argo copies the boundary
+   template's `NodeSelector` to the child pod **before** any
+   `inputs.parameters` substitution could resolve against the dag's
+   own inputs (proven on v4.0.5 — `workflowpod.go:938` runs before the
+   substitution pass would reach the pod). The only substitution that
+   survives is `{{workflow.parameters.X}}`, which is **always
+   root-scoped**: a sub-workflow's `boundary_node_selector` containing
+   `{{workflow.parameters.region}}` resolves against whichever
+   workflow you actually submit at the top, not against this template's
+   `region` input. That mismatch (Rust arg name vs. who-supplies-it) is
+   why `boundary_node_selector` is intentionally literal-only at the
+   macro level. **Treat boundary selectors as static plumbing; reach
+   for `node_selector_if_root` whenever the value depends on an arg.**
+
+### How injection works for `node_selector_if_root`
 
 ```rust,ignore
 #[workflow(
     boundary_node_selector = { "kubernetes.io/arch" = "amd64" },
     node_selector_if_root  = { "tier" = "platform",
-                                "region" = "{{workflow.parameters.region}}" },
+                                "env"  = "prod-" + env },
 )]
-fn pipeline() { /* ... */ }
+fn pipeline(env: String) { /* ... */ }
 ```
 
-Workflow attrs are **literal-only** (keys *and* values) — a workflow
-has no args to inject from. For a dynamic value, drop in
-`{{workflow.parameters.<NAME>}}` as a literal (as in `region` above).
-That's the only interpolation Argo keeps; it always resolves against
-the **submitted root**, so supply `<NAME>` to the workflow you
-actually submit, not to a sub-workflow.
+`"lit" + arg` / `"lit" + arg.field` lowers each `arg` to
+`{{=fromJSON(workflow.parameters['arg'])}}` — i.e. the SUBMITTED
+ROOT's `arguments.parameters.arg`, JSON-unwrapped (so a `String` round-
+trips correctly as a raw label value). The grammar matches
+`#[container]`'s, with the same `Injectable` type guard, but the
+substitution scope is workflow-wide, not per-pod.
+
+The `_if_root` semantic makes this safe by construction:
+
+* When this WT is the submitted root, `workflow.parameters.arg` is
+  whatever the user passed via `-p arg=…` (and `cargo athena submit`
+  prefills it from this workflow's own arg). Matches expectation.
+* When this WT is `templateRef`'d as a sub-workflow,
+  `WorkflowSpec.NodeSelector` is **never read** for that nested call
+  (Argo's `setExecWorkflow` only materializes the submitted root's
+  spec — verified live on v4.0.5). So the sub's `node_selector_if_root`
+  is completely dormant; the parent doesn't need to know about its
+  args, and no admission error fires for an unresolvable reference.
 
 ## The body
 
