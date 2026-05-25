@@ -50,37 +50,37 @@ spec:
       volumeMounts:
       - name: athena-work
         mountPath: /athena
-      - name: host-cache-fast
-        mountPath: /athena/mounts/cache-fast
-      - name: host-cache-slow
-        mountPath: /athena/mounts/cache-slow
-      - name: host-data-default
-        mountPath: /athena/mounts/data-default
-      - name: host-data-empty
-        mountPath: /athena/mounts/data-empty
-      - name: host-var-lib-a
-        mountPath: /athena/mounts/var-lib-a
-      - name: host-var-lib-b
-        mountPath: /athena/mounts/var-lib-b
+      - name: host-97b377f40b8b3903
+        mountPath: /athena/mounts/97b377f40b8b3903
+      - name: host-6c4af851fd572834
+        mountPath: /athena/mounts/6c4af851fd572834
+      - name: host-8827214a2b131334
+        mountPath: /athena/mounts/8827214a2b131334
+      - name: host-359cf2a61f76e450
+        mountPath: /athena/mounts/359cf2a61f76e450
+      - name: host-14e2166354dfafb7
+        mountPath: /athena/mounts/14e2166354dfafb7
+      - name: host-14e2176354dfb16a
+        mountPath: /athena/mounts/14e2176354dfb16a
     volumes:
     - name: athena-work
       emptyDir: {}
-    - name: host-cache-fast
+    - name: host-97b377f40b8b3903
       hostPath:
         path: /cache/fast
-    - name: host-cache-slow
+    - name: host-6c4af851fd572834
       hostPath:
         path: /cache/slow
-    - name: host-data-default
+    - name: host-8827214a2b131334
       hostPath:
         path: /data/default
-    - name: host-data-empty
+    - name: host-359cf2a61f76e450
       hostPath:
         path: /data/empty
-    - name: host-var-lib-a
+    - name: host-14e2166354dfafb7
       hostPath:
         path: /var/lib/a
-    - name: host-var-lib-b
+    - name: host-14e2176354dfb16a
       hostPath:
         path: /var/lib/b
     serviceAccountName: default
@@ -200,12 +200,12 @@ spec:
       volumeMounts:
       - name: athena-work
         mountPath: /athena
-      - name: host-secrets-token
-        mountPath: /athena/mounts/secrets-token
+      - name: host-4722dbf1d90eb665
+        mountPath: /athena/mounts/4722dbf1d90eb665
     volumes:
     - name: athena-work
       emptyDir: {}
-    - name: host-secrets-token
+    - name: host-4722dbf1d90eb665
       hostPath:
         path: /secrets/token
     serviceAccountName: default

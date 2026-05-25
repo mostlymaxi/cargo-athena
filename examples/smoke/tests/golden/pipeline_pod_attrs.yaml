@@ -86,9 +86,9 @@ spec:
       volumeMounts:
       - name: athena-work
         mountPath: /athena
-      - name: host-dev-shm
+      - name: host-aee8d5824d48bc20
         mountPath: /dev/shm
-      - name: host-etc-ca-certs
+      - name: host-ba155970169f1f8b
         mountPath: /certs
         readOnly: true
       securityContext:
@@ -96,10 +96,10 @@ spec:
     volumes:
     - name: athena-work
       emptyDir: {}
-    - name: host-dev-shm
+    - name: host-aee8d5824d48bc20
       hostPath:
         path: /dev/shm
-    - name: host-etc-ca-certs
+    - name: host-ba155970169f1f8b
       hostPath:
         path: /etc/ca-certs
     serviceAccountName: default
