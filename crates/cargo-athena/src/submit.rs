@@ -28,7 +28,7 @@ pub struct SubmitArgs {
     /// `cargo athena workflow ls` / `container ls`.
     template: String,
     #[command(flatten)]
-    pkg: crate::emulate::PkgSel,
+    pkg: crate::pkg::PkgSel,
     /// A workflow input: `-a name=value` (parsed as JSON if it parses,
     /// else a string). Repeatable.
     #[arg(short = 'a', long = "arg", value_name = "NAME=VALUE")]

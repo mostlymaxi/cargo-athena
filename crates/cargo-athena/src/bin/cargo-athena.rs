@@ -16,6 +16,8 @@ use std::process::{Command, Stdio, exit};
 // helpers below (`cargo_run`, `tool_ok`, `package_meta`, …).
 #[path = "../emulate.rs"]
 mod emulate;
+#[path = "../pkg.rs"]
+mod pkg;
 #[path = "../submit.rs"]
 mod submit;
 #[path = "../tarball.rs"]
@@ -45,10 +47,8 @@ struct Athena {
 enum Cmd {
     /// Run the user binary in emit-mode; relay the WorkflowTemplate YAML.
     Emit {
-        #[arg(long)]
-        package: Option<String>,
-        #[arg(long)]
-        bin: Option<String>,
+        #[command(flatten)]
+        pkg: pkg::PkgSel,
         /// Write the YAML here instead of stdout.
         #[arg(long)]
         out: Option<String>,
@@ -77,10 +77,8 @@ enum Cmd {
     /// Cross-compile + package the tarball locally (no upload); print
     /// the upload key. Use `publish` to build **and** upload in one step.
     Build {
-        #[arg(long)]
-        package: Option<String>,
-        #[arg(long)]
-        bin: Option<String>,
+        #[command(flatten)]
+        pkg: pkg::PkgSel,
         /// Override the `athena.toml` target matrix (repeatable).
         #[arg(long = "target")]
         targets: Vec<String>,
@@ -91,10 +89,8 @@ enum Cmd {
     /// One-shot `build` + S3 upload: cross-compile, package, and upload
     /// the tarball to the `athena.toml` artifact repository.
     Publish {
-        #[arg(long)]
-        package: Option<String>,
-        #[arg(long)]
-        bin: Option<String>,
+        #[command(flatten)]
+        pkg: pkg::PkgSel,
         /// Override the `athena.toml` target matrix (repeatable).
         #[arg(long = "target")]
         targets: Vec<String>,
@@ -154,16 +150,18 @@ fn main() {
     }
     match a.cmd {
         Cmd::Emit {
-            package,
-            bin,
+            pkg,
             out,
             with_workflow,
-        } => emit(
-            package.as_deref(),
-            bin.as_deref(),
-            out.as_deref(),
-            with_workflow,
-        ),
+        } => {
+            let (package, bin) = pkg.resolve();
+            emit(
+                package.as_deref(),
+                bin.as_deref(),
+                out.as_deref(),
+                with_workflow,
+            );
+        }
         Cmd::Container { cmd } => match cmd {
             ContainerCmd::Emulate(args) => emulate::container_emulate(args),
             ContainerCmd::Describe(args) => emulate::describe_print(args),
@@ -175,24 +173,28 @@ fn main() {
         },
         Cmd::Submit(args) => submit::submit(args),
         Cmd::Build {
-            package,
-            bin,
+            pkg,
             targets,
             print,
-        } => build(package.as_deref(), bin.as_deref(), &targets, print),
+        } => {
+            let (package, bin) = pkg.resolve();
+            build(package.as_deref(), bin.as_deref(), &targets, print);
+        }
         Cmd::Publish {
-            package,
-            bin,
+            pkg,
             targets,
             tarball,
             print,
-        } => publish(
-            package.as_deref(),
-            bin.as_deref(),
-            &targets,
-            tarball.as_deref(),
-            print,
-        ),
+        } => {
+            let (package, bin) = pkg.resolve();
+            publish(
+                package.as_deref(),
+                bin.as_deref(),
+                &targets,
+                tarball.as_deref(),
+                print,
+            );
+        }
     }
 }
 
