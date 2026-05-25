@@ -1303,8 +1303,13 @@ pub fn wrap_workflow_template(name: String, inner: api::Template) -> api::Workfl
 }
 
 /// kebab-case an Argo identifier (DNS-1123-ish) from a Rust ident.
+/// Lowercases, swaps `_` for `-`, and trims leading/trailing `-` so that
+/// idiomatic Rust names like `fn _unused_helper()` or `fn foo_()` don't
+/// produce DNS-1123-invalid Argo template names (`-foo` / `foo-`, both
+/// rejected by k8s). Internal `__` becomes `--` and is kept (valid).
 pub fn kebab(s: &str) -> String {
-    s.replace('_', "-").to_ascii_lowercase()
+    let s = s.replace('_', "-").to_ascii_lowercase();
+    s.trim_matches('-').to_string()
 }
 
 /// DNS-1123-ish slug for a host path (alphanumerics kept, others →
@@ -1544,6 +1549,8 @@ pub fn entrypoint<E: Template>() {
 mod tests {
     use super::*;
 
+    // ---- kebab: Rust ident → DNS-1123-ish Argo name ---------------------
+
     #[test]
     fn kebab_lowercases_and_hyphenates() {
         assert_eq!(kebab("run_a_container"), "run-a-container");
@@ -1551,8 +1558,122 @@ mod tests {
     }
 
     #[test]
+    fn kebab_preserves_digits() {
+        // DNS-1123 allows `[a-z0-9]`; digits stay as-is. Rust forbids
+        // a leading digit, so we only need to handle internal/trailing.
+        assert_eq!(kebab("fetch2"), "fetch2");
+        assert_eq!(kebab("step_1_of_3"), "step-1-of-3");
+        assert_eq!(kebab("v1_handler"), "v1-handler");
+    }
+
+    #[test]
+    fn kebab_trims_leading_and_trailing_underscores() {
+        // `fn _unused_helper()` is idiomatic Rust (unused-prefix); the
+        // kebab MUST trim the leading `-` so make_argo_name doesn't
+        // produce `<crate>--unused-helper` (cosmetically ugly, and
+        // crate-name-dependent corner cases could land at a literal
+        // leading `-`). `fn foo_()` would yield `foo-` (k8s rejects
+        // trailing `-`) — trim catches it.
+        assert_eq!(kebab("_unused"), "unused");
+        assert_eq!(kebab("foo_"), "foo");
+        assert_eq!(kebab("_wrapped_"), "wrapped");
+        assert_eq!(kebab("__double_"), "double");
+    }
+
+    #[test]
+    fn kebab_keeps_internal_double_underscore() {
+        // Internal `__` lowers to `--`, which is legal DNS-1123. Don't
+        // collapse — round-trip back to the source ident is preserved
+        // (`foo__bar` ↔ `foo--bar`) so two different Rust idents can't
+        // collide in the Argo namespace.
+        assert_eq!(kebab("foo__bar"), "foo--bar");
+        assert_eq!(kebab("a___b"), "a---b");
+    }
+
+    // ---- volume_name / host_mount_path (host! → k8s volume) -------------
+
+    #[test]
     fn volume_name_is_dns_safe() {
         assert_eq!(volume_name("/etc/myapp"), "host-etc-myapp");
         assert_eq!(volume_name("/var/lib/extra"), "host-var-lib-extra");
+    }
+
+    #[test]
+    fn volume_name_handles_path_edges() {
+        // Trailing slash trimmed (no `host-etc-`).
+        assert_eq!(volume_name("/etc/"), "host-etc");
+        // Root → fallback `v` (munge_host_path's empty-string guard).
+        assert_eq!(volume_name("/"), "host-v");
+        // Numeric segments fine (DNS-1123 `[a-z0-9]`).
+        assert_eq!(volume_name("/srv/123/data"), "host-srv-123-data");
+        // Dots / hyphens in the path collapse to `-`.
+        assert_eq!(volume_name("/var/log/app.1"), "host-var-log-app-1");
+    }
+
+    #[test]
+    fn host_mount_path_agrees_with_volume_name_suffix() {
+        // The in-pod mount path and the Volume name MUST agree on the
+        // munged suffix (else the VolumeMount wouldn't bind). Both go
+        // through munge_host_path; this test pins the contract.
+        for path in [
+            "/etc/myapp",
+            "/var/lib/extra",
+            "/srv/123/data",
+            "/var/log/app.1",
+            "/",
+        ] {
+            let v = volume_name(path);
+            let m = host_mount_path(path);
+            let suffix = v.strip_prefix("host-").unwrap();
+            assert_eq!(
+                m,
+                format!("{ATHENA_MOUNTS_DIR}/{suffix}"),
+                "path {path:?} produced mismatched volume + mount"
+            );
+        }
+    }
+
+    // ---- secret_env_name (k8s Secret (name, key) → pod env var) ---------
+
+    #[test]
+    fn secret_env_name_munges_consistently() {
+        // Both halves uppercased; non-alphanumerics → `_`; halves
+        // separated by `__` so the two stay distinguishable. The
+        // emit-side and run-side both go through this fn — this test
+        // pins the contract (drift would silently break `secret!`).
+        assert_eq!(
+            secret_env_name("my-secret", "db.password"),
+            "ATHENA_SEC_MY_SECRET__DB_PASSWORD",
+        );
+        assert_eq!(secret_env_name("simple", "key"), "ATHENA_SEC_SIMPLE__KEY",);
+        // Already-uppercase / digits: pass through.
+        assert_eq!(
+            secret_env_name("API_v2", "TOKEN_1"),
+            "ATHENA_SEC_API_V2__TOKEN_1",
+        );
+    }
+
+    #[test]
+    fn secret_env_name_is_valid_posix_env_var() {
+        // POSIX env var names: `[a-zA-Z_][a-zA-Z_0-9]*`. The output of
+        // secret_env_name must always satisfy this regardless of what
+        // the user passed (any non-alphanumeric → `_`, prefix is
+        // `ATHENA_SEC_`, so the first-char rule is always met).
+        let valid_env = |s: &str| {
+            let mut cs = s.chars();
+            cs.next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && cs.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        };
+        for (name, key) in [
+            ("foo", "bar"),
+            ("my-secret", "db.password"),
+            ("name with spaces", "key/with/slashes"),
+            ("-leading-dash", "trailing.dot."),
+            ("123-numeric-start", "ok"),
+        ] {
+            let env = secret_env_name(name, key);
+            assert!(valid_env(&env), "{env} is not a valid POSIX env var");
+        }
     }
 }
