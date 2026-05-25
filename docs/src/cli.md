@@ -1,8 +1,7 @@
 # The `cargo athena` CLI
 
 After `cargo install cargo-athena` you have the `cargo athena`
-subcommand. It drives *your* workflow crate's binary (the one whose
-`main` calls `cargo_athena::entrypoint!(Root)`) in the right mode.
+subcommand. It drives your workflow crate's binary.
 
 ```text
 cargo athena [-c F] emit  [--package PKG] [--bin B] [--out F] [--with-workflow]
@@ -18,248 +17,164 @@ cargo athena [-c F] build [--package PKG] [--bin B] [--target T].. [--print]
 cargo athena [-c F] publish [--package PKG] [--bin B] [--target T].. [--tarball F] [--print]
 ```
 
+The typical flow is **`publish`** to ship the binary, then
+**`submit`** to register the templates and start a run. Everything
+else is for inspection, GitOps, or local testing.
+
 `-c, --config <FILE>` (global) points at an `athena.toml`. By default
-the nearest one walking up from the cwd is used (like `Cargo.toml`), or
-`$ATHENA_CONFIG`.
+the nearest one walking up from the cwd is used (like `Cargo.toml`),
+or `$ATHENA_CONFIG`.
 
 ## `emit`
 
-Relays the multi-document YAML: one `WorkflowTemplate` per reachable
-template, cross-referenced by `templateRef`. The names are **stable and
-deterministic** (`<crate>-<fn>`) - register them and trigger runs with
-`argo submit --from workflowtemplate/<root>`.
-
-The ergonomic path is **`publish` + [`cargo athena submit`](#submit)** -
-`submit` does this `emit` + register **and** starts the run for you.
-Reach for `emit` directly to *inspect* the YAML, or for a GitOps
-`kubectl apply` pipeline.
+Prints the multi-document `WorkflowTemplate` YAML to stdout.
 
 ```sh
-cargo athena emit --package my-crate                    # to stdout
-cargo athena emit --package my-crate --out wf.yaml      # to a file
-cargo athena emit --package my-crate | kubectl apply -f -   # register
+cargo athena emit --package my-crate
+cargo athena emit --package my-crate --out wf.yaml
+cargo athena emit --package my-crate | kubectl apply -f -
 ```
 
-`--with-workflow` also appends a convenience runnable `Workflow`
-(`generateName`, `workflowTemplateRef` → root), so
-`cargo athena emit --with-workflow … | kubectl create -f -` registers
-*and* fires one run - handy for demos. Off by default: a `generateName`
-object isn't idempotent and isn't something you'd GitOps; the
-deterministic templates are.
+Names are deterministic (`<crate>-<fn>` kebab) so the output is
+GitOps-friendly. For the typical deploy + run flow use
+[`publish`](#publish) and [`submit`](#submit) instead.
 
-Needs only an [`athena.toml`](configuration.md) (it bakes the artifact
-source into the YAML) - no cluster, S3, or cross-build. The fast
-iteration loop.
-
-## `container emulate`
-
-Runs one `#[container]` locally under **docker/podman, exactly as Argo
-would**: the same image, the *same injected bootstrap*, the same
-`ATHENA_PARAM_*` env, the `/athena` scratch dir, `host!` binds, and S3
-artifact ports. Test a single node locally - no Kubernetes, no source
-on the node.
-
-```sh
-# default: pull the *deployed* binary from S3 and run it in its image
-cargo athena container emulate my-crate-transform -a data=hello -a factor=4
-
-cargo athena container emulate my-crate-fetch --input-file args.json
-cargo athena container emulate my-crate-fetch --build         # local musl build instead
-```
-
-Fidelity is by construction: the binary reports its run metadata from
-the *same* `Template::build()` `emit` uses, so there's nothing to keep
-in sync.
-
-- `<name>` (positional) - the full template name (`<crate>-<fn>` kebab,
-  or the `#[container(name = "…")]` override). Run
-  `cargo athena container ls` to list them. A `#[workflow]` is rejected
-  (it's a DAG, not a pod; emulate its containers individually).
-- `-a name=value` (repeatable, **`--arg`**) / `--input-file F` - the
-  function arguments. A value is parsed as JSON if it parses (`-a n=4` →
-  number), else a string; all are JSON-encoded into the env exactly as
-  Argo passes them. Arguments are **type-checked against the fn's real
-  signature before anything launches** - missing, unknown (with
-  did-you-mean), and wrong scalar/array kinds fail fast.
-- `-p`/`--package`, `--bin` select the cargo target (see
-  [package selection](#package-selection)).
-- Binary source: **default = pull the deployed tarball from the
-  `athena.toml` S3 repo** (smoke-test what's live). `--build` packages a
-  local host-arch musl binary; `--tarball F` uses one verbatim. S3
-  credentials come from the standard `AWS_*` env vars.
-- `--runtime docker|podman` (default: autodetect, prefer docker);
-  `--skip-artifacts` to bypass S3 `load/save_artifact!` sync.
-
-**Limitations - this runs the container *body* faithfully, not the
-pod's Kubernetes context.** `docker run` has no notion of a
-`ServiceAccount`, so `#[container(service_account=…)]` and any
-podSpec-level concerns (RBAC, `nodeSelector`, podSpecPatch) are **not**
-emulated. For those, exercise the real Argo path (`emit` + submit).
-
-## `container describe`
-
-Prints, as JSON, the exact runner metadata one template reports - its
-image, parameters **and their Rust types**, the binary/`host!`/artifact
-S3 ports, and the scratch + result paths. It's *the same* metadata
-`emulate` consumes (derived from the same `Template::build()` as
-`emit`), so it's the way to see what *would* run, or to script around
-it:
-
-```sh
-cargo athena container describe my-crate-transform
-```
-
-## `container ls`
-
-Lists the templates your workflow binary reports - full name, kind, and
-typed args - so they're discoverable for `emulate`/`describe` (no
-guessing the `<crate>-<fn>` name):
-
-```sh
-cargo athena container ls            # #[container]s only
-cargo athena container ls --all      # + #[workflow]s and synthetic templates
-```
-
-```text
-NAME                                  KIND       ARGS
-my-crate-fetch                        container  url: String
-my-crate-transform                    container  data: String, factor: i64
-```
-
-## `workflow ls`
-
-Every `#[workflow]` in the package (name + typed inputs). athena's
-synthesized `if`/`else` wrapper + arm sub-workflows are an
-implementation detail, so they're **hidden unless
-`--include-synthetic`**:
-
-```sh
-cargo athena workflow ls                      # your #[workflow]s
-cargo athena workflow ls --include-synthetic  # + the if/else machinery
-```
-
-## `workflow describe`
-
-Same metadata dump as [`container describe`](#container-describe), for
-any template - handy on a `#[workflow]` to see its resolved inputs:
-
-```sh
-cargo athena workflow describe my-crate-pipeline
-```
+Flags:
+- `--out F` - write to a file instead of stdout.
+- `--with-workflow` - also append a runnable `Workflow` so
+  `kubectl create -f -` registers AND fires one run (handy for demos).
 
 ## `submit`
 
-Run a `#[workflow]` (or a single `#[container]`) on a real cluster -
-`argo submit --from workflowtemplate/<name>` with the safety rails you'd
-otherwise do by hand. Paired with **`publish`** this is the recommended
-deploy+run flow: `publish` ships the binary, `submit` registers the
-templates and starts the run - no hand-run `emit`/`kubectl apply`:
+Run a `#[workflow]` (or a single `#[container]`) on a real cluster.
 
 ```sh
 cargo athena submit my-crate-pipeline -a seed=hello
 W=$(cargo athena submit my-crate-pipeline -a seed=hello -y)   # scriptable
 ```
 
-Before anything is created it:
+Before anything is created, `submit`:
 
-1. **type-checks** `-a`/`--input-file` against the template's real
-   signature (same report as `emulate`);
-2. confirms the **binary tarball is uploaded** (so pods can bootstrap;
-   `--skip-binary-check` to bypass);
-3. **registers + drift-checks** every reachable `WorkflowTemplate`:
-   missing ones are *created*, ones that differ from `emit` are
-   *updated* - after a **y/N prompt** (the change list is shown;
-   `--update` re-applies all, `-y/--yes` skips every prompt);
-4. creates the `Workflow` (a second **y/N**), then prints its **name to
-   stdout** (everything else is on stderr, so `W=$(… -y)` works).
+1. type-checks the arguments against the function signature,
+2. confirms the binary tarball is uploaded,
+3. registers every WorkflowTemplate (asking y/N if any drifted),
+4. creates the Workflow and prints its name to stdout.
 
-Transport mirrors the `argo` CLI: with **`--argo-server`/`$ARGO_SERVER`**
-set it uses the **Argo Server REST API** (`$ARGO_TOKEN` for auth,
-`--insecure-skip-tls-verify` if needed); otherwise it creates the CR
-through the **Kubernetes API** via your kubeconfig / in-cluster config
-(client-certs, tokens, and EKS/GKE/AKS exec-credential plugins all work
-- it's `kube-rs`).
+Transport auto-selects: with `--argo-server` / `$ARGO_SERVER` set it
+uses the Argo Server REST API (`$ARGO_TOKEN` for auth); otherwise it
+uses your kubeconfig (EKS / GKE / AKS exec plugins all work).
 
-Overrides: `-n/--namespace` (`$ARGO_NAMESPACE` →
-[`[defaults].namespace`](configuration.md) → `default`),
-`--service-account` (→ `[defaults].service_account`), and
-`--node-selector k=v` (repeatable; set root-scoped on the submitted
-Workflow - Argo applies it to every pod).
+Flags:
+- `-a name=value` (repeatable) / `--input-file F` - workflow arguments.
+- `-n NS` / `--namespace` - target namespace.
+- `--service-account SA` - override `[defaults].service_account`.
+- `--node-selector k=v` (repeatable) - root-scoped, applies to every pod.
+- `--argo-server URL` - use Argo Server REST instead of Kubernetes API.
+- `-y` / `--yes` - skip every y/N prompt.
+- `--update` - re-apply all WorkflowTemplates.
+- `--skip-binary-check` - don't verify the tarball is uploaded.
+
+## `publish`
+
+Cross-compiles a static-musl binary, packages it as a `.tar.gz`, and
+uploads it to the artifact repository in `athena.toml`.
+
+```sh
+cargo athena publish --package my-crate
+```
+
+Requires the Zig cross toolchain: `cargo install cargo-zigbuild` and
+[`zig`](https://ziglang.org/download/). `publish` checks for both up
+front and tells you what's missing.
+
+S3 credentials come from `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
+(plus `AWS_SESSION_TOKEN` if you use it), or from instance-role
+identity (EC2 IMDS / ECS task role / IRSA). The shared
+`~/.aws/credentials` file is **not** read.
+
+Flags:
+- `--target T` (repeatable) - override the `athena.toml` target matrix.
+- `--tarball F` - upload `F` verbatim; skip the build (build-once / upload-many).
+- `--print` - dry run: resolve and print the destination key, no build or upload.
+- `AWS_ENDPOINT_URL` env var - override the endpoint for this upload
+  only (port-forward / public-vs-in-cluster split).
 
 ## `build`
 
-Cross-compiles a **static-musl** binary for each target in
-[`athena.toml`](configuration.md)'s matrix, packages them as
-`app-<triple>` inside one `.tar.gz`, and prints the exact upload
-destination:
+The package-only variant of `publish`. Cross-compiles and writes the
+`.tar.gz` locally without uploading - useful for CI artifacts or
+inspection.
 
 ```sh
-cargo athena build --package my-crate           # build + package
-cargo athena build --package my-crate --print   # dry run: just resolve + print the key
+cargo athena build --package my-crate
+cargo athena build --package my-crate --print    # just resolve + print the key
 ```
 
-- `--target T` (repeatable) overrides the `athena.toml` target matrix.
-- Requires the Zig cross toolchain: `cargo install cargo-zigbuild` and
-  [`zig`](https://ziglang.org/download/). `build` checks for both up
-  front and tells you exactly what to install if either is missing.
+Same flags as `publish` minus `--tarball` and the upload step.
 
-## `cargo athena publish`
+## `container emulate`
 
-The one-shot **build + upload**: cross-compiles + packages (exactly
-like `build`) and then uploads the tarball to
-[`athena.toml`](configuration.md)'s artifact repository - the same key
-`emit` resolves, so it lands where the injected bootstrap fetches it:
+Runs one `#[container]` locally under docker or podman.
 
 ```sh
-cargo athena publish --package my-crate   # cross-compile + package + upload
+cargo athena container emulate my-crate-transform -a data=hello -a factor=4
+cargo athena container emulate my-crate-fetch --input-file args.json
+cargo athena container emulate my-crate-fetch --build
 ```
 
-- Takes the same flags as `build` (`-p/--bin`, `--target`, `--print`).
-  `--print` is a dry run (resolve + print the key, no build/upload).
-  Use plain `build` when you want the tarball locally *without*
-  uploading (CI artifact, inspection).
-- `--tarball F` uploads `F` verbatim and **skips the build** -
-  build-once / upload-many (reuse one CI-built artifact; the kind e2e
-  uses this).
-- S3 credentials: the standard `AWS_ACCESS_KEY_ID` /
-  `AWS_SECRET_ACCESS_KEY` (/ `AWS_SESSION_TOKEN`) env vars, else the
-  ambient cloud identity (EC2 IMDS / ECS task role / IRSA web-identity)
-  - the same `object_store` path `submit`/`emulate` use. The shared
-  `~/.aws/credentials` file and `AWS_PROFILE` are **not** read
-  (`object_store` is not the AWS SDK).
-- `AWS_ENDPOINT_URL` (AWS-SDK standard; `AWS_ENDPOINT_URL_S3` too)
-  overrides the `athena.toml` endpoint **for this upload only** - for
-  when S3 is reached differently here than from the pods (a
-  port-forward, or a public vs in-cluster host). It does *not* change
-  what `emit` bakes into the templates.
-- The destination `s3://bucket/key` is printed on **stdout**
-  (scriptable); progress on stderr.
+By default it pulls the deployed tarball from S3 so you smoke-test
+what's actually live. Arguments are type-checked against the real
+function signature; missing or wrong-type values fail fast.
 
-`emit` injects that tarball plus a tiny `sh` bootstrap into every
-container template, so the same upload serves every step on any
-node architecture.
+**Not emulated:** anything Kubernetes-specific. `docker run` has no
+ServiceAccount, no RBAC, no `nodeSelector`. For those, use `submit`
+on a real cluster.
+
+Flags:
+- `-a name=value` (repeatable) / `--input-file F` - function arguments.
+- `--build` - use a fresh local host-arch musl build instead of the
+  deployed tarball.
+- `--tarball F` - use `F` verbatim.
+- `--runtime docker|podman` - autodetect by default (prefer docker).
+- `--skip-artifacts` - bypass S3 `load`/`save_artifact!` sync.
+
+## `container describe` / `workflow describe`
+
+Prints one template's runner metadata as JSON: image, parameters
+and their Rust types, S3 ports, scratch paths. Used by `emulate`
+and scriptable.
+
+```sh
+cargo athena container describe my-crate-transform
+cargo athena workflow  describe my-crate-pipeline
+```
+
+## `container ls` / `workflow ls`
+
+Lists the templates your workflow binary reports.
+
+```sh
+cargo athena container ls            # #[container]s only
+cargo athena container ls --all      # + #[workflow]s and synthetic templates
+
+cargo athena workflow ls
+cargo athena workflow ls --include-synthetic   # + the if/else machinery
+```
+
+athena's synthesized `if` / `else` wrapper sub-workflows are an
+implementation detail and hidden unless you ask for them.
 
 ## Package selection
 
-`cargo athena` runs *your* crate's binary. Which one is resolved, in
-order:
+Which workflow binary `cargo athena` drives, in order:
 
-1. **`-p`/`--package` and `--bin`** flags (same meaning as for `cargo`
-   itself);
-2. else **`[defaults]` in `athena.toml`** - `package = "…"` /
-   `bin = "…"` (set them once instead of repeating the flags, like a
-   project default);
-3. else cargo's single-package / default-bin autodetect.
+1. `-p` / `--package` and `--bin` flags (same meaning as `cargo`).
+2. `[defaults].package` / `.bin` in `athena.toml`.
+3. cargo's single-package / default-bin autodetect.
 
-So in a configured workspace `cargo athena container ls` and
-`cargo athena container emulate my-crate-fetch -a url=…` just work with
-no target flags. (`-p` is **package** here - function arguments to
-`emulate` are `-a`/`--arg`.)
-
-This precedence (and the `-p` short flag) is for
-`container`/`workflow`/`submit`. `emit`/`build`/`publish` take
-`--package`/`--bin` explicitly - no `-p`, no `[defaults]` fallback
-(pass them, or rely on cargo's single-package autodetect).
+So in a configured workspace, no target flags are needed on any
+command. `container emulate` and `submit` use `-a` / `--arg` for
+function arguments (since `-p` is already package).
 
 > Working in this repo instead of an installed binary? Any
 > `cargo athena <cmd>` above becomes

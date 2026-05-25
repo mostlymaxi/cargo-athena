@@ -16,36 +16,12 @@
 //! are **not** emulated — `docker run` has no notion of them. This runs
 //! the container body faithfully, not the pod's k8s context.
 
-use cargo_athena::{AthenaConfig, ContainerRunMeta, S3Ref, serde_json};
+use cargo_athena::{ContainerRunMeta, S3Ref, serde_json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, exit};
 
-/// Cargo `--package`/`--bin` selection, shared by every `container`
-/// subcommand. Each falls back to `athena.toml` `[defaults]`, then to
-/// cargo's single-package autodetect.
-#[derive(clap::Args)]
-pub struct PkgSel {
-    /// Cargo package to drive. Default: `[defaults].package` in
-    /// athena.toml, else the sole workspace package.
-    #[arg(short = 'p', long)]
-    package: Option<String>,
-    /// Cargo bin within it. Default: `[defaults].bin`, else the
-    /// package's default bin.
-    #[arg(long)]
-    bin: Option<String>,
-}
-
-impl PkgSel {
-    /// flag → `athena.toml` `[defaults]` → None (cargo autodetect).
-    pub(crate) fn resolve(&self) -> (Option<String>, Option<String>) {
-        let d = AthenaConfig::load().defaults;
-        (
-            self.package.clone().or(d.package),
-            self.bin.clone().or(d.bin),
-        )
-    }
-}
+use crate::pkg::PkgSel;
 
 #[derive(clap::Args)]
 pub struct EmulateArgs {
