@@ -14,10 +14,14 @@ use std::process::{Command, Stdio, exit};
 // Lives in `src/` (not `src/bin/`, which would make it a second
 // binary); a `#[path]` module so it stays bin-private and can use the
 // helpers below (`cargo_run`, `tool_ok`, `package_meta`, …).
+#[path = "../doctor.rs"]
+mod doctor;
 #[path = "../emulate.rs"]
 mod emulate;
 #[path = "../feedback.rs"]
 mod feedback;
+#[path = "../init.rs"]
+mod init;
 #[path = "../pkg.rs"]
 mod pkg;
 #[path = "../submit.rs"]
@@ -47,6 +51,13 @@ struct Athena {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Scaffold a new workflow crate (Cargo.toml, src/main.rs,
+    /// athena.toml). Interactive on a TTY; flag-driven otherwise.
+    Init(init::InitArgs),
+    /// Preflight every prereq for `publish` / `submit` (cargo-zigbuild,
+    /// zig, rustup targets, athena.toml, AWS creds, optional S3 reach).
+    /// Reports each as green/red with a fix hint. Exit 0 on all-pass.
+    Doctor(doctor::DoctorArgs),
     /// Run the user binary in emit-mode; relay the WorkflowTemplate YAML.
     Emit {
         #[command(flatten)]
@@ -151,6 +162,8 @@ fn main() {
         unsafe { std::env::set_var("ATHENA_CONFIG", &abs) };
     }
     match a.cmd {
+        Cmd::Init(args) => init::init(args),
+        Cmd::Doctor(args) => doctor::doctor(args),
         Cmd::Emit {
             pkg,
             out,

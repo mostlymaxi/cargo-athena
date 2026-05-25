@@ -4,7 +4,9 @@ After `cargo install cargo-athena` you have the `cargo athena`
 subcommand. It drives your workflow crate's binary.
 
 ```text
-cargo athena [-c F] emit  [--package PKG] [--bin B] [--out F] [--with-workflow]
+cargo athena [-c F] init [PATH] [--name N] [--bucket B] [--endpoint E] [--region R] [-y]
+cargo athena [-c F] doctor [--check-s3]
+cargo athena [-c F] emit  [-p PKG] [--bin B] [--out F] [--with-workflow]
 cargo athena [-c F] container ls       [-p PKG] [--bin B] [--all]
 cargo athena [-c F] container emulate  <name> [-a k=v].. [--input-file F] [-p PKG] [--bin B]
                                        [--build|--tarball F] [--runtime R] [--skip-artifacts]
@@ -13,17 +15,56 @@ cargo athena [-c F] workflow  ls       [-p PKG] [--bin B] [--include-synthetic]
 cargo athena [-c F] workflow  describe <name> [-p PKG] [--bin B]
 cargo athena [-c F] submit <name> [-a k=v].. [-n NS] [--service-account SA]
                           [--node-selector k=v].. [--argo-server URL] [-y] [--update]
-cargo athena [-c F] build [--package PKG] [--bin B] [--target T].. [--print]
-cargo athena [-c F] publish [--package PKG] [--bin B] [--target T].. [--tarball F] [--print]
+cargo athena [-c F] build [-p PKG] [--bin B] [--target T].. [--print]
+cargo athena [-c F] publish [-p PKG] [--bin B] [--target T].. [--tarball F] [--print]
 ```
 
 The typical flow is **`publish`** to ship the binary, then
-**`submit`** to register the templates and start a run. Everything
-else is for inspection, GitOps, or local testing.
+**`submit`** to register the templates and start a run. Use
+[`init`](#init) to scaffold a fresh crate and [`doctor`](#doctor) to
+check that your toolchain is ready.
 
 `-c, --config <FILE>` (global) points at an `athena.toml`. By default
 the nearest one walking up from the cwd is used (like `Cargo.toml`),
 or `$ATHENA_CONFIG`.
+
+## `init`
+
+Scaffold a new workflow crate: writes a minimal `Cargo.toml`,
+`src/main.rs`, and `athena.toml` in the target directory.
+
+```sh
+cargo athena init my-pipeline           # interactive (prompts for bucket/endpoint/region)
+cargo athena init my-pipeline -y        # accept defaults, no prompts
+cargo athena init -y --bucket my-bucket --region eu-west-1 .
+```
+
+Refuses to overwrite an existing `Cargo.toml`. For adding cargo-athena
+to an existing crate, just run
+`cargo add cargo-athena --no-default-features`.
+
+Flags:
+- `--name N` - cargo package name (default: directory basename).
+- `--bucket` / `--endpoint` / `--region` - prefill `athena.toml`.
+- `-y` / `--yes` - skip the interactive prompts.
+
+## `doctor`
+
+Preflight every prereq for `publish` and `submit`. Reports each as
+green / red with a fix hint when something is missing:
+
+```sh
+cargo athena doctor
+cargo athena doctor --check-s3   # also try a live HEAD on the bucket
+```
+
+Checks: `athena.toml` parses, `cargo-zigbuild` and `zig` are
+installed, the rustup targets in `athena.toml [bootstrap].targets`
+are present, and `AWS_*` env credentials are set (warning, not
+fatal, since IMDS / IRSA cover the ambient case). With `--check-s3`,
+also confirms the configured bucket actually responds.
+
+Exit code is 0 on all-pass, 1 if anything failed.
 
 ## `emit`
 

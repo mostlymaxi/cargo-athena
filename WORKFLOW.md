@@ -120,6 +120,8 @@ Each entry is `{ name = …, namespace = … }`. `namespace` is optional
 coordinate across namespaces). Both fields accept the
 `"lit" + arg + arg.field` injection grammar.
 
+Cookbook: [Mutual exclusion across runs](cookbook.md#mutual-exclusion-across-runs).
+
 ## The body
 
 Only three statement shapes are lowered:
@@ -249,3 +251,23 @@ let chosen = if n > 3 { left(n) } else { right(n) };
 
 If it compiles, the argument / field / return types line up and
 every statement was lowered. There is no silent mis-emit.
+
+## See also
+
+Cookbook recipes that exercise these features:
+
+- [Sequential vs. parallel](cookbook.md#sequential-vs-parallel)
+- [Reuse a multi-step workflow as a building block](cookbook.md#reuse-a-multi-step-workflow-as-a-building-block)
+- [Inline one step's output into another](cookbook.md#inline-one-steps-output-into-another)
+- [Fan-out over a list](cookbook.md#fan-out-over-a-list)
+- [Conditionals](cookbook.md#conditionals)
+- [Pass only one field of a struct](cookbook.md#pass-only-one-field-of-a-struct)
+- [Force a sequential execution order](cookbook.md#force-a-sequential-execution-order)
+- [Per-task hooks](cookbook.md#per-task-hooks)
+- [Retry with backoff](cookbook.md#retry-with-backoff)
+- [Timeouts](cookbook.md#timeouts)
+- [Whole-workflow cleanup](cookbook.md#whole-workflow-cleanup)
+- [Mutual exclusion across runs](cookbook.md#mutual-exclusion-across-runs)
+- [Pin every step in a workflow to specific nodes](cookbook.md#pin-every-step-in-a-workflow-to-specific-nodes)
+
+Hitting an error? See [Troubleshooting](troubleshooting.md).

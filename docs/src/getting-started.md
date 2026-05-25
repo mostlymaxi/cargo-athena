@@ -7,8 +7,11 @@ bucket and a reachable Argo cluster.
 
 ```sh
 cargo install cargo-athena                      # the `cargo athena` CLI
-cargo add cargo-athena --no-default-features    # the library, in your workflow crate
 ```
+
+You'll add the library to your workflow crate in step 3 via
+`cargo athena init`; or you can add it to an existing crate with
+`cargo add cargo-athena --no-default-features`.
 
 > ⚠️ **Library users: `--no-default-features`.** A workflow crate needs
 > only the macros + runtime; the default `cli` feature pulls a heavy
@@ -31,13 +34,16 @@ rustup target add x86_64-unknown-linux-musl
 rustup target add aarch64-unknown-linux-musl
 ```
 
-If something is missing, `cargo athena publish` and `cargo athena
-build` will tell you exactly what to install before they start.
+Run `cargo athena doctor` to verify every prereq is green before you
+try to publish:
+
+```sh
+cargo athena doctor
+# checks cargo-zigbuild, zig, rustup targets, athena.toml, AWS creds
+```
 
 **No toolchain needed for `emit` or `submit`** - those don't compile
-anything. `cargo athena emit` runs your workflow binary in
-emit-mode; `submit` does that plus talks to your cluster. Useful if
-you build the tarball on a CI machine and only run `submit` from
+anything. Useful if you build the tarball on CI and only `submit` from
 elsewhere.
 
 > The repo also ships a Nix flake that installs the full toolchain
@@ -47,11 +53,34 @@ elsewhere.
 > nix develop github:mostlymaxi/cargo-athena   # or just enter a shell
 > ```
 
-## 3. Write a tiny pipeline
+## 3. Scaffold a workflow crate
 
-Three containers in a chain - data flow becomes the DAG.
-[Source](https://github.com/mostlymaxi/cargo-athena/blob/main/examples/getting-started/src/main.rs)
-· [Emitted YAML](https://github.com/mostlymaxi/cargo-athena/blob/main/examples/getting-started/emit.yaml)
+```sh
+cargo athena init my-pipeline       # prompts for bucket/endpoint/region
+cd my-pipeline
+```
+
+This writes a runnable starter (a one-container `hello` pipeline)
+plus an `athena.toml` skeleton:
+
+```
+my-pipeline/
+  Cargo.toml          # cargo-athena dep, default-features = false
+  src/main.rs         # #[workflow] pipeline() { hello("world") }
+  athena.toml         # your S3 bucket + bootstrap targets
+```
+
+Pass `-y` to accept defaults without prompts, or flags like
+`--bucket`, `--endpoint`, `--region` for a fully scripted run.
+
+> Already have a crate? Add cargo-athena with
+> `cargo add cargo-athena --no-default-features` and skip `init`.
+> See [`athena.toml`](configuration.md) for the config format.
+
+## 4. Write your pipeline
+
+Open `src/main.rs` and replace the `hello` starter with whatever you
+need. A typical multi-step pipeline:
 
 ```rust,ignore
 use cargo_athena::{container, workflow};
@@ -83,31 +112,15 @@ fn main() {
 }
 ```
 
-## 4. Add `athena.toml`
-
-Drop this at or above your crate (found by walking up, like
-`Cargo.toml`):
-
-```toml
-[artifact_repository.s3]
-endpoint = "s3.amazonaws.com"
-bucket   = "my-bucket"
-region   = "us-east-1"
-access_key_secret = { name = "my-s3", key = "accessKey" }
-secret_key_secret = { name = "my-s3", key = "secretKey" }
-
-[bootstrap]
-targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]
-```
-
-Full reference: [`athena.toml`](configuration.md).
+Data flow becomes the DAG. See [Core Concepts](concepts.md) and the
+[Cookbook](cookbook.md) for what else you can do.
 
 ## 5. Ship it
 
 ```sh
-cargo athena emit                                    # inspect the YAML, no infra needed
-cargo athena publish                                 # cross-compile + upload the binary
-cargo athena submit cargo-athena-example-getting-started-pipeline
+cargo athena emit                # inspect the YAML, no infra needed
+cargo athena publish             # cross-compile + upload the binary
+cargo athena submit my-pipeline-pipeline
 ```
 
 `submit` does the safe-deploy steps for you:
@@ -127,6 +140,6 @@ and `--argo-server` flags.
 
 Want to try one step locally before deploying?
 [`cargo athena container emulate`](cli.md#container-emulate) runs a
-single `#[container]` under docker/podman exactly as Argo would.
+single `#[container]` under docker / podman exactly as Argo would.
 
 Next: [Core Concepts](concepts.md).
