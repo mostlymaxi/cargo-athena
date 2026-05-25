@@ -143,6 +143,26 @@ failing 403.
 Bind the executor role to the SA used by your pods (see the project's
 `scripts/deploy.sh` for the kubectl invocation we use in CI).
 
+### "configmaps is forbidden: ... cannot create resource configmaps"
+
+```
+task '...' errored: configmaps is forbidden: User
+"system:serviceaccount:argo:argo" cannot create resource "configmaps"
+in API group "" in the namespace "argo"
+```
+
+A task's substituted arguments crossed the 128 KB threshold and Argo
+3.7+ tried to stage them in a per-pod `ConfigMap` (PR #15265). The
+upstream `namespace-install.yaml` grants the controller SA only
+read access on configmaps. Add `create` (and `update/patch/delete`
+for resilience) to the controller's Role - `scripts/deploy.sh` does
+this with `Role/RoleBinding athena-argo-configmaps`.
+
+On Argo 3.6 the offload path doesn't exist at all; a substituted
+`c.Args[]` over the kernel exec `ARG_MAX` (~128 KB) fails with
+`exec /var/run/argo/argoexec: argument list too long` and the only
+fix is using `Artifact<T>` for the large value.
+
 ### "failed to resolve {{tasks.X.outputs.*}}" on Argo ≤ 3.5
 
 cargo-athena emits one `WorkflowTemplate` per template, wired via
