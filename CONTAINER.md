@@ -210,3 +210,19 @@ async fn fetch(url: String) -> String {
 
 `#[workflow]` bodies are statically analyzed, so
 `#[workflow] async fn` is a compile error.
+
+## See also
+
+Cookbook recipes that exercise these features:
+
+- [Share data between steps without a dependency](cookbook.md#share-data-between-steps-without-a-dependency)
+- [Share data and keep a strict order](cookbook.md#share-data-and-keep-a-strict-order)
+- [Retry with backoff](cookbook.md#retry-with-backoff)
+- [Timeouts](cookbook.md#timeouts)
+- [Mutual exclusion across runs](cookbook.md#mutual-exclusion-across-runs)
+- [Pin a single pod (image, service account, node)](cookbook.md#pin-a-single-pod-image-service-account-node)
+- [Pull a Kubernetes Secret as an env var](cookbook.md#pull-a-kubernetes-secret-as-an-env-var)
+- [Reuse setup across containers](cookbook.md#reuse-setup-across-containers)
+- [Async `#[container]` fns](cookbook.md#async-container-fns)
+
+Hitting an error? See [Troubleshooting](troubleshooting.md).
