@@ -128,7 +128,7 @@ my-crate-transform                    container  data: String, factor: i64
 
 ## `workflow ls`
 
-The `#[workflow]`s in the package (name + typed inputs). athena's
+Every `#[workflow]` in the package (name + typed inputs). athena's
 synthesized `if`/`else` wrapper + arm sub-workflows are an
 implementation detail, so they're **hidden unless
 `--include-synthetic`**:
