@@ -147,6 +147,13 @@ argo! {
         /// camelCase of the field name already matches.) skip-empty ⇒
         /// existing goldens stay byte-identical.
         pub active_deadline_seconds: Option<i64>,
+        /// Root-scoped `Synchronization` — workflow-level mutexes
+        /// (`#[…(mutexes_if_root = [{ name = … }])]`). Argo's sync
+        /// manager keys on `<ns>/Mutex/<name>` globally per controller,
+        /// so two SEPARATE Workflow runs (not just `templateRef`'d
+        /// sub-workflows in one run) contend on the same name —
+        /// empirically verified on v4.0.5, holder key `<ns>/<wf>`.
+        pub synchronization: Option<Synchronization>,
     }
 
     /// Argo `ttlStrategy`: delete the finished Workflow after the given
@@ -206,6 +213,31 @@ argo! {
         /// Argo `Template.activeDeadlineSeconds` (per-pod; applies even
         /// when this template is `templateRef`'d — NOT root-only).
         pub active_deadline_seconds: Option<i32>,
+        /// Template-level `Synchronization` — per-step mutexes
+        /// (`#[…(mutexes = [{ name = … }])]`). Holder key is
+        /// `<ns>/<wf>/<node>`, so within ONE run two nodes
+        /// referencing the same template-level mutex serialize, AND
+        /// nodes across separate runs (same name + ns) also serialize.
+        /// Both `inputs.parameters` and `workflow.parameters`
+        /// substitution resolve at this scope (no nodeSelector-style
+        /// boundary-copy footgun — proven v4.0.5 2026-05-25).
+        pub synchronization: Option<Synchronization>,
+    }
+
+    /// Argo `Synchronization`: workflow- or template-scoped mutex /
+    /// semaphore registry. We surface mutexes only (semaphores TBD);
+    /// `database` (Argo's per-cluster mutex DB toggle) is deferred.
+    pub struct Synchronization {
+        pub mutexes: Vec<Mutex>,
+    }
+
+    /// Argo `Mutex`: a named lock. `namespace` defaults to the
+    /// workflow's namespace if empty (per
+    /// `workflow/sync/lock_name.go:58-67`); set it to coordinate
+    /// across namespaces (lock key becomes `<namespace>/Mutex/<name>`).
+    pub struct Mutex {
+        pub name: String,
+        pub namespace: String,
     }
 
     /// Argo `retryStrategy`: re-run the template on failure. Nil `limit`

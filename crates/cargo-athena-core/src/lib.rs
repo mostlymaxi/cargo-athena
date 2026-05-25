@@ -395,6 +395,18 @@ pub trait Template {
     /// workflow attrs have no injectable args (see `#[workflow(node
     /// _selector)]` for the rationale).
     const NODE_SELECTOR_IF_ROOT: &'static [(&'static str, &'static str)] = &[];
+    /// Root-only `WorkflowSpec.synchronization.mutexes`, from
+    /// `#[…(mutexes_if_root = [{ name = …, namespace = … }])]`. Each
+    /// entry is `(name, namespace)`, already lowered to its final YAML
+    /// string form (literal, or `{{=fromJSON(workflow.parameters[…])}}`
+    /// for injected operands). `namespace == ""` ⇒ skip the field
+    /// (Argo defaults to the workflow's own namespace per
+    /// `workflow/sync/lock_name.go:58-67`). Same per-WT, root-only
+    /// plumbing as `TTL` / `POD_GC` / `NODE_SELECTOR_IF_ROOT`; Argo's
+    /// sync manager keys on `<ns>/Mutex/<name>` globally so two
+    /// SEPARATE Workflow runs contend on the same name (empirically
+    /// verified on v4.0.5 2026-05-25, holder key `<ns>/<wf>`).
+    const MUTEXES_IF_ROOT: &'static [(&'static str, &'static str)] = &[];
 
     /// Build this template's inner Argo `template` object.
     fn build(ctx: &BuildCtx) -> api::Template;
@@ -1059,6 +1071,13 @@ pub struct Collector {
     /// onto that WT's `spec.nodeSelector` (the only nodeSelector knob
     /// Argo cascades over every pod in the run, root-only).
     node_selector_if_root: HashMap<String, Vec<(String, String)>>,
+    /// `<argo name> -> mutexes` for every template declaring
+    /// `#[…(mutexes_if_root = […])]`. Each entry is `(name, namespace)`
+    /// already lowered to the final YAML form (literal, or
+    /// `{{=fromJSON(workflow.parameters[…])}}` for injected operands);
+    /// `namespace == ""` means "skip the field" (defaults to the wf's
+    /// own ns). Stamped onto that WT's `spec.synchronization.mutexes`.
+    mutexes_if_root: HashMap<String, Vec<(String, String)>>,
     /// `<argo name> -> stringified input types` (parallel to the
     /// template's INPUTS), for `container emulate` arg type-checking.
     types: HashMap<String, &'static [&'static str]>,
@@ -1084,6 +1103,7 @@ impl Collector {
             pod_gc: HashMap::new(),
             active_deadline: HashMap::new(),
             node_selector_if_root: HashMap::new(),
+            mutexes_if_root: HashMap::new(),
             types: HashMap::new(),
             synthetic: HashSet::new(),
         }
@@ -1123,6 +1143,15 @@ impl Collector {
                 T::NODE_SELECTOR_IF_ROOT
                     .iter()
                     .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                    .collect(),
+            );
+        }
+        if !T::MUTEXES_IF_ROOT.is_empty() {
+            self.mutexes_if_root.insert(
+                T::ARGO_NAME.to_string(),
+                T::MUTEXES_IF_ROOT
+                    .iter()
+                    .map(|(n, ns)| ((*n).to_string(), (*ns).to_string()))
                     .collect(),
             );
         }
@@ -1214,6 +1243,17 @@ impl Collector {
         if let Some(ns) = self.node_selector_if_root.get(name) {
             for (k, v) in ns {
                 spec.node_selector.insert(k.clone(), v.clone());
+            }
+        }
+        if let Some(mtx) = self.mutexes_if_root.get(name) {
+            let sync = spec
+                .synchronization
+                .get_or_insert_with(api::Synchronization::default);
+            for (mname, mns) in mtx {
+                sync.mutexes.push(api::Mutex {
+                    name: mname.clone(),
+                    namespace: mns.clone(),
+                });
             }
         }
     }

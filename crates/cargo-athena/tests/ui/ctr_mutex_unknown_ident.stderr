@@ -1,0 +1,5 @@
+error: `nope` is not a parameter of this #[container] — only its arguments can be injected.
+ --> tests/ui/ctr_mutex_unknown_ident.rs:4:57
+  |
+4 | #[cargo_athena::container(mutexes = [{ name = "lock-" + nope }])]
+  |                                                         ^^^^

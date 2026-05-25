@@ -234,6 +234,40 @@ Every `#[workflow]`/`#[container]` that sets it carries the hook on its
 bigger run, *its* `on_exit_if_root` stays inert (Argo fires only the
 submitted workflow's) — submit it directly to get it.
 
+## Mutual exclusion across runs
+
+Argo `synchronization.mutexes` — at most one holder of a named mutex at
+a time, **per controller namespace**, so separate Workflow runs
+serialize against each other (not just nested sub-workflows):
+
+```rust,ignore
+// Block all other "deploy" workflows while this one runs:
+#[workflow(mutexes_if_root = [{ name = "deploy-" + env }])]
+fn pipeline(env: String) { /* … */ }
+
+// Serialize just one expensive step (lets the rest of the DAG fan out):
+#[container(mutexes = [{ name = "shard-" + shard }])]
+fn writer(shard: String) { /* … */ }
+```
+
+Two tiers, picked by reach:
+
+* **`mutexes_if_root`** = `WorkflowSpec.synchronization` — held for the
+  whole submitted run; **root-only** (inert when this WT is
+  `templateRef`'d as a sub, same family as `ttl_if_root` /
+  `pod_gc_if_root`). The standard "one of these workflows at a time" knob.
+* **`mutexes`** = `Template.synchronization` — held just while the
+  template's node is running; fires anywhere the template is invoked
+  (root or nested). Lets parallel tasks in one run serialize on a
+  per-shard mutex name, and lets a sub-workflow self-serialize wherever
+  it's embedded.
+
+Each entry is `{ name = …, namespace = … }`; `namespace` is optional
+(defaults to the workflow's own ns). Both fields accept the same
+`"lit" + arg` injection grammar as `image` / `env`, with the scope
+matching the tier (`inputs.parameters` for `mutexes`,
+`workflow.parameters` for `mutexes_if_root`).
+
 ## Pinning a pod (image / SA / node)
 
 Static, or with a container argument spliced in (`image` /

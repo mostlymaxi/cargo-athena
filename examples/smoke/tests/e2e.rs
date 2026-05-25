@@ -22,6 +22,7 @@ const BIN_DEADLINE: &str = env!("CARGO_BIN_EXE_smoke-deadline");
 const BIN_ASYNC: &str = env!("CARGO_BIN_EXE_smoke-async");
 const BIN_SECRETS: &str = env!("CARGO_BIN_EXE_smoke-secrets");
 const BIN_POD_ATTRS: &str = env!("CARGO_BIN_EXE_smoke-pod-attrs");
+const BIN_MUTEX: &str = env!("CARGO_BIN_EXE_smoke-mutex");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -255,6 +256,17 @@ fn emit_pipeline_pod_attrs() {
 #[test]
 fn emit_pipeline_secrets() {
     assert_golden("pipeline_secrets.yaml", &run_bin(BIN_SECRETS, &[]));
+}
+
+/// `mutexes` (template-level on a `#[container]`, injecting from
+/// `inputs.parameters['shard']`) + `mutexes` (template-level literal
+/// on a `#[workflow]`) + `mutexes_if_root` (root-only WorkflowSpec
+/// scope, injecting from `workflow.parameters['env']`). Pins the
+/// `Template.synchronization` and `WorkflowSpec.synchronization` emit
+/// shape across both macros.
+#[test]
+fn emit_pipeline_mutex() {
+    assert_golden("pipeline_mutex.yaml", &run_bin(BIN_MUTEX, &[]));
 }
 
 /// Run mode: with Argo's secretKeyRef env vars planted by the

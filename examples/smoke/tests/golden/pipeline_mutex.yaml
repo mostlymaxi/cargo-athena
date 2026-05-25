@@ -1,0 +1,88 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-pipeline-mutex
+spec:
+  entrypoint: cargo-athena-example-smoke-pipeline-mutex
+  templates:
+  - name: cargo-athena-example-smoke-pipeline-mutex
+    inputs:
+      parameters:
+      - name: env
+    dag:
+      tasks:
+      - name: shard-writer
+        arguments:
+          parameters:
+          - name: shard
+            value: '{{inputs.parameters.env}}'
+        templateRef:
+          name: cargo-athena-example-smoke-shard-writer
+          template: cargo-athena-example-smoke-shard-writer
+    synchronization:
+      mutexes:
+      - name: pipeline-dag
+  synchronization:
+    mutexes:
+    - name: global-deploy-{{=fromJSON(workflow.parameters['env'])}}
+      namespace: ops-{{=fromJSON(workflow.parameters['env'])}}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-shard-writer
+spec:
+  entrypoint: cargo-athena-example-smoke-shard-writer
+  templates:
+  - name: cargo-athena-example-smoke-shard-writer
+    inputs:
+      parameters:
+      - name: shard
+      artifacts:
+      - name: athena-dist
+        path: /athena/bin
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: athena/bin/example/0.1.0/app.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          path: /athena/result
+    container:
+      image: busybox:1.36-musl
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-shard-writer
+      env:
+      - name: ATHENA_PARAM_shard
+        value: '{{inputs.parameters.shard}}'
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default
+    synchronization:
+      mutexes:
+      - name: shard-{{=fromJSON(inputs.parameters['shard'])}}
