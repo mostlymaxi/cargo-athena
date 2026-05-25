@@ -12,3 +12,8 @@ result-*
 
 # mdBook render output (docs/ source is tracked; the build is not)
 docs/book/
+
+# Local-only design notes / onboarding scratch — kept on disk for
+# maintainers and AI sessions, not shipped in the repo.
+CLAUDE.md
+HANDOFF.md
