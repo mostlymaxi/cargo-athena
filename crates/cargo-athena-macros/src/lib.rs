@@ -592,7 +592,26 @@ struct ContainerArgs {
 struct WorkflowArgs {
     name: Option<String>,
     steps: deluxe::Flag,
-    node_selector: std::collections::BTreeMap<String, String>,
+    /// `boundary_node_selector = { "k" = "v" }` — Argo
+    /// `Template.NodeSelector` on this dag/steps template. Despite its
+    /// name suggesting wide reach, Argo only uses this as the
+    /// **boundary fallback** for pods whose IMMEDIATE enclosing
+    /// dag/steps is this template (proven from
+    /// `workflow/controller/workflowpod.go:928-958`). It does NOT
+    /// cascade through nested sub-workflows — a `pipeline → sub →
+    /// container` chain doesn't see `pipeline`'s selector on `container`.
+    /// For "every pod in the run by default", use
+    /// `node_selector_if_root` (below). Renamed 2026-05-24 from
+    /// the misleading `node_selector` after a real e2e bug.
+    boundary_node_selector: std::collections::BTreeMap<String, String>,
+    /// `node_selector_if_root = { "k" = "v" }` — Argo
+    /// `WorkflowSpec.NodeSelector`. The third tier of Argo's 3-tier
+    /// pod nodeSelector lookup: applies to every pod in the run that
+    /// doesn't have its own template-level or boundary-level selector
+    /// set. Root-only (same family as `ttl_if_root`/`pod_gc_if_root`/
+    /// `active_deadline_if_root`); inert when this WT is `templateRef`'d
+    /// as a sub-workflow.
+    node_selector_if_root: std::collections::BTreeMap<String, String>,
     on_exit_if_root: Option<syn::Path>,
     /// Template-level `retryStrategy` (`limit` required when present).
     retry: Option<RetryArgs>,
@@ -3628,11 +3647,15 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    // `node_selector` — literal keys *and* values (no injection: see
-    // `WorkflowArgs`). Set on the dag/steps template; the Argo
-    // controller cascades it onto every `templateRef`'d task pod.
-    let ns_keys: Vec<&String> = cfg.node_selector.keys().collect();
-    let ns_vals: Vec<&String> = cfg.node_selector.values().collect();
+    // `boundary_node_selector` — literal keys *and* values (no
+    // injection — workflow attrs have no args to inject from). Set on
+    // this dag/steps template's `Template.NodeSelector`. Argo uses it
+    // as the *boundary* fallback only for pods whose IMMEDIATE
+    // enclosing dag/steps is this template — does NOT cascade through
+    // nested sub-workflows. For "every pod in the run", use
+    // `node_selector_if_root` (below).
+    let ns_keys: Vec<&String> = cfg.boundary_node_selector.keys().collect();
+    let ns_vals: Vec<&String> = cfg.boundary_node_selector.values().collect();
     let node_selector_tokens = quote! {
         node_selector: {
             let mut __ns = ::std::collections::BTreeMap::new();
@@ -3640,6 +3663,16 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #ns_keys.to_string(), #ns_vals.to_string()); )*
             __ns
         },
+    };
+    // `node_selector_if_root` — Argo `WorkflowSpec.NodeSelector`,
+    // root-only, applies to every pod that doesn't have a template- or
+    // boundary-level override. Emitted as the `NODE_SELECTOR_IF_ROOT`
+    // trait const → Collector → per-WT spec post-pass (mirrors
+    // `TTL`/`POD_GC`/`ACTIVE_DEADLINE_IF_ROOT`).
+    let nsi_keys: Vec<&String> = cfg.node_selector_if_root.keys().collect();
+    let nsi_vals: Vec<&String> = cfg.node_selector_if_root.values().collect();
+    let node_selector_if_root_tok = quote! {
+        &[ #( (#nsi_keys, #nsi_vals) ),* ]
     };
     // `annotations` — literal keys + values, lands on
     // `Template.metadata.annotations` of the dag/steps template. Same
@@ -3780,6 +3813,8 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
             const POD_GC: ::core::option::Option<&'static str> = #podgc_tok;
             const ACTIVE_DEADLINE_IF_ROOT: ::core::option::Option<i64> =
                 #active_deadline_if_root_tok;
+            const NODE_SELECTOR_IF_ROOT: &'static [(&'static str, &'static str)] =
+                #node_selector_if_root_tok;
 
             fn build(_ctx: &::cargo_athena::BuildCtx)
                 -> ::cargo_athena::api::Template

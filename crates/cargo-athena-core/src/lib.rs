@@ -384,6 +384,17 @@ pub trait Template {
     /// whole-workflow timeout: Argo applies neither `Template.timeout`
     /// nor `Template.activeDeadlineSeconds` to dag/steps templates.
     const ACTIVE_DEADLINE_IF_ROOT: ::core::option::Option<i64> = None;
+    /// Root-only `WorkflowSpec.nodeSelector`, from
+    /// `#[workflow(node_selector_if_root = { … })]`. Argo's pod-build
+    /// lookup is 3-tier: `tmpl.NodeSelector → boundary.NodeSelector →
+    /// wfSpec.NodeSelector`, so this is the only knob that lands on
+    /// EVERY pod in the run unless that pod (or its immediate enclosing
+    /// dag/steps) overrides it (verified from `workflow/controller/
+    /// workflowpod.go:928-958`). Same per-WT plumbing as
+    /// `TTL`/`POD_GC`/`ACTIVE_DEADLINE_IF_ROOT`. Literal pairs only —
+    /// workflow attrs have no injectable args (see `#[workflow(node
+    /// _selector)]` for the rationale).
+    const NODE_SELECTOR_IF_ROOT: &'static [(&'static str, &'static str)] = &[];
 
     /// Build this template's inner Argo `template` object.
     fn build(ctx: &BuildCtx) -> api::Template;
@@ -1043,6 +1054,11 @@ pub struct Collector {
     /// `active_deadline_if_root(..)`. Stamped onto that WT's
     /// `spec.activeDeadlineSeconds` (same per-WT, root-only as `ttl`).
     active_deadline: HashMap<String, i64>,
+    /// `<argo name> -> nodeSelector key-value pairs` for every template
+    /// that declares `#[workflow(node_selector_if_root = …)]`. Stamped
+    /// onto that WT's `spec.nodeSelector` (the only nodeSelector knob
+    /// Argo cascades over every pod in the run, root-only).
+    node_selector_if_root: HashMap<String, Vec<(String, String)>>,
     /// `<argo name> -> stringified input types` (parallel to the
     /// template's INPUTS), for `container emulate` arg type-checking.
     types: HashMap<String, &'static [&'static str]>,
@@ -1067,6 +1083,7 @@ impl Collector {
             ttl: HashMap::new(),
             pod_gc: HashMap::new(),
             active_deadline: HashMap::new(),
+            node_selector_if_root: HashMap::new(),
             types: HashMap::new(),
             synthetic: HashSet::new(),
         }
@@ -1099,6 +1116,15 @@ impl Collector {
         }
         if let Some(s) = T::ACTIVE_DEADLINE_IF_ROOT {
             self.active_deadline.insert(T::ARGO_NAME.to_string(), s);
+        }
+        if !T::NODE_SELECTOR_IF_ROOT.is_empty() {
+            self.node_selector_if_root.insert(
+                T::ARGO_NAME.to_string(),
+                T::NODE_SELECTOR_IF_ROOT
+                    .iter()
+                    .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                    .collect(),
+            );
         }
         if !T::INPUT_TYPES.is_empty() {
             self.types.insert(T::ARGO_NAME.to_string(), T::INPUT_TYPES);
@@ -1189,6 +1215,17 @@ impl Collector {
             {
                 spec.active_deadline_seconds = Some(*s);
             }
+            // `node_selector_if_root` is the only nodeSelector that
+            // lands on every pod in the run regardless of nesting
+            // (Argo's `tmpl → boundary → wfSpec` 3-tier; this hits
+            // wfSpec). Root-only, same per-WT plumbing.
+            if let Some(ns) = self.node_selector_if_root.get(&name)
+                && let Some(spec) = t.spec.as_mut()
+            {
+                for (k, v) in ns {
+                    spec.node_selector.insert(k.clone(), v.clone());
+                }
+            }
         }
         tpls
     }
@@ -1239,14 +1276,18 @@ impl Collector {
                         m
                     })
                     .unwrap_or_default(),
-                // Only the emit root's ttl/pod_gc/active_deadline reaches
-                // the runnable Workflow (same workflow-scoped reasoning
-                // as the hook).
+                // Only the emit root's ttl/pod_gc/active_deadline/
+                // node_selector reaches the runnable Workflow (same
+                // workflow-scoped reasoning as the hook).
                 ttl_strategy: E::TTL,
                 active_deadline_seconds: E::ACTIVE_DEADLINE_IF_ROOT,
                 pod_gc: E::POD_GC.map(|s| api::PodGc {
                     strategy: s.to_string(),
                 }),
+                node_selector: E::NODE_SELECTOR_IF_ROOT
+                    .iter()
+                    .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                    .collect(),
                 ..Default::default()
             }),
         };

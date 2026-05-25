@@ -278,14 +278,38 @@ README is intentionally lean (user-facing); the *why* lives here.
   field + rename) and `pipeline_retry.yaml` (`timeout: 5m`→`300s`
   canonicalization) churn — all other emit goldens byte-identical
   (`argo!` skips `Option::None`/empty-string).**
-- **`nodeSelector` DOES cascade (empirical, real Argo v4.0.5,
-  2026-05-16).** A parent DAG/steps template's `nodeSelector` is merged
-  by the Argo controller onto the pods of templates it calls via
-  `templateRef` (probe: a leaf WT with no selector got its ancestor
-  DAG's `{disktype:doesnotexist}` and went Pending). So the earlier
-  "DAG creates no pod ⇒ nodeSelector is a no-op / no inheritance"
-  reasoning is WRONG. athena's per-`#[container(node_selector=…)]`
-  (leaf-level) is correct.
+- **`nodeSelector` is BOUNDARY-scoped, not cascading (corrected
+  2026-05-24, source-verified from `workflow/controller/workflowpod
+  .go:928-958` `addSchedulingConstraints`).** Argo's three-tier
+  lookup when building a pod:
+  ```
+  if tmpl.NodeSelector ≠ ∅:                  pod.NodeSelector = tmpl
+  elif boundaryTemplate.NodeSelector ≠ ∅:    pod.NodeSelector = boundary
+  elif wfSpec.NodeSelector ≠ ∅:              pod.NodeSelector = wfSpec
+  ```
+  `boundaryTemplate` = the **immediate enclosing dag/steps** (singular
+  — Argo never walks the ancestor chain). So a `#[workflow(node
+  _selector=…)]` on `pipeline` is invisible to a leaf container's pod
+  when there's a `pipeline → pipeline_steps → container_C` chain
+  (`container_C`'s boundary is `pipeline_steps`, which has no selector
+  → falls through to `wfSpec.NodeSelector`, also empty → no selector).
+  The earlier "DAG `nodeSelector` cascades onto every templateRef'd
+  pod" framing was over-stated — it only reaches the IMMEDIATE
+  template's pods. Same boundary semantics apply to `affinity` and
+  `tolerations` (the only three boundary-fallback fields). Everything
+  else (`schedulerName`, `priorityClassName`, pod `securityContext`)
+  is 2-tier `tmpl → wfSpec` only; `hostAliases` is concat-both.
+  **`wfSpec.NodeSelector`** is sourced from `woc.execWf.Spec` (line
+  140) — the submitted root, per the prior `setExecWorkflow` proof
+  — so it's the proper "apply to every pod by default unless
+  overridden" knob. That makes it the natural `node_selector_if_root`
+  pattern (same family as `ttl_if_root`/`pod_gc_if_root`).
+  **Caught by PR #28's e2e fail (2026-05-22):** `pipeline` selector
+  failed to land on `pipeline_steps`'s sub-pods → e2e v4.0.5's
+  `.items[0]` happened to pick a sub-pod and saw empty selector
+  (3.6/3.7 picked a direct child and saw the selector — consistent
+  Argo behavior, fragile test). The assertion itself is also fragile
+  (`.items[0]` ordering is non-deterministic) — TODO harden it.
 - **`#[workflow(node_selector = { "k" = "v" })]` — IMPLEMENTED, but
   LITERALS-ONLY (keys *and* values; `BTreeMap<String,String>` in
   `WorkflowArgs`, NO `inject_lower`/`Injectable`/`syn::Expr`). Set on
