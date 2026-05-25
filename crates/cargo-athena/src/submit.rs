@@ -20,53 +20,47 @@ use cargo_athena::{AthenaConfig, ContainerRunMeta, api, serde_json};
 use std::io::Write;
 use std::process::exit;
 
+/// Top-level shape: template name + everything else. The "everything
+/// else" is re-parsed in `submit()` against a clap `Command` built
+/// dynamically from the chosen template's typed argument list (so
+/// each function parameter is a real `--<kebab-name>` flag in
+/// `--help`). The static submit flags (`-n`, `--priority`, etc.) live
+/// in the same dynamic Command, plus the `-a name=value` escape hatch
+/// for struct-typed args.
 #[derive(clap::Args)]
+// Disable clap's auto -h/--help so `submit <tpl> --help` can flow
+// into `rest` and be served by the dynamic per-template Command,
+// which knows the typed args. The top-level `cargo athena submit
+// --help` (no template) still works via the parent `cargo athena`
+// subcommand help.
+#[command(disable_help_flag = true)]
 pub struct SubmitArgs {
     /// Template to submit — a `#[workflow]` (the whole DAG) or one
     /// `#[container]`. Full name (`<crate>-<fn>` kebab, or the
     /// `#[..(name = "…")]` override); list with
-    /// `cargo athena workflow ls` / `container ls`.
+    /// `cargo athena workflow ls` / `container ls`. Run
+    /// `cargo athena submit <template> --help` to see its typed args.
     template: String,
-    #[command(flatten)]
+    /// Per-template typed flags + submit-specific static flags, parsed
+    /// in a second pass once we know the template's signature.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    rest: Vec<std::ffi::OsString>,
+}
+
+/// Fully-parsed submission inputs, populated after the two-stage parse
+/// (`pkg` from a phase-1 pass, the rest from the dynamic Command).
+struct Parsed {
+    template: String,
     pkg: crate::pkg::PkgSel,
-    /// A workflow input: `-a name=value` (parsed as JSON if it parses,
-    /// else a string). Repeatable.
-    #[arg(short = 'a', long = "arg", value_name = "NAME=VALUE")]
-    args: Vec<String>,
-    /// JSON object of the inputs (merged under `-a`).
-    #[arg(long = "input-file", value_name = "FILE")]
-    input_file: Option<std::path::PathBuf>,
-    /// Kubernetes namespace. Default: `$ARGO_NAMESPACE` →
-    /// `[defaults].namespace` → `default`.
-    #[arg(short = 'n', long)]
+    vals: std::collections::BTreeMap<String, serde_json::Value>,
     namespace: Option<String>,
-    /// ServiceAccount for the run. Default: `[defaults].service_account`.
-    #[arg(long = "service-account")]
     service_account: Option<String>,
-    /// Root-scoped `nodeSelector` on the submitted Workflow — `k=v`,
-    /// repeatable (Argo applies it to every pod).
-    #[arg(long = "node-selector", value_name = "K=V")]
     node_selector: Vec<String>,
-    /// Workflow priority (int32). Higher = scheduled first when the
-    /// controller hits its parallelism limit. No default; Argo treats
-    /// absence as 0.
-    #[arg(long, value_name = "N")]
     priority: Option<i32>,
-    /// Submit via this Argo Server URL instead of the kube API (else
-    /// `$ARGO_SERVER`; absent ⇒ kubeconfig/in-cluster).
-    #[arg(long = "argo-server", value_name = "URL")]
     argo_server: Option<String>,
-    /// Skip TLS verification talking to the Argo Server.
-    #[arg(long = "insecure-skip-tls-verify")]
     insecure: bool,
-    /// Re-apply every `WorkflowTemplate` even if unchanged.
-    #[arg(long)]
     update: bool,
-    /// Skip the "is the binary tarball uploaded?" pre-flight.
-    #[arg(long = "skip-binary-check")]
     skip_binary_check: bool,
-    /// Assume "yes" for every prompt (create/update templates + submit).
-    #[arg(short = 'y', long)]
     yes: bool,
 }
 
@@ -122,7 +116,7 @@ trait Cluster {
     fn describe(&self) -> String;
 }
 
-fn connect(a: &SubmitArgs) -> Box<dyn Cluster> {
+fn connect(a: &Parsed) -> Box<dyn Cluster> {
     let server = a
         .argo_server
         .clone()
@@ -329,11 +323,19 @@ impl Cluster for ArgoServer {
 
 // ---- orchestration --------------------------------------------------------
 
-pub fn submit(a: SubmitArgs) {
-    let (pkg, bin) = a.pkg.resolve();
+/// Two-stage parse: extract `pkg` from `rest` (phase 1), fetch the
+/// template's metadata using that, then build the dynamic Command and
+/// re-parse `rest` against it (phase 2). Returns the fully-populated
+/// internal `Parsed` view + the template list (so the caller can avoid
+/// a second binary spawn).
+fn parse_submit_args(a: SubmitArgs) -> (Parsed, Vec<ContainerRunMeta>) {
+    // Phase 1: pkg only (ignore_errors so the typed per-template flags
+    // we don't know about yet don't cause a parse failure).
+    let (pkg_flag, bin_flag) = crate::dyn_args::extract_pkg(&a.rest);
+    let pkg_sel = crate::pkg::PkgSel::from_flags(pkg_flag.clone(), bin_flag.clone());
+    let (pkg, bin) = pkg_sel.clone().resolve();
 
-    // 1. Introspect every reachable template (names, params+types, the
-    //    binary S3 coords). Resolve the root.
+    // Fetch the template list to find the chosen template + its params.
     let metas: Vec<ContainerRunMeta> = serde_json::from_value(from_bin(
         pkg.as_deref(),
         bin.as_deref(),
@@ -352,16 +354,55 @@ pub fn submit(a: SubmitArgs) {
             ))
         });
 
-    // 2. Type-check args against the root's real signature (shared with
-    //    `emulate` — missing/unknown/wrong-kind, one CLI-style report).
-    let vals = crate::emulate::parse_args(a.input_file.as_deref(), &a.args);
+    // Phase 2: build the dynamic Command with the template's typed args
+    // + the submit-specific static flags. Parse `rest` against it.
+    let param_pairs: Vec<(String, String)> = root
+        .params
+        .iter()
+        .map(|p| (p.name.clone(), p.ty.clone()))
+        .collect();
+    let (cmd, idents) = crate::dyn_args::build_command(&a.template, &param_pairs);
+    let matches = cmd
+        .try_get_matches_from(&a.rest)
+        .unwrap_or_else(|e| e.exit());
+
+    let vals = crate::dyn_args::extract(&matches, &idents).unwrap_or_else(|e| die(&e));
+
+    // After extraction, validate against the template's real signature
+    // — catches `-a foo=bogus` (where `foo: i64`), missing required args,
+    // and unknown args supplied via `-a` (the typed `--<flag>` form is
+    // already typed by clap).
     if let Err(report) = crate::emulate::validate_args(root, &vals) {
         die(&report);
     }
 
-    // 3. The binary tarball must be uploaded or the pods can't
-    //    bootstrap. The key is identical for every container in the
-    //    binary, so one check suffices.
+    let parsed = Parsed {
+        template: a.template,
+        pkg: pkg_sel,
+        vals,
+        namespace: matches.get_one::<String>("namespace").cloned(),
+        service_account: matches.get_one::<String>("service_account").cloned(),
+        node_selector: matches
+            .get_many::<String>("node_selector")
+            .map(|it| it.cloned().collect())
+            .unwrap_or_default(),
+        priority: matches.get_one::<i32>("priority").copied(),
+        argo_server: matches.get_one::<String>("argo_server").cloned(),
+        insecure: matches.get_flag("insecure"),
+        update: matches.get_flag("update"),
+        skip_binary_check: matches.get_flag("skip_binary_check"),
+        yes: matches.get_flag("yes"),
+    };
+    (parsed, metas)
+}
+
+pub fn submit(args: SubmitArgs) {
+    let (a, metas) = parse_submit_args(args);
+    let (pkg, bin) = a.pkg.clone().resolve();
+
+    // The binary tarball must be uploaded or the pods can't bootstrap.
+    // The key is identical for every container in the binary, so one
+    // check suffices.
     if !a.skip_binary_check
         && let Some(ba) = metas.iter().find_map(|m| m.binary_artifact.as_ref())
         && !crate::emulate::s3_exists(&ba.s3)
@@ -373,8 +414,8 @@ pub fn submit(a: SubmitArgs) {
         ));
     }
 
-    // 4. The deterministic WorkflowTemplate set (structured, for the
-    //    register/drift checks).
+    // The deterministic WorkflowTemplate set (structured, for the
+    // register/drift checks).
     let wts: Vec<api::WorkflowTemplate> = serde_json::from_value(from_bin(
         pkg.as_deref(),
         bin.as_deref(),
@@ -445,7 +486,8 @@ pub fn submit(a: SubmitArgs) {
     }
 
     // 6. Build + create the Workflow (workflowTemplateRef → root).
-    let params: Vec<api::Parameter> = vals
+    let params: Vec<api::Parameter> = a
+        .vals
         .iter()
         .map(|(k, v)| api::Parameter {
             name: k.clone(),

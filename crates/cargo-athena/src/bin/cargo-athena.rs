@@ -16,6 +16,8 @@ use std::process::{Command, Stdio, exit};
 // helpers below (`cargo_run`, `tool_ok`, `package_meta`, …).
 #[path = "../doctor.rs"]
 mod doctor;
+#[path = "../dyn_args.rs"]
+mod dyn_args;
 #[path = "../emulate.rs"]
 mod emulate;
 #[path = "../feedback.rs"]

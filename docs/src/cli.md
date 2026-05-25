@@ -90,10 +90,36 @@ Flags:
 
 Run a `#[workflow]` (or a single `#[container]`) on a real cluster.
 
+The template's function arguments appear as **typed `--<name>` flags**:
+
 ```sh
-cargo athena submit my-crate-pipeline -a seed=hello
-W=$(cargo athena submit my-crate-pipeline -a seed=hello -y)   # scriptable
+cargo athena submit my-crate-pipeline --seed hello
+cargo athena submit my-crate-fetch --url https://example.com --depth 3 -y
+W=$(cargo athena submit my-crate-pipeline --seed hello -y)   # scriptable
 ```
+
+`cargo athena submit <template> --help` shows the typed flags for that
+specific template, derived from its function signature at runtime:
+
+```text
+Usage: cargo athena submit my-crate-pipeline-fetch [OPTIONS]
+
+Options:
+      --url <STRING>      template arg `url: String`
+      --depth <INT>       template arg `depth: i64`
+  -n, --namespace <NS>
+      --priority <N>
+      ...
+```
+
+Scalar Rust types (`String`, integers, floats, `bool`, `Vec<scalar>`,
+`Option<scalar>`) get typed flags. Anything else (user struct types,
+maps, etc.) appears as `--<name> <JSON>` plus a sibling
+`--<name>-from-file <PATH>` for large values.
+
+The classic `-a name=value` form is still accepted and required for
+JSON-encoded struct-typed args you want to set inline. Setting the
+same parameter via both `--name` and `-a name=...` is an error.
 
 Before anything is created, `submit`:
 
@@ -106,8 +132,8 @@ Transport auto-selects: with `--argo-server` / `$ARGO_SERVER` set it
 uses the Argo Server REST API (`$ARGO_TOKEN` for auth); otherwise it
 uses your kubeconfig (EKS / GKE / AKS exec plugins all work).
 
-Flags:
-- `-a name=value` (repeatable) / `--input-file F` - workflow arguments.
+Submission flags (in addition to the typed per-template args):
+- `-a name=value` (repeatable) / `--input-file F` - any-arg fallback.
 - `-n NS` / `--namespace` - target namespace.
 - `--service-account SA` - override `[defaults].service_account`.
 - `--node-selector k=v` (repeatable) - root-scoped, applies to every pod.
