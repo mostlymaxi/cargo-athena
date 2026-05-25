@@ -25,6 +25,7 @@ const BIN_POD_ATTRS: &str = env!("CARGO_BIN_EXE_smoke-pod-attrs");
 const BIN_MUTEX: &str = env!("CARGO_BIN_EXE_smoke-mutex");
 const BIN_ARTIFACT: &str = env!("CARGO_BIN_EXE_smoke-artifact");
 const BIN_ARTIFACT_WF: &str = env!("CARGO_BIN_EXE_smoke-artifact-wf");
+const BIN_ARTIFACT_CLONE: &str = env!("CARGO_BIN_EXE_smoke-artifact-clone");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -314,6 +315,18 @@ fn emit_pipeline_artifact() {
 #[test]
 fn emit_pipeline_artifact_wf() {
     assert_golden("pipeline_artifact_wf.yaml", &run_bin(BIN_ARTIFACT_WF, &[]));
+}
+
+/// `Artifact<T>` fan-out via `.clone()`: one producer feeding two
+/// consumers. Pins that both consumers' `arguments.artifacts.m.from`
+/// point at the same upstream artifact, same idiom as parameter-typed
+/// `.clone()` fan-out.
+#[test]
+fn emit_pipeline_artifact_clone() {
+    assert_golden(
+        "pipeline_artifact_clone.yaml",
+        &run_bin(BIN_ARTIFACT_CLONE, &[]),
+    );
 }
 
 /// Run mode: with Argo's secretKeyRef env vars planted by the

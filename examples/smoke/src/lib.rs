@@ -589,3 +589,17 @@ pub fn pipeline_artifact_wf() {
     let m = sub_returning_artifact();
     sub_consuming_artifact(m);
 }
+
+/// `Artifact<T>` fan-out via `.clone()`: one producer (`make_meta
+/// _artifact`) feeding two consumers. Same idiom as parameter-typed
+/// bindings (clone is the explicit fan-out marker); the wire shape
+/// just gives both consumers their own `arguments.artifacts.m.from:
+/// '{{tasks.m.outputs.artifacts.return}}'` pointing at the same
+/// upstream artifact. No in-pod clone happens; Argo downloads the
+/// object once per consumer.
+#[workflow]
+pub fn pipeline_artifact_clone() {
+    let m = make_meta_artifact();
+    use_meta_artifact(m.clone());
+    use_meta_artifact(m);
+}

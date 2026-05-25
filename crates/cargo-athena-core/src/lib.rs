@@ -393,6 +393,17 @@ impl<T> Artifact<T> {
     }
 }
 
+// `.clone()` in a `#[workflow]` body is the fan-out marker that lets
+// the same producer feed multiple consumers (see WORKFLOW.md). The
+// ghost type-checks it as a real `Clone` call so the binding has to
+// implement `Clone`; the macro lowers it as "reference the same
+// upstream task again", so no runtime clone happens in-pod.
+impl<T: Clone> Clone for Artifact<T> {
+    fn clone(&self) -> Self {
+        Self::new(self.inner.clone())
+    }
+}
+
 // Serde-transparent: the wire form is plain serialized `T`. The wrapper
 // is purely a Rust type marker that the macros key on; on disk it is
 // indistinguishable from `T` itself. Lets `#[container]`'s `run()` body
