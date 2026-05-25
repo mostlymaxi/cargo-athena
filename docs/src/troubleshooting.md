@@ -19,11 +19,16 @@ You called a `#[fragment]` or a regular Rust function from a
 - Convert the helper to a `#[fragment]` and call it from a
   `#[container]` (fragments run inside the calling pod).
 
-### "this is not a supported statement in a `#[workflow]` body"
+### "unsupported statement in a #[workflow]" / shape-specific variants
 
-You tried to use `match`, `for`, `while`, `loop`, a macro call, an
-arbitrary method call, or an unusual `let` pattern in a `#[workflow]`
-body. The strict grammar exists so a step is never silently dropped.
+The macro emits a targeted message per shape with a hint at what *is*
+supported:
+
+- **`for`** -> *"For per-element parallel work use `list.fan_out(|x| step(x))`; for sequential work, thread a return value through."*
+- **`while`/`loop`** -> *"A #[workflow] body is read once to build the DAG, not iterated at runtime. Move the loop inside a #[container] body, or use `.fan_out` for parallelism."*
+- **`match`** -> *"For exclusive branches use `if`/`else if`/`else` (supported)."*
+- **`.method()`** -> *"The lowered chains are `.clone()`/`.to_owned()` on args, `.fan_out`, `.continue_on`, `.on_success/.on_failure/.on_error/.on_exit/.hook_if`."*
+- **macros** -> *"A macro call here would be dropped from the DAG. If you need pod resources (`host!`, `secret!`, `load_artifact!`, `save_artifact!`), declare them inside a #[container] body."*
 
 Supported shapes are:
 
@@ -34,9 +39,6 @@ if cond { ... } else { ... }
 binding.fan_out(|x| template(x, …));
 binding.continue_on(...)       // and the other per-task hooks
 ```
-
-Lift any other logic into a `#[container]`, or use `if` / `fan_out` if
-that captures what you need.
 
 ### "the trait `Injectable` is not implemented for ..."
 

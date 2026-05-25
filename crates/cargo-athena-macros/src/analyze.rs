@@ -545,14 +545,102 @@ pub(crate) fn path_leaf(p: &Path) -> String {
         .map(|s| s.ident.to_string())
         .unwrap_or_else(|| "task".to_string())
 }
-pub(crate) const UNSUPPORTED_STMT: &str = "unsupported statement in a #[workflow]: only \
-`let x = template(args);` and `template(args);` are lowered. if/match, \
-for/while/loop, macros, method calls and other expressions aren't \
-supported yet — they'll be lowered differently later.";
+/// Catch-all kept for the few sites that pass an `Expr` we can't or
+/// don't bother narrowing (returned-binding paths, etc.). Prefer
+/// [`unsupported_stmt_msg`] when you have an `Expr` in hand.
+pub(crate) const UNSUPPORTED_STMT: &str = "unsupported statement in a #[workflow]. \
+Only `let x = template(args);`, `template(args);`, and \
+`if`/`else if`/`else` are lowered. Anything else is rejected so a step is \
+never silently dropped.";
 
-pub(crate) const NOT_A_TEMPLATE_CALL: &str = "expected a template call `name(args)` — a \
-#[container] or #[workflow]. #[fragment]s and regular functions are not \
-templates and can't be called from a #[workflow].";
+/// Tailored advice per statement shape. Steers the user toward the
+/// feature that *does* model what they probably wanted (fan_out for
+/// loops, if/else for match, the builder chain for method calls), so
+/// the error doubles as a hint.
+pub(crate) fn unsupported_stmt_msg(expr: &Expr) -> String {
+    use Expr::*;
+    match expr {
+        ForLoop(_) => "`for` loops aren't lowered. For per-element parallel work use \
+            `list.fan_out(|x| step(x))`; for sequential work, thread a return \
+            value through to make the dependency explicit."
+            .to_string(),
+        While(_) | Loop(_) => "`while`/`loop` aren't lowered. A #[workflow] body is read \
+            once to build the DAG, not iterated at runtime. Move the loop \
+            inside a #[container] body, or use `.fan_out` for parallelism."
+            .to_string(),
+        Match(_) => "`match` isn't lowered yet. For exclusive branches in a #[workflow], \
+            use `if` / `else if` / `else` (supported)."
+            .to_string(),
+        MethodCall(mc) => format!(
+            "`.{m}(..)` isn't a supported chain in a #[workflow]. \
+             The lowered chains are `.clone()`/`.to_owned()` on args, \
+             `.fan_out(|x| C(x, ..))`, `.continue_on(..)`, \
+             `.on_success(..)`/`.on_failure(..)`/`.on_error(..)`/\
+             `.on_exit(..)`/`.hook_if(..)`.",
+            m = mc.method
+        ),
+        Try(_) => "`?` (the Try operator) isn't supported in a #[workflow] body. \
+            Templates can't propagate errors via Rust's Try; use \
+            `.continue_on(failed, error)` to let dependents proceed when a \
+            step fails."
+            .to_string(),
+        Async(_) | Await(_) => "`async`/`await` isn't supported in a #[workflow] body. \
+            The workflow is statically analyzed at compile time; the steps \
+            run in pods, not here. (For async work *inside* a container, \
+            `#[container] async fn` works with the `tokio` feature.)"
+            .to_string(),
+        Closure(_) => "a bare closure isn't a statement in a #[workflow]. The only \
+            place a closure is accepted is inside `.fan_out(|x| C(x, ..))`."
+            .to_string(),
+        Block(_) => "a bare block isn't a statement in a #[workflow]. Each step \
+            must be a single template call; group with a sub-#[workflow] \
+            if you want reusable composition."
+            .to_string(),
+        Unsafe(_) => "`unsafe` blocks aren't a workflow statement. A #[workflow] \
+            body only describes the DAG; put any unsafe code inside a \
+            #[container] body (it runs there)."
+            .to_string(),
+        _ => UNSUPPORTED_STMT.to_string(),
+    }
+}
+
+pub(crate) const NOT_A_TEMPLATE_CALL: &str = "expected a template call `name(args)`. \
+Only #[container] and #[workflow] are templates - #[fragment]s and regular \
+functions can't be called from a #[workflow] body.";
+
+pub(crate) const FAN_OUT_BODY_NOT_A_CALL: &str = "a `.fan_out(|x| …)` closure body must \
+be a single template call like `step(x)` or `step(x, lit)`. The closure \
+runs once per element; its return value joins the aggregated `Vec`.";
+
+/// Detect `<recv>.fan_out(...)` with a closure body that *isn't* a
+/// template call. Lets the error point at the actual problem (the
+/// closure) instead of saying \"this whole expression isn't a call\".
+pub(crate) fn fan_out_bad_closure(e: &Expr) -> Option<&Expr> {
+    let Expr::MethodCall(mc) = unwrap_expr(e) else {
+        return None;
+    };
+    if mc.method != "fan_out" || mc.args.len() != 1 {
+        return None;
+    }
+    let Expr::Closure(cl) = unwrap_expr(&mc.args[0]) else {
+        return None;
+    };
+    // If it parses as a fan_out shape (one ident arg + a body), but the
+    // body isn't a call, we want to error specifically about the body.
+    if cl.inputs.len() != 1 {
+        return None;
+    }
+    let body = closure_tail(&cl.body);
+    if call_parts(body).is_some() {
+        return None;
+    }
+    Some(body)
+}
+
+pub(crate) const MACRO_IN_WORKFLOW: &str = "macros aren't lowered to workflow steps. \
+A macro call here would be dropped from the DAG. If you need pod resources \
+(`host!`, `secret!`, `load_artifact!`, `save_artifact!`), declare them \
+inside a #[container] body; only container bodies actually run.";
 
 pub(crate) const RETURN_UNRESOLVED: &str = "this #[workflow] declares a return type but \
 its returned value isn't produced by a template call. End with a tail \
@@ -734,7 +822,11 @@ pub(crate) fn analyze_stmts(
                         )?
                     } else {
                         let (callee, raw) = call_parts(base_expr).ok_or_else(|| {
-                            syn::Error::new_spanned(&init.expr, NOT_A_TEMPLATE_CALL)
+                            if let Some(body) = fan_out_bad_closure(base_expr) {
+                                syn::Error::new_spanned(body, FAN_OUT_BODY_NOT_A_CALL)
+                            } else {
+                                syn::Error::new_spanned(&init.expr, NOT_A_TEMPLATE_CALL)
+                            }
                         })?;
                         let base = bind.clone().unwrap_or_else(|| path_leaf(&callee));
                         push_call(
@@ -793,7 +885,11 @@ pub(crate) fn analyze_stmts(
                             }
                             _ => {
                                 let (callee, raw) = call_parts(base_expr).ok_or_else(|| {
-                                    syn::Error::new_spanned(target, NOT_A_TEMPLATE_CALL)
+                                    if let Some(body) = fan_out_bad_closure(base_expr) {
+                                        syn::Error::new_spanned(body, FAN_OUT_BODY_NOT_A_CALL)
+                                    } else {
+                                        syn::Error::new_spanned(target, NOT_A_TEMPLATE_CALL)
+                                    }
                                 })?;
                                 let base = path_leaf(&callee);
                                 push_call(
@@ -805,7 +901,7 @@ pub(crate) fn analyze_stmts(
                     }
                 } else if let Expr::Path(p) = unwrap_expr(expr) {
                     if !(is_last && semi.is_none() && p.path.segments.len() == 1) {
-                        return Err(syn::Error::new_spanned(expr, UNSUPPORTED_STMT));
+                        return Err(syn::Error::new_spanned(expr, unsupported_stmt_msg(expr)));
                     }
                     let name = p.path.segments[0].ident.to_string();
                     output_task = Some(bindings.get(&name).cloned().ok_or_else(|| {
@@ -835,8 +931,9 @@ pub(crate) fn analyze_stmts(
                             inputs,
                         )?
                     } else {
-                        let (callee, raw) = call_parts(base_expr)
-                            .ok_or_else(|| syn::Error::new_spanned(expr, UNSUPPORTED_STMT))?;
+                        let (callee, raw) = call_parts(base_expr).ok_or_else(|| {
+                            syn::Error::new_spanned(expr, unsupported_stmt_msg(expr))
+                        })?;
                         let base = path_leaf(&callee);
                         push_call(
                             callee, raw, &base, opts, None, None, &mut used, &mut nodes, &bindings,
@@ -849,10 +946,15 @@ pub(crate) fn analyze_stmts(
                 }
             }
             Stmt::Macro(m) => {
-                return Err(syn::Error::new_spanned(m, UNSUPPORTED_STMT));
+                return Err(syn::Error::new_spanned(m, MACRO_IN_WORKFLOW));
             }
             Stmt::Item(it) => {
-                return Err(syn::Error::new_spanned(it, UNSUPPORTED_STMT));
+                return Err(syn::Error::new_spanned(
+                    it,
+                    "nested items (fn / mod / struct / enum / etc.) aren't \
+                     lowered in a #[workflow] body. Move helpers to the \
+                     surrounding module.",
+                ));
             }
         }
     }

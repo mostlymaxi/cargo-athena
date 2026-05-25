@@ -47,6 +47,11 @@ pub struct SubmitArgs {
     /// repeatable (Argo applies it to every pod).
     #[arg(long = "node-selector", value_name = "K=V")]
     node_selector: Vec<String>,
+    /// Workflow priority (int32). Higher = scheduled first when the
+    /// controller hits its parallelism limit. No default; Argo treats
+    /// absence as 0.
+    #[arg(long, value_name = "N")]
+    priority: Option<i32>,
     /// Submit via this Argo Server URL instead of the kube API (else
     /// `$ARGO_SERVER`; absent ⇒ kubeconfig/in-cluster).
     #[arg(long = "argo-server", value_name = "URL")]
@@ -477,6 +482,7 @@ pub fn submit(a: SubmitArgs) {
             }),
             service_account_name: sa.clone(),
             node_selector,
+            priority: a.priority,
             ..Default::default()
         }),
     };

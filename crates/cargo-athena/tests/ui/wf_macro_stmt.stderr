@@ -1,4 +1,4 @@
-error: unsupported statement in a #[workflow]: only `let x = template(args);` and `template(args);` are lowered. if/match, for/while/loop, macros, method calls and other expressions aren't supported yet — they'll be lowered differently later.
+error: macros aren't lowered to workflow steps. A macro call here would be dropped from the DAG. If you need pod resources (`host!`, `secret!`, `load_artifact!`, `save_artifact!`), declare them inside a #[container] body; only container bodies actually run.
  --> tests/ui/wf_macro_stmt.rs:5:5
   |
 5 |     println!("hello");

@@ -1,4 +1,4 @@
-error: unsupported statement in a #[workflow]: only `let x = template(args);` and `template(args);` are lowered. if/match, for/while/loop, macros, method calls and other expressions aren't supported yet — they'll be lowered differently later.
+error: `.len(..)` isn't a supported chain in a #[workflow]. The lowered chains are `.clone()`/`.to_owned()` on args, `.fan_out(|x| C(x, ..))`, `.continue_on(..)`, `.on_success(..)`/`.on_failure(..)`/`.on_error(..)`/`.on_exit(..)`/`.hook_if(..)`.
  --> tests/ui/wf_method_call.rs:5:5
   |
 5 |     "x".to_string().len();

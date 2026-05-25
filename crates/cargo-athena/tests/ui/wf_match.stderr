@@ -1,0 +1,8 @@
+error: `match` isn't lowered yet. For exclusive branches in a #[workflow], use `if` / `else if` / `else` (supported).
+ --> tests/ui/wf_match.rs:6:5
+  |
+6 | /     match value {
+7 | |         0 => {}
+8 | |         _ => {}
+9 | |     }
+  | |_____^

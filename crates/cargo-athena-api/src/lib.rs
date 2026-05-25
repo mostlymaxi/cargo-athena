@@ -154,6 +154,14 @@ argo! {
         /// sub-workflows in one run) contend on the same name —
         /// empirically verified on v4.0.5, holder key `<ns>/<wf>`.
         pub synchronization: Option<Synchronization>,
+        /// Workflow priority (int32). The Argo controller schedules
+        /// higher-priority workflows first when its parallelism limit
+        /// is hit. Today only `cargo athena submit --priority` sets
+        /// this; emit never does (skip-empty ⇒ existing goldens stay
+        /// byte-identical). A future `#[workflow(priority_if_root=N)]`
+        /// would land here too (spec-scoped, hence the `_if_root`
+        /// convention).
+        pub priority: Option<i32>,
     }
 
     /// Argo `ttlStrategy`: delete the finished Workflow after the given
