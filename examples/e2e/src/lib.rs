@@ -7,7 +7,7 @@
 //!
 //! * container→container **param data-deps**
 //!   (`{{tasks.x.outputs.parameters.return}}` — run-mode (de)serialize,
-//!   `ATHENA_PARAM_*` in, `/athena/result` out),
+//!   positional argv in, `/athena/result` out),
 //! * a nested `#[workflow]` that **returns a value** consumed downstream
 //!   (workflow→container across the `templateRef` wormhole),
 //! * **`.fan_out`** → Argo `withParam`, aggregate consumed as `Vec`,
@@ -275,6 +275,31 @@ pub fn read_note(_after: String) {
     println!("read e2e-note = {v}");
 }
 
+// --- large-parameter offload ----------------------------------------------
+//
+// Argo's "container arguments offloading" auto-offloads any single
+// argv element bigger than 128 KB to a ConfigMap so the exec syscall
+// doesn't hit `E2BIG`. cargo-athena delivers each function parameter
+// as positional argv (not env, since env can't be offloaded), so this
+// step proves Argo's offload path works for a real cargo-athena
+// parameter. If a future regression went back to env delivery, this
+// 160 KB blob would balloon the pod spec or trip `E2BIG` — the
+// workflow would fail and CI catches it.
+
+const BIG_BLOB_BYTES: usize = 160 * 1024;
+
+#[container]
+pub fn make_big_blob() -> String {
+    "x".repeat(BIG_BLOB_BYTES)
+}
+
+#[container]
+pub fn verify_big_blob(blob: String) {
+    assert_eq!(blob.len(), BIG_BLOB_BYTES, "big_blob round-trip size drift");
+    assert!(blob.chars().all(|c| c == 'x'), "big_blob content drift");
+    println!("OK verify_big_blob {} bytes", blob.len());
+}
+
 // --- per-task builders + the exit handler ----------------------------------
 
 #[container]
@@ -353,6 +378,10 @@ pub fn pipeline() {
 
     let r = risky().continue_on(failed, error);
     finalize(r).on_exit(cleanup); // per-task exit hook
+
+    // 160 KB parameter -> argv -> Argo's ConfigMap offload path.
+    let big = make_big_blob();
+    verify_big_blob(big);
 
     // Force-link the steps-mode workflow into this entrypoint's emit
     // closure so its template registers + Argo executes it as a

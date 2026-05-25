@@ -67,16 +67,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         quote! { #impl_ident( #( #arg_idents ),* ) }
     };
     let arg_names: Vec<String> = arg_idents.iter().map(|i| i.to_string()).collect();
-
-    // Argo delivers params via container env so the binary can read them.
-    let param_env_names: Vec<String> = arg_names
-        .iter()
-        .map(|n| format!("ATHENA_PARAM_{n}"))
-        .collect();
-    let param_env_vals: Vec<String> = arg_names
-        .iter()
-        .map(|n| format!("{{{{inputs.parameters.{n}}}}}"))
-        .collect();
+    // Positional argv index per parameter (in declaration order).
+    let arg_indices: Vec<usize> = (0..arg_names.len()).collect();
     let inputs_slice = str_slice(&arg_names);
     // Stringified arg types, parallel to INPUTS — `container emulate`
     // type-checks supplied params against these before launching.
@@ -354,20 +346,39 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             const MUTEXES_IF_ROOT: &'static [(&'static str, &'static str)] =
                 #mutexes_if_root_tok;
 
-            fn run(__in: ::cargo_athena::serde_json::Value)
-                -> ::cargo_athena::serde_json::Value
+            fn run(__argv: &[::std::string::String]) -> ::std::string::String
             {
+                // Argv length must match INPUTS. A mismatch means the
+                // running binary and the WorkflowTemplate that scheduled
+                // it were built from different source revisions; fail
+                // loud rather than silently mis-bind positions.
+                let __expected = <Self as ::cargo_athena::Template>::INPUTS.len();
+                if __argv.len() != __expected {
+                    panic!(
+                        "{}: argv has {} arg(s), expected {} (binary <-> template version drift?)",
+                        <Self as ::cargo_athena::Template>::ARGO_NAME,
+                        __argv.len(),
+                        __expected,
+                    );
+                }
                 #(
+                    // Argo delivers each parameter value JSON-encoded
+                    // (string -> "v", number/bool bare). Fall back to a
+                    // raw-string interpretation for the unquoted case.
+                    let __raw: &::std::primitive::str = &__argv[#arg_indices];
                     let #arg_idents: #arg_types =
-                        ::cargo_athena::serde_json::from_value(
-                            __in.get(#arg_names)
-                                .cloned()
-                                .unwrap_or(::cargo_athena::serde_json::Value::Null),
-                        ).expect(concat!(
-                            "deserialize container input `", #arg_names, "`"));
+                        ::cargo_athena::serde_json::from_str(__raw)
+                            .or_else(|_| {
+                                ::cargo_athena::serde_json::from_value(
+                                    ::cargo_athena::serde_json::Value::String(__raw.to_string())
+                                )
+                            })
+                            .expect(concat!(
+                                "deserialize container input `", #arg_names, "`"
+                            ));
                 )*
                 let __out = #call_expr;
-                ::cargo_athena::serde_json::to_value(__out)
+                ::cargo_athena::serde_json::to_string(&__out)
                     .expect("serialize container output")
             }
 
@@ -391,7 +402,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 // pulls & exec's the athena binary delivered as an artifact.
                 let __d = ::cargo_athena::container_delivery(
                     __ctx,
-                    <Self as ::cargo_athena::Template>::ARGO_NAME,
+                    &[ #( #arg_names ),* ],
                     #image_opt,
                 );
                 // Native Argo artifact ports (no S3): own load/save decls
@@ -456,12 +467,18 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                         args: __d.args,
                         security_context: #security_context_tok,
                         env: {
+                            // Selector: the binary's entrypoint reads
+                            // CARGO_ATHENA_TEMPLATE to pick which container
+                            // body to run. Function params arrive as
+                            // positional argv on `container.args` so
+                            // Argo's automatic large-args offload kicks
+                            // in for big values; env can't be offloaded.
                             let mut __env: ::std::vec::Vec<::cargo_athena::api::EnvVar> = ::std::vec![
-                                #( ::cargo_athena::api::EnvVar {
-                                    name: #param_env_names.to_string(),
-                                    value: #param_env_vals.to_string(),
+                                ::cargo_athena::api::EnvVar {
+                                    name: ::cargo_athena::CARGO_ATHENA_TEMPLATE_ENV.to_string(),
+                                    value: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
                                     ..::core::default::Default::default()
-                                } ),*
+                                },
                             ];
                             // `#[container(env = { "K" = "lit" + arg, … })]` —
                             // literal keys + already-injection-lowered values

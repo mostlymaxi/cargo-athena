@@ -43,10 +43,12 @@ spec:
         esac
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
-        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-fetch
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.url}}'
       env:
-      - name: ATHENA_PARAM_url
-        value: '{{inputs.parameters.url}}'
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-fetch
       volumeMounts:
       - name: athena-work
         mountPath: /athena
@@ -150,10 +152,12 @@ spec:
         esac
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
-        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-record
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.tag}}'
       env:
-      - name: ATHENA_PARAM_tag
-        value: '{{inputs.parameters.tag}}'
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-record
       volumeMounts:
       - name: athena-work
         mountPath: /athena
@@ -205,7 +209,11 @@ spec:
         esac
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
-        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-teardown
+        exec /athena/bin/app-$__t "$@"
+      - --
+      env:
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-teardown
       volumeMounts:
       - name: athena-work
         mountPath: /athena
@@ -260,12 +268,13 @@ spec:
         esac
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
-        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-transform
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.data}}'
+      - '{{inputs.parameters.factor}}'
       env:
-      - name: ATHENA_PARAM_data
-        value: '{{inputs.parameters.data}}'
-      - name: ATHENA_PARAM_factor
-        value: '{{inputs.parameters.factor}}'
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-transform
       volumeMounts:
       - name: athena-work
         mountPath: /athena

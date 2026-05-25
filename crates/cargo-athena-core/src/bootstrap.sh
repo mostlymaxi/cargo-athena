@@ -4,4 +4,4 @@ case "$(uname -m)" in
 esac
 chmod +x @@BIN_DIR@@/app-$__t
 export CARGO_ATHENA_OUTPUT=/athena/result
-exec @@BIN_DIR@@/app-$__t --cargo-athena-template @@TEMPLATE@@
+exec @@BIN_DIR@@/app-$__t "$@"

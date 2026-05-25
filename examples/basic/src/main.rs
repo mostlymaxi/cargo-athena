@@ -4,8 +4,9 @@
 //!     -> emits a multi-doc WorkflowTemplate stream rooted at `run_foo`
 //!
 //!   CARGO_ATHENA_TEMPLATE=cargo-athena-example-basic-run-a-container \
-//!   CARGO_ATHENA_INPUT='{"a":"hi"}' cargo run -p cargo-athena-example-basic
-//!     -> runs that container's real body in-process
+//!     cargo run -p cargo-athena-example-basic -- '"hi"'
+//!     -> runs that container's real body in-process (`-- '"hi"'`
+//!        passes the JSON-encoded `a: String` arg as positional argv)
 
 // `host!` is context-restricted; always called path-qualified.
 use cargo_athena::{container, fragment, workflow};

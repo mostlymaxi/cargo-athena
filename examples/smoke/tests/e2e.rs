@@ -54,10 +54,15 @@ fn assert_golden(name: &str, actual: &str) {
 }
 
 fn run_bin(bin: &str, envs: &[(&str, &str)]) -> String {
+    run_bin_argv(bin, envs, &[])
+}
+
+fn run_bin_argv(bin: &str, envs: &[(&str, &str)], argv: &[&str]) -> String {
     let mut cmd = Command::new(bin);
     for (k, v) in envs {
         cmd.env(k, v);
     }
+    cmd.args(argv);
     let out = cmd.output().expect("failed to spawn smoke binary");
     assert!(
         out.status.success(),
@@ -219,16 +224,34 @@ fn list_if() {
 /// Run mode: a container that returns a value (JSON to stdout).
 #[test]
 fn run_mode_transform() {
-    let out = run_bin(
+    // `fn transform(data: String, factor: i64)` -> positional argv.
+    let out = run_bin_argv(
         BIN_PIPELINE,
-        &[
-            (
-                "CARGO_ATHENA_TEMPLATE",
-                "cargo-athena-example-smoke-transform",
-            ),
-            ("CARGO_ATHENA_INPUT", r#"{"data":"hello","factor":4}"#),
-        ],
+        &[(
+            "CARGO_ATHENA_TEMPLATE",
+            "cargo-athena-example-smoke-transform",
+        )],
+        &[r#""hello""#, "4"],
     );
+    assert_golden("run_transform.txt", &out);
+}
+
+/// Run mode raw-string fallback: argv for a `String` param may be
+/// either the JSON-quoted form (`"hello"`, what Argo sends in Regime
+/// B) or the bare unquoted form (`hello`, friendlier for hand-typed
+/// shell invocations). Both must decode to the same value.
+#[test]
+fn run_mode_transform_unquoted_string() {
+    let out = run_bin_argv(
+        BIN_PIPELINE,
+        &[(
+            "CARGO_ATHENA_TEMPLATE",
+            "cargo-athena-example-smoke-transform",
+        )],
+        &["hello", "4"], // `hello` is NOT valid JSON; fallback path
+    );
+    // Identical golden as the quoted-form test above: the decoder must
+    // produce the same `data: String = "hello"` from both inputs.
     assert_golden("run_transform.txt", &out);
 }
 
@@ -274,14 +297,14 @@ fn emit_pipeline_mutex() {
 /// returns `None` when the optional env is unset.
 #[test]
 fn run_mode_use_secrets() {
-    let out = run_bin(
+    // `fn use_secrets(label: String)` -> one positional argv.
+    let out = run_bin_argv(
         BIN_SECRETS,
         &[
             (
                 "CARGO_ATHENA_TEMPLATE",
                 "cargo-athena-example-smoke-use-secrets",
             ),
-            ("CARGO_ATHENA_INPUT", r#"{"label":"hi"}"#),
             // The env names mirror what the macro emits in the WT —
             // ATHENA_SEC_<munged-secret>__<munged-key> (uppercased,
             // non-alphanumerics → _).
@@ -290,6 +313,7 @@ fn run_mode_use_secrets() {
             // ATHENA_SEC_DEBUG_CREDS__TRACE deliberately unset:
             // `secret_opt!` returns None.
         ],
+        &[r#""hi""#],
     );
     assert_golden("run_use_secrets.txt", &out);
 }
@@ -299,12 +323,10 @@ fn run_mode_use_secrets() {
 /// Proves the runtime is wired correctly + the body's `.await` lands.
 #[test]
 fn run_mode_async_delay() {
-    let out = run_bin(
+    let out = run_bin_argv(
         BIN_ASYNC,
-        &[
-            ("CARGO_ATHENA_TEMPLATE", "cargo-athena-example-smoke-delay"),
-            ("CARGO_ATHENA_INPUT", r#"{"label":"hi"}"#),
-        ],
+        &[("CARGO_ATHENA_TEMPLATE", "cargo-athena-example-smoke-delay")],
+        &[r#""hi""#],
     );
     assert_golden("run_async_delay.txt", &out);
 }
@@ -312,15 +334,13 @@ fn run_mode_async_delay() {
 /// Run mode: a container whose real body branches and uses `host!`.
 #[test]
 fn run_mode_branchy() {
-    let out = run_bin(
+    let out = run_bin_argv(
         BIN_PIPELINE,
-        &[
-            (
-                "CARGO_ATHENA_TEMPLATE",
-                "cargo-athena-example-smoke-branchy",
-            ),
-            ("CARGO_ATHENA_INPUT", r#"{"mode":"fast"}"#),
-        ],
+        &[(
+            "CARGO_ATHENA_TEMPLATE",
+            "cargo-athena-example-smoke-branchy",
+        )],
+        &[r#""fast""#],
     );
     assert_golden("run_branchy.txt", &out);
 }

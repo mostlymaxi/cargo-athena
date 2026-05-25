@@ -43,10 +43,12 @@ spec:
         esac
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
-        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-decide
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.seed}}'
       env:
-      - name: ATHENA_PARAM_seed
-        value: '{{inputs.parameters.seed}}'
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-decide
       volumeMounts:
       - name: athena-work
         mountPath: /athena
@@ -100,10 +102,12 @@ spec:
         esac
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
-        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-left
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.x}}'
       env:
-      - name: ATHENA_PARAM_x
-        value: '{{inputs.parameters.x}}'
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-left
       volumeMounts:
       - name: athena-work
         mountPath: /athena
@@ -157,10 +161,12 @@ spec:
         esac
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
-        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-note
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.msg}}'
       env:
-      - name: ATHENA_PARAM_msg
-        value: '{{inputs.parameters.msg}}'
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-note
       volumeMounts:
       - name: athena-work
         mountPath: /athena

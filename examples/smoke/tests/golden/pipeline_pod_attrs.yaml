@@ -73,12 +73,13 @@ spec:
         esac
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
-        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-smoke-run-svc
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.tag}}'
+      - '{{inputs.parameters.zone}}'
       env:
-      - name: ATHENA_PARAM_tag
-        value: '{{inputs.parameters.tag}}'
-      - name: ATHENA_PARAM_zone
-        value: '{{inputs.parameters.zone}}'
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-run-svc
       - name: LOG_LEVEL
         value: info
       - name: REGION

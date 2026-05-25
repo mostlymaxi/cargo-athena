@@ -1,14 +1,16 @@
-error[E0277]: the trait bound `NotSerde: serde::de::DeserializeOwned` is not satisfied
+error[E0277]: the trait bound `NotSerde: serde::Deserialize<'de>` is not satisfied
  --> tests/ui/nonserializable_container.rs:8:1
   |
 8 | #[cargo_athena::container]
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
   |
-help: the trait `for<'de> serde_core::de::Deserialize<'de>` is not implemented for `NotSerde`
+help: the trait `serde_core::de::Deserialize<'_>` is not implemented for `NotSerde`
  --> tests/ui/nonserializable_container.rs:4:1
   |
 4 | struct NotSerde {
   | ^^^^^^^^^^^^^^^
+  = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `NotSerde` type
+  = note: for types from other crates check whether the crate offers a `serde` feature flag
   = help: the following other types implement trait `serde_core::de::Deserialize<'de>`:
             &'a Path
             &'a [u8]
@@ -19,15 +21,14 @@ help: the trait `for<'de> serde_core::de::Deserialize<'de>` is not implemented f
             (T0, T1, T2)
             (T0, T1, T2, T3)
           and $N others
-  = note: required for `NotSerde` to implement `serde_core::de::DeserializeOwned`
-note: required by a bound in `cargo_athena::serde_json::from_value`
- --> $CARGO/serde_json-$VERSION/src/value/mod.rs
+note: required by a bound in `cargo_athena::serde_json::from_str`
+ --> $CARGO/serde_json-$VERSION/src/de.rs
   |
-  | pub fn from_value<T>(value: Value) -> Result<T, Error>
-  |        ---------- required by a bound in this function
+  | pub fn from_str<'a, T>(s: &'a str) -> Result<T>
+  |        -------- required by a bound in this function
   | where
-  |     T: DeserializeOwned,
-  |        ^^^^^^^^^^^^^^^^ required by this bound in `from_value`
+  |     T: de::Deserialize<'a>,
+  |        ^^^^^^^^^^^^^^^^^^^ required by this bound in `from_str`
   = note: this error originates in the attribute macro `cargo_athena::container` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `NotSerde: serde::Serialize` is not satisfied
@@ -53,12 +54,12 @@ help: the trait `serde_core::ser::Serialize` is not implemented for `NotSerde`
             (T0, T1, T2, T3)
             (T0, T1, T2, T3, T4)
           and $N others
-note: required by a bound in `cargo_athena::serde_json::to_value`
- --> $CARGO/serde_json-$VERSION/src/value/mod.rs
+note: required by a bound in `cargo_athena::serde_json::to_string`
+ --> $CARGO/serde_json-$VERSION/src/ser.rs
   |
-  | pub fn to_value<T>(value: T) -> Result<Value, Error>
-  |        -------- required by a bound in this function
+  | pub fn to_string<T>(value: &T) -> Result<String>
+  |        --------- required by a bound in this function
   | where
-  |     T: Serialize,
-  |        ^^^^^^^^^ required by this bound in `to_value`
+  |     T: ?Sized + Serialize,
+  |                 ^^^^^^^^^ required by this bound in `to_string`
   = note: this error originates in the attribute macro `cargo_athena::container` (in Nightly builds, run with -Z macro-backtrace for more info)

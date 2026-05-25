@@ -1,6 +1,6 @@
 //! `cargo athena container emulate` — realize ONE `#[container]`'s
 //! emitted spec locally under docker/podman, *exactly as Argo would*: same
-//! image, the same injected bootstrap, the same `ATHENA_PARAM_*` env,
+//! image, the same injected bootstrap, the same positional argv,
 //! the same `/athena` scratch dir, `host!` binds, and S3 artifact ports.
 //!
 //! Fidelity is by construction: the binary reports a [`ContainerRunMeta`]
@@ -269,12 +269,14 @@ pub fn container_emulate(a: EmulateArgs) {
         let mount = cargo_athena::host_mount_path(hp);
         c.arg("-v").arg(format!("{hp}:{mount}"));
     }
-    for (name, json) in &values {
-        c.arg("-e").arg(format!("{name}={json}"));
-    }
+    // Selector goes in env; positional argv carries the function params.
+    c.arg("-e")
+        .arg(format!("CARGO_ATHENA_TEMPLATE={}", meta.name));
     // Argo sets the container `command` (→ overrides the image
     // ENTRYPOINT) + `args`. Mirror that with --entrypoint so the
-    // injected bootstrap runs exactly as in-pod.
+    // injected bootstrap runs exactly as in-pod. `meta.args` from the
+    // template still carries `{{inputs.parameters.X}}` placeholders;
+    // here we substitute them with the actual values from `-a`.
     let (entry, rest) = meta
         .command
         .split_first()
@@ -282,7 +284,14 @@ pub fn container_emulate(a: EmulateArgs) {
     c.arg("--entrypoint").arg(entry);
     c.arg(&meta.image);
     c.args(rest);
-    c.args(&meta.args);
+    // The bootstrap is the first arg; the rest is `--` + positional
+    // placeholders. Drop the placeholders, keep `--`, then add our
+    // values in INPUTS order (same as Argo's substitution would yield).
+    if let Some(script) = meta.args.first() {
+        c.arg(script);
+    }
+    c.arg("--");
+    c.args(&values);
 
     eprintln!("→ Running: {runtime} run {} ({})", meta.image, meta.name);
     let status = c
@@ -416,22 +425,22 @@ fn mkparent(p: &Path) {
 /// anything launches: missing required args, unknown args (typos), and
 /// wrong scalar/array kinds all fail fast with one CLI-style report.
 /// On success, returns the params JSON-encoded per Regime B (string →
-/// `"v"`, number → `7`) into the env each is delivered through.
-fn check_params(meta: &ContainerRunMeta, a: &EmulateArgs) -> Vec<(String, String)> {
+/// `"v"`, number → `7`) in `INPUTS` (positional) order — emulate passes
+/// them to the bootstrap as positional argv, exactly as Argo does in-pod.
+fn check_params(meta: &ContainerRunMeta, a: &EmulateArgs) -> Vec<String> {
     let vals = parse_args(a.input_file.as_deref(), &a.args);
     if let Err(report) = validate_args(meta, &vals) {
         die(&report);
     }
-    // emulate delivers each param through its env var.
     meta.params
         .iter()
-        .filter_map(|p| {
-            vals.get(&p.name).map(|v| {
-                (
-                    p.env.clone(),
-                    serde_json::to_string(v).expect("JSON-encodable param"),
-                )
-            })
+        .map(|p| {
+            vals.get(&p.name)
+                .map(|v| serde_json::to_string(v).expect("JSON-encodable param"))
+                // A missing param shouldn't reach here (validate_args
+                // would have died); fall back to JSON null so we keep
+                // positional alignment if it ever does.
+                .unwrap_or_else(|| "null".to_string())
         })
         .collect()
 }
