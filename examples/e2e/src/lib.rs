@@ -275,29 +275,29 @@ pub fn read_note(_after: String) {
     println!("read e2e-note = {v}");
 }
 
-// --- large-parameter offload ----------------------------------------------
+// --- non-trivial parameter round-trip --------------------------------------
 //
-// Argo's "container arguments offloading" auto-offloads any single
-// argv element bigger than 128 KB to a ConfigMap so the exec syscall
-// doesn't hit `E2BIG`. cargo-athena delivers each function parameter
-// as positional argv (not env, since env can't be offloaded), so this
-// step proves Argo's offload path works for a real cargo-athena
-// parameter. If a future regression went back to env delivery, this
-// 160 KB blob would balloon the pod spec or trip `E2BIG` — the
-// workflow would fail and CI catches it.
+// Exercises the env -> argv migration end-to-end: a multi-kilobyte
+// string crosses a task boundary as `outputs.parameters.return` ->
+// `{{tasks.X.outputs.parameters.return}}` -> positional argv on the
+// next pod -> serde-decoded back to `String`. The blob is well below
+// Argo's per-parameter limit and intentionally NOT >128 KB (that
+// would test Argo's argv offload feature, but offload applies only
+// at pod-spec creation, not to cross-task output-parameter transfer
+// — large blobs between steps should use artifacts, not parameters).
 
-const BIG_BLOB_BYTES: usize = 160 * 1024;
+const BLOB_BYTES: usize = 16 * 1024;
 
 #[container]
-pub fn make_big_blob() -> String {
-    "x".repeat(BIG_BLOB_BYTES)
+pub fn make_blob() -> String {
+    "x".repeat(BLOB_BYTES)
 }
 
 #[container]
-pub fn verify_big_blob(blob: String) {
-    assert_eq!(blob.len(), BIG_BLOB_BYTES, "big_blob round-trip size drift");
-    assert!(blob.chars().all(|c| c == 'x'), "big_blob content drift");
-    println!("OK verify_big_blob {} bytes", blob.len());
+pub fn verify_blob(blob: String) {
+    assert_eq!(blob.len(), BLOB_BYTES, "blob round-trip size drift");
+    assert!(blob.chars().all(|c| c == 'x'), "blob content drift");
+    println!("OK verify_blob {} bytes", blob.len());
 }
 
 // --- per-task builders + the exit handler ----------------------------------
@@ -379,9 +379,11 @@ pub fn pipeline() {
     let r = risky().continue_on(failed, error);
     finalize(r).on_exit(cleanup); // per-task exit hook
 
-    // 160 KB parameter -> argv -> Argo's ConfigMap offload path.
-    let big = make_big_blob();
-    verify_big_blob(big);
+    // Multi-KB parameter round-trip: producer writes blob -> Argo
+    // captures it as outputs.parameters.return -> consumer receives
+    // it as positional argv -> serde decodes back to String.
+    let blob = make_blob();
+    verify_blob(blob);
 
     // Force-link the steps-mode workflow into this entrypoint's emit
     // closure so its template registers + Argo executes it as a
