@@ -15,5 +15,6 @@
 # Going Further
 
 - [Cookbook](cookbook.md)
+- [Troubleshooting](troubleshooting.md)
 - [Testing](testing.md)
 - [Supported Argo Versions](argo-versions.md)
