@@ -1,0 +1,19 @@
+error[E0308]: mismatched types
+  --> tests/ui/artifact_to_param_mismatch.rs:19:13
+   |
+16 | #[cargo_athena::workflow]
+   | ------------------------- arguments to this function are incorrect
+...
+19 |     use_str(a);
+   |             ^ expected `String`, found `Artifact<String>`
+   |
+   = note: expected struct `std::string::String`
+              found struct `cargo_athena::Artifact<std::string::String>`
+note: associated function defined here
+  --> tests/ui/artifact_to_param_mismatch.rs:11:1
+   |
+11 | #[cargo_athena::container]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+12 | fn use_str(s: String) {
+   |            ---------
+   = note: this error originates in the attribute macro `cargo_athena::container` (in Nightly builds, run with -Z macro-backtrace for more info)

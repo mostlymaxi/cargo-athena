@@ -1,0 +1,5 @@
+error[E0599]: no method named `fan_out` found for struct `cargo_athena::Artifact<T>` in the current scope
+  --> tests/ui/artifact_fan_out.rs:20:15
+   |
+20 |     let _ = a.fan_out(|x| consume(x));
+   |               ^^^^^^^ method not found in `cargo_athena::Artifact<Vec<std::string::String>>`
