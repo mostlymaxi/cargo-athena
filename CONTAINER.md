@@ -65,7 +65,7 @@ All athena paths live under a pod-scoped `emptyDir` at `/athena`.
 | `service_account = "…"` | Pod `ServiceAccount`. Default: `[defaults].service_account`. |
 | `node_selector = { "k" = "v", … }` | Template-level `nodeSelector`; the controller cascades it onto this template's pods. Keys are literal; values may be injected (below). |
 | `env = { "K" = "v", … }` | Extra container `env` entries the body reads via `std::env::var(…)`. Literal keys; values follow the same `"lit" + arg + …` injection grammar as `image`. |
-| `host_mount = [{ host_path = "/h", mount_path = "/m", read_only = false }, …]` | Explicit hostPath mounts with **chosen mount paths**. Use when you really do want a specific in-container path (`/dev/shm`, sidecar data, …); `host!` is the safe form (always under `/athena/mounts/<munged>`). Both `host_path` and `mount_path` are literal strings; `read_only` defaults to false. Dedup'd against `host!` paths on the same `host_path`. |
+| `host_mount = [{ host_path = "/h", mount_path = "/m", read_only = false }, …]` | Explicit hostPath mounts with **chosen mount paths**. Use when you really do want a specific in-container path (`/dev/shm`, sidecar data, …); `host!` is the safe form (always under `/athena/mounts/<hash>`). Both `host_path` and `mount_path` are literal strings; `read_only` defaults to false. Dedup'd against `host!` paths on the same `host_path`. |
 | `annotations = { "k" = "v", … }` | Pod-template annotations (`metadata.annotations`). Literal keys; values injectable like `env`. |
 | `privileged = true` | K8s `securityContext.privileged: true` on this container. Off by default; opt in only when you genuinely need host devices / kernel-level access (mounting NVIDIA gear, running `iptables`, …). Your cluster's PodSecurity admission still has the final say. |
 | `on_exit_if_root = t` | Whole-workflow exit handler. Fires only when *this* template is the workflow you submit. Distinct from the per-task `.on_exit(t)` builder. |
@@ -177,7 +177,7 @@ and a `#[workflow]` using one is a hard error):
 
 | Macro | Effect | Runtime value |
 |---|---|---|
-| `host!("/abs/path")` | a `hostPath` volume mounted safely under `/athena/mounts/<munged>` (never at the host's own path — `host!("/")` would otherwise overlay the host root over the container). For a chosen mount path, use `#[container(host_mount = …)]` above. | `String` path (the safe mount path; portable) |
+| `host!("/abs/path")` | a `hostPath` volume mounted safely under `/athena/mounts/<hash>` (never at the host's own path — `host!("/")` would otherwise overlay the host root over the container). The suffix is a stable hash of your literal — two distinct strings get two distinct mounts (`host!("/foo")` and `host!("//foo")` are *not* merged; k8s/Linux handle path resolution at mount time). For a chosen mount path, use `#[container(host_mount = …)]` above. | `String` path (the safe mount path; portable) |
 | `load_artifact!("key")` | an Argo S3 **input** artifact port at the exact `athena.toml` object key | `Vec<u8>` |
 | `load_artifact_str!("key")` | same, as text | `String` |
 | `save_artifact!("key", bytes)` | an Argo S3 **output** artifact port | writes `impl AsRef<[u8]>` |
