@@ -9,7 +9,7 @@
 Compile regular Rust into [Argo Workflow](https://argoproj.github.io/workflows/) YAML.
 
 ```sh
-cargo add cargo-athena --no-default-features   # the library (lean — no CLI deps)
+cargo add cargo-athena --no-default-features   # the library (lean - no CLI deps)
 cargo install cargo-athena                     # the `cargo athena` subcommand
 
 # …or get the CLI via Nix (flake):
@@ -22,11 +22,11 @@ nix run github:mostlymaxi/cargo-athena -- athena …   # one-off, no install
 > needs only the proc macros + runtime; the default `cli` feature pulls
 > a heavy CLI tree (`kube`, `reqwest`, `tokio`, …) it doesn't use.
 
-📖 **[Documentation](https://mostlymaxi.github.io/cargo-athena/)** — from
+📖 **[Documentation](https://mostlymaxi.github.io/cargo-athena/)** - from
 zero to adept (the same `#[workflow]`/`#[container]` reference is also in
 `cargo doc`).
 
-**Supported Argo Workflows** — every push to `main` submits the
+**Supported Argo Workflows** - every push to `main` submits the
 `examples/e2e` workflow to a real Argo + MinIO per version and
 asserts it `Succeeded`; these badges are that live result:
 
@@ -63,18 +63,18 @@ fn run_a_container(a: String) {
 #[fragment]
 fn load_extra() { let _ = cargo_athena::host!("/var/lib/extra"); }
 
-fn main() { cargo_athena::entrypoint::<run_foo>(); }   // entrypoint = a type
+fn main() { cargo_athena::entrypoint!(run_foo); }   // entrypoint = a type
 ```
 
 Each `#[workflow]`/`#[container]` compiles to its own Argo
 `WorkflowTemplate`, cross-referenced by `templateRef` (referencing a
 template's type force-links its crate, so workflows compose across
 modules and crates with no registry). `cargo athena publish`
-cross-compiles one static-musl binary and uploads it to the S3
-`ArtifactRepository` from `athena.toml`; `emit` injects that binary plus a tiny `sh`
-bootstrap into every container template, so in-pod each step pulls the
-binary, picks its arch, and runs the right function — deserialize
-inputs, run the body, serialize outputs.
+cross-compiles your package as a static-musl binary and uploads it
+to the S3 `ArtifactRepository` from `athena.toml`; `emit` injects it
+plus a tiny `sh` bootstrap into every container template, so in-pod
+each step pulls the binary, picks its arch, and runs the right
+function (deserialize inputs, run the body, serialize outputs).
 
 ```sh
 cargo athena emit    --package my-workflows                # check the YAML (no cluster)

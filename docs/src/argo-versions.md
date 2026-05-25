@@ -2,7 +2,7 @@
 
 Every push to `main` submits the real `examples/e2e` workflow to a live
 Argo + MinIO **per version** and asserts it `Succeeded`. The support
-matrix is therefore not a claim — it is a continuously verified result.
+matrix is therefore not a claim - it is a continuously verified result.
 
 | Argo | Support |
 |---|---|
@@ -23,7 +23,7 @@ multi-step workflow fails instantly with
 `failed to resolve {{tasks.a.outputs.…}}`.
 
 This is intrinsic to the one-template-per-function model and was **fixed
-in Argo 3.6** — the emitted YAML is correct and passes 3.6/3.7/4.0
+in Argo 3.6** - the emitted YAML is correct and passes 3.6/3.7/4.0
 unchanged. Older versions *may* still work for trivial cases; use at
 your own risk.
 
@@ -31,5 +31,5 @@ your own risk.
 
 GitHub has no per-matrix-job badge, so each matrix job publishes its
 pass/fail to a gist and the README renders
-[shields.io](https://shields.io) endpoint badges from it — the badges at
+[shields.io](https://shields.io) endpoint badges from it - the badges at
 the top of the README are that live e2e result.

@@ -23,13 +23,13 @@ fn run_a_container(a: String) {
     println!("regular code, got: {a}");
 }
 
-fn main() { cargo_athena::entrypoint::<run_foo>(); }
+fn main() { cargo_athena::entrypoint!(run_foo); }
 ```
 
 This facade is the only crate you depend on; it re-exports the runtime
 and proc macros behind one `::cargo_athena` path. Install the
-`cargo athena` subcommand (emit / build / run) with
-`cargo install cargo-athena`.
+`cargo athena` subcommand (emit / publish / submit / container / workflow)
+with `cargo install cargo-athena`.
 
 - **Feature reference:** the full `#[workflow]` and `#[container]`
   documentation is on [docs.rs](https://docs.rs/cargo-athena) (on the

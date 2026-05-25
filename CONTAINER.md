@@ -2,41 +2,28 @@
 
 A `#[container]` is a workflow step whose body is **ordinary Rust,
 executed in a pod**. Unlike a `#[workflow]` (statically analyzed), a
-container's body really runs: arguments are deserialized from Argo
-parameters, the function executes, and its return value is serialized
-back out.
+container body really runs: arguments come in, the function executes,
+and its return value goes out.
 
 ```rust,ignore
 #[container(image = "ghcr.io/acme/app:latest")]
 fn run_a_container(a: String) -> String {
     println!("regular code, got: {a}");
-    format!("done:{a}")          // -> outputs.parameters.return
+    format!("done:{a}")
 }
 ```
 
-It compiles to its own Argo `WorkflowTemplate`. The image is arbitrary
-— it needs only POSIX `sh` and `uname`, so distroless and
-read-only-rootfs images work fine.
+The image is arbitrary; it needs only POSIX `sh` and `uname`, so
+distroless and read-only-rootfs images work fine.
 
-### I/O contract
+## I/O contract
 
-- Each function argument is an Argo **input parameter**, deserialized
-  (serde) from that parameter at pod start.
-- The return value is serialized to **`outputs.parameters.return`**, so
-  a `#[workflow]` consumes it as `{{tasks.<t>.outputs.parameters.return}}`.
-- Container I/O is compile-time bound to `serde` (`DeserializeOwned` /
-  `Serialize`). Borrows can't cross this boundary — take/return owned
-  types (`String`, not `&str`).
-
-### How it runs in-pod
-
-`cargo athena publish` cross-compiles a static-musl, multi-arch binary
-and uploads it to the S3 `ArtifactRepository` in `athena.toml`. `emit`
-adds that binary as an input artifact to every container template;
-Argo stages it at `/athena/bin`, and a small `sh` bootstrap picks the
-matching `app-<triple>` and `exec`s it.
-
-All athena paths live under a pod-scoped `emptyDir` at `/athena`.
+- Each function argument is one input parameter the step receives.
+- The return value is the step's output; the next `#[workflow]` task
+  consumes it like any binding.
+- I/O is compile-time bound to `serde` (`DeserializeOwned` /
+  `Serialize`). Borrows can't cross this boundary - take and return
+  owned types (`String`, not `&str`).
 
 ## Attribute arguments
 
@@ -58,60 +45,113 @@ All athena paths live under a pod-scoped `emptyDir` at `/athena`.
 )]
 ```
 
-| Arg | Effect |
-|---|---|
-| `image = "…"` | Container image. Default: `[bootstrap].default_image` from `athena.toml`. |
-| `name = "…"` | Override the Argo template name. Default: `<crate>-<fn>` (kebab). |
-| `service_account = "…"` | Pod `ServiceAccount`. Default: `[defaults].service_account`. |
-| `node_selector = { "k" = "v", … }` | Template-level `nodeSelector`; the controller cascades it onto this template's pods. Keys are literal; values may be injected (below). |
-| `env = { "K" = "v", … }` | Extra container `env` entries the body reads via `std::env::var(…)`. Literal keys; values follow the same `"lit" + arg + …` injection grammar as `image`. |
-| `host_mount = [{ host_path = "/h", mount_path = "/m", read_only = false }, …]` | Explicit hostPath mounts with **chosen mount paths**. Use when you really do want a specific in-container path (`/dev/shm`, sidecar data, …); `host!` is the safe form (always under `/athena/mounts/<hash>`). Both `host_path` and `mount_path` are literal strings; `read_only` defaults to false. Dedup'd against `host!` paths on the same `host_path`. |
-| `annotations = { "k" = "v", … }` | Pod-template annotations (`metadata.annotations`). Literal keys; values injectable like `env`. |
-| `privileged = true` | K8s `securityContext.privileged: true` on this container. Off by default; opt in only when you genuinely need host devices / kernel-level access (mounting NVIDIA gear, running `iptables`, …). Your cluster's PodSecurity admission still has the final say. |
-| `on_exit_if_root = t` | Whole-workflow exit handler. Fires only when *this* template is the workflow you submit. Distinct from the per-task `.on_exit(t)` builder. |
-| `retry(limit = N \| unlimited, policy = "…", backoff = <dur>)` | Template-level Argo `retryStrategy`. `limit` is **required** (`unlimited` ⇒ no cap); `policy` ∈ `Always\|OnFailure\|OnError\|OnTransientError`; `backoff` is an int (seconds) or a [humantime](https://docs.rs/humantime) string. |
-| `timeout = <secs \| "5m">` | Argo `Template.timeout`. Controller-enforced node timeout, **counts Pending time**. See [Timeouts](#timeouts). |
-| `pod_running_timeout = <secs \| "1h30m">` | Argo `Template.activeDeadlineSeconds` on the pod. Kubelet-enforced; only counts time **Running**. See [Timeouts](#timeouts). |
-| `ttl_if_root(after_completion = <s>, after_success = <s>, after_failure = <s>)` | WorkflowSpec `ttlStrategy`: GC the finished Workflow. ≥1 of the three is required (int seconds or humantime). **Root-only.** |
-| `pod_gc_if_root(strategy = "<S>")` | WorkflowSpec `podGC`. `strategy` ∈ `OnPodCompletion\|OnPodSuccess\|OnWorkflowCompletion\|OnWorkflowSuccess`. **Root-only.** |
-| `active_deadline_if_root = <secs \| "2h">` | WorkflowSpec `activeDeadlineSeconds` — the whole-workflow runtime cap. **Root-only.** See [Timeouts](#timeouts). |
-| `mutexes = [{ name = "...", namespace = "..." }, …]` | `Template.synchronization.mutexes` — Argo serializes any pod running this template against any other holder of the same `<ns>/Mutex/<name>` (within one run AND across separate Workflow runs). Holder key `<ns>/<wf>/<node>`. Both `name` and `namespace` accept `"lit" + arg + arg.field` injection, lowered to `{{=fromJSON(inputs.parameters['arg'])}}` (per-pod scope). |
-| `mutexes_if_root = [{ name = "...", namespace = "..." }, …]` | `WorkflowSpec.synchronization.mutexes` — whole-workflow lock (holder key `<ns>/<wf>`). **Root-only**, inert when this WT is `templateRef`'d. Injection scope `workflow.parameters` (the only one Argo resolves at `WorkflowSpec`). |
+All optional.
 
-All optional. As with `#[workflow]`, an argument *name* or a `name = "…"`
-value that a YAML 1.1 parser reads as a boolean/null is a compile error.
+**`image = "…"`**: container image. Default
+`[bootstrap].default_image` from `athena.toml`.
 
-### Timeouts
+**`name = "…"`**: override the Argo template name. Default
+`<crate>-<fn>` (kebab).
 
-Argo has three "stop after a while" knobs.
+**`service_account = "…"`**: pod `ServiceAccount`. Default
+`[defaults].service_account`.
 
-| Attribute | Argo field | Enforced by | Clock starts |
-|---|---|---|---|
-| `timeout` | `Template.timeout` | Argo controller | node creation (**includes** Pending) |
-| `pod_running_timeout` | `Template.activeDeadlineSeconds` | Kubernetes kubelet | pod **Running** |
-| `active_deadline_if_root` | `WorkflowSpec.activeDeadlineSeconds` | Argo controller | whole-workflow start (**root-only**) |
+**`node_selector = { "k" = "v", … }`**: pin pods of this template
+to nodes matching the labels. Literal keys; values may be injected
+(see [Parameter injection](#parameter-injection)).
+
+**`env = { "K" = "v", … }`**: extra container `env` entries the
+body reads via `std::env::var(…)`. Literal keys; values follow the
+same `"lit" + arg + …` injection grammar as `image`.
+
+**`host_mount = [{ host_path = "/h", mount_path = "/m", read_only = false }, …]`**:
+explicit hostPath mounts with chosen mount paths. Use when you
+really do want a specific in-container path (`/dev/shm`, sidecar
+data, …); `host!` is the safer form (the macro picks a non-clobbering
+path). Both `host_path` and `mount_path` are literal strings;
+`read_only` defaults to false. Dedup'd against `host!` paths on the
+same `host_path`.
+
+**`annotations = { "k" = "v", … }`**: pod-template annotations.
+Literal keys; values injectable like `env`.
+
+**`privileged = true`**: K8s `securityContext.privileged: true` on
+this container. Off by default; opt in only when you really do need
+host devices / kernel-level access (mounting NVIDIA gear, running
+`iptables`, …). Your cluster's PodSecurity admission still has the
+final say.
+
+**`on_exit_if_root = t`**: whole-workflow exit handler that fires
+only when *this* template is the workflow you submit. Distinct from
+the per-task `.on_exit(t)` builder.
+
+**`retry(limit = N | unlimited, policy = "…", backoff = <dur>)`**:
+template-level Argo `retryStrategy`. `limit` is required (`unlimited`
+means no cap); `policy` is one of `Always`, `OnFailure`, `OnError`,
+`OnTransientError`; `backoff` is an int (seconds) or a
+[humantime](https://docs.rs/humantime) string.
+
+**`timeout = <secs | "5m">`**: per-step timeout that **counts
+Pending time**. See [Timeouts](#timeouts).
+
+**`pod_running_timeout = <secs | "1h30m">`**: per-step timeout that
+only counts time the pod is **Running**.
+
+**`ttl_if_root(after_completion = <s>, after_success = <s>, after_failure = <s>)`**:
+GC the finished Workflow after the given duration. At least one of
+the three is required (int seconds or humantime). **Root-only.**
+
+**`pod_gc_if_root(strategy = "<S>")`**: pod garbage collection.
+`strategy` is one of `OnPodCompletion`, `OnPodSuccess`,
+`OnWorkflowCompletion`, `OnWorkflowSuccess`. **Root-only.**
+
+**`active_deadline_if_root = <secs | "2h">`**: the whole-workflow
+runtime cap. **Root-only.** See [Timeouts](#timeouts).
+
+**`mutexes = [{ name = "...", namespace = "..." }, …]`**: serialize
+pods of this template against any other holder of the same mutex
+name (within one run AND across separate Workflow runs). Both
+`name` and `namespace` accept `"lit" + arg + arg.field` injection.
+
+**`mutexes_if_root = [{ name = "...", namespace = "..." }, …]`**:
+serialize the whole submitted run against other runs holding the
+same mutex. **Root-only**, inert when this WT is referenced as a
+sub-workflow.
+
+As with `#[workflow]`, an argument *name* or a `name = "…"` value
+that a YAML 1.1 parser reads as a boolean/null is a compile error.
+
+## Timeouts
+
+Three "stop after a while" knobs:
+
+| Attribute | What it bounds | Clock starts |
+|---|---|---|
+| `timeout` | this step | when the node is created (**includes** Pending) |
+| `pod_running_timeout` | this pod | when the pod is **Running** |
+| `active_deadline_if_root` | the whole submitted run | at workflow start (**root-only**) |
 
 A pod stuck Pending trips `timeout` but not `pod_running_timeout`.
-Both are `#[container]`-only; Argo applies neither to dag/steps
-templates, so they're rejected on a `#[workflow]`. The only working
-whole-workflow timeout is `active_deadline_if_root`.
+The first two are `#[container]`-only and are rejected on a
+`#[workflow]`. The only working whole-workflow timeout is
+`active_deadline_if_root`.
 
 Every duration accepts an integer (seconds) or a
 [humantime](https://docs.rs/humantime) string (`"90s"`, `"1h30m"`,
 `"2d"`).
 
-### Parameter injection
+## Parameter injection
 
-`image`, `service_account`, and `node_selector` **values** can splice in
-the container's own arguments — Argo substitutes the real value into
-those fields when the pod is created:
+`image`, `service_account`, `env`, `node_selector`, `annotations`,
+and the mutex `name` / `namespace` **values** can splice in the
+container's own arguments:
 
 ```rust,ignore
 #[container(
     image           = "ghcr.io/acme/app:" + tag,            // arg
-    service_account = "athena-" + tenant + "-runner",        // literal + arg + literal
-    node_selector   = { "kubernetes.io/arch" = "amd64",      // literal value
-                        "disktype" = profile.disk },         // a named struct field
+    service_account = "athena-" + tenant + "-runner",       // literal + arg + literal
+    node_selector   = { "kubernetes.io/arch" = "amd64",
+                        "disktype" = profile.disk },        // a named struct field
 )]
 fn run(tag: String, tenant: String, profile: Profile) { /* ... */ }
 ```
@@ -119,43 +159,35 @@ fn run(tag: String, tenant: String, profile: Profile) { /* ... */ }
 Rules:
 
 - The value is a string literal, or a `+`-concatenation of string
-  literals and operands. An operand is an **argument** (`tag`) or a
-  **named struct field of one** (`profile.disk`, `a.b.c` — named fields
-  only, no `a.0`/`a[i]`).
-- **String-literal segments are emitted verbatim.** A hand-written
-  `{{workflow.parameters.x}}` inside a literal passes through untouched
-  — the escape hatch if you know Argo's templating and want it raw.
-- Operands must be `String`/`&str` or a number (`i64`, `f64`, …).
-  That's enforced at compile time: anything else (a struct, `Vec`,
-  `bool`, …) is an error, because only those round-trip to the obvious
-  raw scalar. A non-argument identifier, a tuple/index field, or any
-  other expression is also a targeted error.
-- **`node_selector` keys are always literal.** (Argo *can* substitute
-  them, but a dynamic label key is a foot-gun, so athena forbids it by
-  design.)
-- `name` is the static Argo template identity and `on_exit_if_root` is
-  a template path — neither is an injection target.
-
-Under the hood an operand lowers to
-`{{=fromJSON(inputs.parameters['arg']['field'…])}}` — Argo evaluates it
-to the raw scalar at pod creation. You don't need to know that; the
-point is `image = "repo:" + tag` just works.
+  literals and operands. An operand is an argument (`tag`) or a
+  named struct field of one (`profile.disk`, `a.b.c`; no `a.0` /
+  `a[i]`).
+- String-literal segments are emitted verbatim - a hand-written
+  `{{workflow.parameters.x}}` inside a literal passes through
+  untouched (eyes-open escape hatch).
+- Operands must be `String` / `&str` or a number (`i64`, `f64`, …).
+  Anything else is a compile error, because only those round-trip
+  to a raw scalar value.
+- `node_selector` keys are always literal (a dynamic label key
+  would be a foot-gun).
+- `name` is the static template identity and `on_exit_if_root` is
+  a template path; neither is an injection target.
 
 ## `#[fragment]`
 
-A `#[fragment]` is a **plain helper function** — *not* a template. It is
-genuinely called as Rust, so it executes inside the calling
+A `#[fragment]` is a **plain helper function**, not a template. It
+is called as ordinary Rust, so it executes inside the calling
 container's pod:
 
 ```rust,ignore
 #[container(image = "ghcr.io/acme/tools:latest")]
 fn build() {
-    frag_a();                                  // ordinary call, runs in this pod
+    frag_a();
 }
 
 #[fragment]
 fn frag_a() {
-    let _ = cargo_athena::host!("/var/lib/a"); // resource carried to `build`
+    let _ = cargo_athena::host!("/var/lib/a");
     frag_b();                                  // transitive
 }
 
@@ -164,31 +196,31 @@ fn frag_b() { let _ = cargo_athena::host!("/var/lib/b"); }
 ```
 
 Its purpose is to **carry pod-resource declarations across function
-boundaries**. Every `host!` / artifact-port macro a fragment uses is
-collected onto each `#[container]` that transitively calls it (resolved
-as a closure at emit time). A `#[fragment]` cannot be called from a
-`#[workflow]` (it is not a `Template`, so it fails as a type error).
+boundaries**. Every `host!` / artifact-port / `secret!` a fragment
+uses is added to each `#[container]` that transitively calls it. A
+`#[fragment]` cannot be called from a `#[workflow]` (it is not a
+template; doing so is a type error).
 
 ## Macro calls
 
-These declare pod resources and are only valid inside a `#[container]`
-or `#[fragment]` (the public form is a `compile_error!` anywhere else,
-and a `#[workflow]` using one is a hard error):
+These declare pod resources and are only valid inside a
+`#[container]` or `#[fragment]`. Calling them anywhere else is a
+compile error.
 
 | Macro | Effect | Runtime value |
 |---|---|---|
-| `host!("/abs/path")` | a `hostPath` volume mounted safely under `/athena/mounts/<hash>` (never at the host's own path — `host!("/")` would otherwise overlay the host root over the container). The suffix is a stable hash of your literal — two distinct strings get two distinct mounts (`host!("/foo")` and `host!("//foo")` are *not* merged; k8s/Linux handle path resolution at mount time). For a chosen mount path, use `#[container(host_mount = …)]` above. | `String` path (the safe mount path; portable) |
-| `load_artifact!("key")` | an Argo S3 **input** artifact port at the exact `athena.toml` object key | `Vec<u8>` |
+| `host!("/abs/path")` | a `hostPath` volume mounted at a safe path the macro picks. | `String` (the path your code reads/writes) |
+| `load_artifact!("key")` | S3 **input** at the given object key | `Vec<u8>` |
 | `load_artifact_str!("key")` | same, as text | `String` |
-| `save_artifact!("key", bytes)` | an Argo S3 **output** artifact port | writes `impl AsRef<[u8]>` |
+| `save_artifact!("key", bytes)` | S3 **output** at the given object key | writes `impl AsRef<[u8]>` |
 | `save_artifact_str!("key", text)` | same, as text | writes `impl AsRef<str>` |
-| `secret!("name", "key")` | a K8s Secret env on this container (`valueFrom.secretKeyRef`) | `String` (panics if unset) |
-| `secret_opt!("name", "key")` | same, but `optional: true` on the ref | `Option<String>` |
+| `secret!("name", "key")` | a K8s Secret env on this container | `String` (panics if unset) |
+| `secret_opt!("name", "key")` | same, optional | `Option<String>` |
 
 ```rust,ignore
 #[container]
 fn publish(report: String) {
-    let notes = cargo_athena::load_artifact_str!("notes");   // S3 input port
+    let notes = cargo_athena::load_artifact_str!("notes");
     println!("publishing {report} (notes: {notes})");
     cargo_athena::save_artifact!("receipt", format!("ok:{report}"));
 }
@@ -196,17 +228,36 @@ fn publish(report: String) {
 
 Key properties:
 
-- **Literal key only.** The argument is the exact S3 object key (for
-  artifacts) or absolute path (for `host!`) — a string literal/const,
-  resolved at compile time.
-- **Static AST union, not a trace.** Declarations are collected from
-  *every* `if`/`match`/loop branch, not the one path that runs. This is
-  correct, not approximate: Argo fixes the pod spec before the pod runs,
-  so the union is the only expressible semantics.
-- **Decoupled through the bucket.** Artifact producer and consumer share
-  only the S3 key — there is no DAG dependency, no `{{tasks.…}}` wiring,
-  and no ordering imposed. A missing object is an Argo error at run time.
+- **Literal key only.** The argument is the exact S3 object key
+  (for artifacts) or absolute path (for `host!`) - a string literal
+  or const, resolved at compile time.
+- **Collected from every branch.** Declarations are picked up from
+  *every* `if` / `match` / loop branch in the body, not just the
+  one path that runs. The pod's spec is fixed before the pod
+  starts, so this is the only correct behavior.
+- **Artifacts are decoupled.** A producer and consumer that share
+  only an S3 key have no DAG dependency or ordering. A missing
+  object is a runtime error in the consumer.
 - **Carried through `#[fragment]`s** transitively, as above.
 
-Used path-qualified (`cargo_athena::host!`) by convention so it doesn't
-require a `use` and the gating compile-errors stay obvious.
+Used path-qualified (`cargo_athena::host!`) by convention so it
+doesn't require a `use` and the gating compile errors stay obvious.
+
+## Async `#[container]`
+
+Mark a container `async fn` and the macro wraps the body in a
+current-thread tokio runtime built per invocation. Enable the
+`tokio` feature on `cargo-athena` to opt in - `tokio` is re-exported.
+
+```rust,ignore
+// Cargo.toml: cargo-athena = { …, features = ["tokio"] }
+
+#[container]
+async fn fetch(url: String) -> String {
+    cargo_athena::tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    format!("data-from:{url}")
+}
+```
+
+`#[workflow]` bodies are statically analyzed, so
+`#[workflow] async fn` is a compile error.

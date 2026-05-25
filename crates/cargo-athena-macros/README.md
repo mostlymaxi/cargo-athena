@@ -6,7 +6,7 @@
 The `#[workflow]`, `#[container]`, and `#[fragment]` proc macros behind
 [`cargo-athena`](https://crates.io/crates/cargo-athena).
 
-Depend on **[`cargo-athena`](https://crates.io/crates/cargo-athena)** —
+Depend on **[`cargo-athena`](https://crates.io/crates/cargo-athena)** -
 it re-exports these behind the `::cargo_athena` path the generated code
 targets. The complete feature reference for each macro is on
 [docs.rs](https://docs.rs/cargo-athena-macros) (the `WORKFLOW.md` /
