@@ -1165,69 +1165,57 @@ impl Collector {
             .collect();
         tpls.sort_by_key(name_of);
 
-        // `on_exit_if_root`: EVERY template that declares it carries the
-        // exit hook on its OWN WorkflowTemplate's `spec.hooks.exit`
-        // (`templateRef` — the legacy `spec.onExit` name-string can't
-        // cross the one-WT-per-template model). Argo only fires the hook
-        // of the workflow actually submitted (workflow-scoped, proven on
-        // real Argo v4.0.5 via both `argo submit --from` and a
-        // `workflowTemplateRef` Workflow); a templateRef'd sub-workflow's
-        // own hook stays inert when nested — but submit that sub-WT
-        // directly and its own hook fires.
+        // Stamp the `*_if_root` family onto each declaring template's
+        // own `spec` — `on_exit_if_root` becomes `spec.hooks.exit`
+        // (`templateRef`; legacy `spec.onExit` name-string can't cross
+        // the one-WT-per-template wormhole), `ttl_if_root`/
+        // `pod_gc_if_root`/`active_deadline_if_root`/
+        // `node_selector_if_root` land on their matching `spec` fields.
+        // Argo fires/applies them workflow-scoped (only for the
+        // SUBMITTED root), so per-WT stamping is the correct model: a
+        // templateRef'd sub-workflow stays inert when nested but fires
+        // on direct submission. Single source of truth lives in
+        // `stamp_spec` — the runnable Workflow path in `emit` calls the
+        // same method so the two sites can't drift.
         for t in tpls.iter_mut() {
             let name = name_of(t);
-            if let Some(handler) = self.exits.get(&name)
-                && let Some(spec) = t.spec.as_mut()
-            {
-                spec.hooks.insert(
-                    "exit".to_string(),
-                    api::LifecycleHook {
-                        template_ref: Some(api::TemplateRef {
-                            name: handler.to_string(),
-                            template: handler.to_string(),
-                            cluster_scope: false,
-                        }),
-                        ..Default::default()
-                    },
-                );
-            }
-            // `ttl(..)`/`pod_gc(..)` are WorkflowSpec-scoped: stamped on
-            // each declaring template's OWN WorkflowTemplate (Argo runs
-            // GC workflow-scoped, same per-WT model as the exit hook).
-            if let Some(ttl) = self.ttl.get(&name)
-                && let Some(spec) = t.spec.as_mut()
-            {
-                spec.ttl_strategy = Some(ttl.clone());
-            }
-            if let Some(s) = self.pod_gc.get(&name)
-                && let Some(spec) = t.spec.as_mut()
-            {
-                spec.pod_gc = Some(api::PodGc {
-                    strategy: s.clone(),
-                });
-            }
-            // `active_deadline_if_root` is the genuine whole-workflow
-            // runtime cap (Argo applies `Template.timeout` /
-            // `Template.activeDeadlineSeconds` to neither dag nor steps);
-            // root-only, same per-WT plumbing as `ttl`/`pod_gc`.
-            if let Some(s) = self.active_deadline.get(&name)
-                && let Some(spec) = t.spec.as_mut()
-            {
-                spec.active_deadline_seconds = Some(*s);
-            }
-            // `node_selector_if_root` is the only nodeSelector that
-            // lands on every pod in the run regardless of nesting
-            // (Argo's `tmpl → boundary → wfSpec` 3-tier; this hits
-            // wfSpec). Root-only, same per-WT plumbing.
-            if let Some(ns) = self.node_selector_if_root.get(&name)
-                && let Some(spec) = t.spec.as_mut()
-            {
-                for (k, v) in ns {
-                    spec.node_selector.insert(k.clone(), v.clone());
-                }
+            if let Some(spec) = t.spec.as_mut() {
+                self.stamp_spec(&name, spec);
             }
         }
         tpls
+    }
+
+    /// Apply every per-template spec-scoped attribute (`on_exit_if_root`,
+    /// `ttl_if_root`, `pod_gc_if_root`, `active_deadline_if_root`,
+    /// `node_selector_if_root`) for `name` onto `spec`. The single
+    /// source of truth for the `*_if_root` family — called once per
+    /// emitted WT in `build_templates`, and once for the convenience
+    /// runnable Workflow's root in `emit`. Adding a new spec-scoped
+    /// attribute means adding one map field, one populate line in
+    /// `add::<T>()`, and one `if let Some` block here — both
+    /// stamping sites pick it up automatically.
+    fn stamp_spec(&self, name: &str, spec: &mut api::WorkflowSpec) {
+        if let Some(handler) = self.exits.get(name) {
+            spec.hooks
+                .insert("exit".to_string(), exit_hook_ref(handler));
+        }
+        if let Some(ttl) = self.ttl.get(name) {
+            spec.ttl_strategy = Some(ttl.clone());
+        }
+        if let Some(s) = self.pod_gc.get(name) {
+            spec.pod_gc = Some(api::PodGc {
+                strategy: s.clone(),
+            });
+        }
+        if let Some(s) = self.active_deadline.get(name) {
+            spec.active_deadline_seconds = Some(*s);
+        }
+        if let Some(ns) = self.node_selector_if_root.get(name) {
+            for (k, v) in ns {
+                spec.node_selector.insert(k.clone(), v.clone());
+            }
+        }
     }
 
     pub fn emit<E: Template>(&self, with_workflow: bool) -> String {
@@ -1242,6 +1230,21 @@ impl Collector {
         }
 
         let ctx = BuildCtx::collect();
+        // Start from a default + the two fields specific to the runnable
+        // Workflow (`workflowTemplateRef → root`, default SA from
+        // athena.toml), then `stamp_spec` overlays every `*_if_root`
+        // attribute for the root — same path `build_templates` uses
+        // per-WT, so the two stamping sites can never drift when a new
+        // `*_if_root` attribute is added.
+        let mut spec = api::WorkflowSpec {
+            workflow_template_ref: Some(api::WorkflowTemplateRef {
+                name: E::ARGO_NAME.to_string(),
+                cluster_scope: false,
+            }),
+            service_account_name: ctx.config().defaults.service_account.clone(),
+            ..Default::default()
+        };
+        self.stamp_spec(E::ARGO_NAME, &mut spec);
         let wf = api::Workflow {
             api_version: api::API_VERSION.to_string(),
             kind: api::KIND_WORKFLOW.to_string(),
@@ -1249,50 +1252,26 @@ impl Collector {
                 generate_name: format!("{}-", E::ARGO_NAME),
                 ..Default::default()
             }),
-            spec: Some(api::WorkflowSpec {
-                workflow_template_ref: Some(api::WorkflowTemplateRef {
-                    name: E::ARGO_NAME.to_string(),
-                    cluster_scope: false,
-                }),
-                service_account_name: ctx.config().defaults.service_account.clone(),
-                // Only the emit root's on_exit reaches a runnable Workflow,
-                // and it must be `hooks.exit` with a templateRef (the
-                // legacy `spec.onExit` name-string can't cross the
-                // one-WT-per-template wormhole).
-                hooks: E::ON_EXIT
-                    .map(|n| {
-                        let mut m = std::collections::BTreeMap::new();
-                        m.insert(
-                            "exit".to_string(),
-                            api::LifecycleHook {
-                                template_ref: Some(api::TemplateRef {
-                                    name: n.to_string(),
-                                    template: n.to_string(),
-                                    cluster_scope: false,
-                                }),
-                                ..Default::default()
-                            },
-                        );
-                        m
-                    })
-                    .unwrap_or_default(),
-                // Only the emit root's ttl/pod_gc/active_deadline/
-                // node_selector reaches the runnable Workflow (same
-                // workflow-scoped reasoning as the hook).
-                ttl_strategy: E::TTL,
-                active_deadline_seconds: E::ACTIVE_DEADLINE_IF_ROOT,
-                pod_gc: E::POD_GC.map(|s| api::PodGc {
-                    strategy: s.to_string(),
-                }),
-                node_selector: E::NODE_SELECTOR_IF_ROOT
-                    .iter()
-                    .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
-                    .collect(),
-                ..Default::default()
-            }),
+            spec: Some(spec),
         };
         docs.push(serde_norway::to_string(&wf).expect("Workflow is serializable"));
         docs.join("---\n")
+    }
+}
+
+/// A `spec.hooks.exit` `LifecycleHook` referencing the named handler
+/// template. The legacy `spec.onExit: <name>` (a name-string) can't
+/// cross the one-WT-per-template wormhole on real Argo v4.0.5 — only
+/// the structured `templateRef` form survives, hence this single
+/// construction reused by every stamping site.
+fn exit_hook_ref(handler: &str) -> api::LifecycleHook {
+    api::LifecycleHook {
+        template_ref: Some(api::TemplateRef {
+            name: handler.to_string(),
+            template: handler.to_string(),
+            cluster_scope: false,
+        }),
+        ..Default::default()
     }
 }
 
