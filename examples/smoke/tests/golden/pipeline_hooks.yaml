@@ -154,12 +154,12 @@ spec:
       volumeMounts:
       - name: athena-work
         mountPath: /athena
-      - name: host-secrets-token
-        mountPath: /athena/mounts/secrets-token
+      - name: host-4722dbf1d90eb665
+        mountPath: /athena/mounts/4722dbf1d90eb665
     volumes:
     - name: athena-work
       emptyDir: {}
-    - name: host-secrets-token
+    - name: host-4722dbf1d90eb665
       hostPath:
         path: /secrets/token
     serviceAccountName: default

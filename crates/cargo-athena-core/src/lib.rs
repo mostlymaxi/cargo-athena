@@ -1352,20 +1352,38 @@ pub fn kebab(s: &str) -> String {
     s.trim_matches('-').to_string()
 }
 
-/// DNS-1123-ish slug for a host path (alphanumerics kept, others →
-/// `-`; trimmed; empty → `v`). Shared between `volume_name` and
-/// `host_mount_path` so the Volume name and the in-container mount
-/// path agree on the same suffix for a given hostPath.
+/// Hash a `host!` path literal verbatim into a DNS-1123-safe label
+/// suffix. Shared between [`volume_name`] and [`host_mount_path`] so
+/// the Volume name and the in-container mount path always agree on
+/// the same suffix for a given input string.
+///
+/// **No canonicalization** — `host!("/var/lib")` and `host!("//var/lib")`
+/// produce two distinct Volumes (even though Linux resolves them to
+/// the same inode). If the user wrote two distinct literals, they get
+/// two distinct mounts; letting k8s / Linux handle path resolution
+/// keeps our logic simple and removes a category of "did athena
+/// silently merge my mounts?" surprises.
+///
+/// The hash is **FNV-1a 64-bit, fixed initial state**, emitted as 16
+/// lowercase hex chars. Determinism is load-bearing: emit-time
+/// ([`volume_name`]/[`host_mount_path`] called from `Template::build`)
+/// and run-time ([`rt::host_path`]) hash the same literal in two
+/// different process invocations (`cargo athena emit` and the in-pod
+/// binary); `std::hash::DefaultHasher` uses a per-process random seed
+/// and would silently mismatch.
+///
+/// 16 hex chars = 64 bits. `host-` (5) + 16 = 21-char Volume name,
+/// comfortably under DNS-1123's 63-char label limit and collision-
+/// resistant well past any plausible per-binary `host!` count.
 fn munge_host_path(path: &str) -> String {
-    let mut n: String = path
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    n = n.trim_matches('-').to_string();
-    if n.is_empty() {
-        n.push('v');
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+    let mut h = FNV_OFFSET;
+    for b in path.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(FNV_PRIME);
     }
-    n
+    format!("{h:016x}")
 }
 
 fn volume_name(path: &str) -> String {
@@ -1633,21 +1651,62 @@ mod tests {
     // ---- volume_name / host_mount_path (host! → k8s volume) -------------
 
     #[test]
-    fn volume_name_is_dns_safe() {
-        assert_eq!(volume_name("/etc/myapp"), "host-etc-myapp");
-        assert_eq!(volume_name("/var/lib/extra"), "host-var-lib-extra");
+    fn munge_is_deterministic_16_hex() {
+        // The hash MUST be deterministic across calls (and across
+        // process invocations — emit-side and run-side hash the same
+        // literal in two different `cargo athena` / in-pod runs and
+        // must agree). 16 lowercase hex chars; structurally pinned.
+        let m = munge_host_path("/var/lib");
+        assert_eq!(m.len(), 16);
+        assert!(
+            m.chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        );
+        assert_eq!(m, munge_host_path("/var/lib"));
     }
 
     #[test]
-    fn volume_name_handles_path_edges() {
-        // Trailing slash trimmed (no `host-etc-`).
-        assert_eq!(volume_name("/etc/"), "host-etc");
-        // Root → fallback `v` (munge_host_path's empty-string guard).
-        assert_eq!(volume_name("/"), "host-v");
-        // Numeric segments fine (DNS-1123 `[a-z0-9]`).
-        assert_eq!(volume_name("/srv/123/data"), "host-srv-123-data");
-        // Dots / hyphens in the path collapse to `-`.
-        assert_eq!(volume_name("/var/log/app.1"), "host-var-log-app-1");
+    fn munge_known_value_pins_algorithm() {
+        // FNV-1a 64-bit with the standard offset/prime, lowercase hex.
+        // Pinning a known input → known output so an accidental swap to
+        // a different hash function fails LOUD here, not silently in
+        // every user's cluster (emit-side and run-side would suddenly
+        // mismatch). Bump this intentionally only.
+        assert_eq!(munge_host_path("/var/lib"), "5b8d11771a6f946b");
+    }
+
+    #[test]
+    fn distinct_literals_produce_distinct_volumes() {
+        // The whole point of the verbatim-hash design: NO
+        // canonicalization. Two strings that Linux resolves identically
+        // MUST hash to different Volumes — the user wrote two distinct
+        // literals, k8s handles the resolution at mount time.
+        assert_ne!(munge_host_path("/var/lib"), munge_host_path("//var/lib"));
+        assert_ne!(munge_host_path("/var/lib"), munge_host_path("/var/lib/"));
+        assert_ne!(munge_host_path("/var/lib"), munge_host_path("/var//lib"));
+    }
+
+    #[test]
+    fn volume_name_fits_dns_1123() {
+        // k8s Volume names are DNS-1123 LABELS: max 63 chars,
+        // `[a-z0-9]([-a-z0-9]*[a-z0-9])?`. `host-` (5) + 16-hex hash =
+        // 21 chars total, so any input fits regardless of path length.
+        for path in [
+            "/",
+            "/etc/myapp",
+            "/very/deeply/nested/path/that/keeps/going/forever/and/ever/and/ever",
+            "/has spaces and weird chars: !@#$%",
+        ] {
+            let n = volume_name(path);
+            assert!(n.len() <= 63, "{n:?} exceeds DNS-1123 label limit");
+            assert_eq!(n.len(), 21); // host- + 16 hex
+            assert!(n.starts_with("host-"));
+            assert!(n.chars().next().unwrap().is_ascii_alphabetic());
+            assert!(
+                n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
+                "{n:?} contains non-DNS-1123 chars"
+            );
+        }
     }
 
     #[test]
@@ -1661,6 +1720,7 @@ mod tests {
             "/srv/123/data",
             "/var/log/app.1",
             "/",
+            "//double-slash",
         ] {
             let v = volume_name(path);
             let m = host_mount_path(path);
