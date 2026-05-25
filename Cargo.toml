@@ -66,3 +66,7 @@ kube = { version = "0.99", default-features = false, features = ["client", "rust
 # (untyped), so `latest` is fine — the version is immaterial.
 k8s-openapi = { version = "0.24", features = ["latest"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# progress bars / spinners on uploads + downloads. tiny dep, no transitives.
+indicatif = "0.18"
+# stream chunks during S3 multipart upload (bound the bar's `Stream`).
+futures = "0.3"

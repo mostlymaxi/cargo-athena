@@ -16,6 +16,8 @@ use std::process::{Command, Stdio, exit};
 // helpers below (`cargo_run`, `tool_ok`, `package_meta`, …).
 #[path = "../emulate.rs"]
 mod emulate;
+#[path = "../feedback.rs"]
+mod feedback;
 #[path = "../pkg.rs"]
 mod pkg;
 #[path = "../submit.rs"]
@@ -198,9 +200,14 @@ fn main() {
     }
 }
 
+/// `cargo run` invocation for the user binary. NO `--quiet`: cargo's
+/// "Compiling foo..." progress and any compile errors stream to the
+/// user's terminal (stderr) by default. Callers that need to capture
+/// the binary's stdout (the YAML / JSON payload) should explicitly
+/// `.stdout(Stdio::piped())` and let stderr inherit.
 fn cargo_run(package: Option<&str>, bin: Option<&str>) -> Command {
     let mut c = Command::new("cargo");
-    c.args(["run", "--quiet"]);
+    c.arg("run");
     if let Some(p) = package {
         c.args(["--package", p]);
     }
@@ -217,9 +224,11 @@ fn emit(package: Option<&str>, bin: Option<&str>, out: Option<&str>, with_workfl
     if with_workflow {
         cmd.env("CARGO_ATHENA_WITH_WORKFLOW", "1");
     }
+    // stdout = the YAML we want to capture; stderr = cargo's
+    // "Compiling..." progress, streams to the user.
+    cmd.stdout(Stdio::piped()).stderr(Stdio::inherit());
     let o = cmd.output().expect("failed to run user binary");
     if !o.status.success() {
-        eprint!("{}", String::from_utf8_lossy(&o.stderr));
         exit(o.status.code().unwrap_or(1));
     }
     match out {
@@ -227,7 +236,8 @@ fn emit(package: Option<&str>, bin: Option<&str>, out: Option<&str>, with_workfl
             std::fs::write(path, &o.stdout).expect("write --out file");
             eprintln!("wrote {path}");
         }
-        None => print!("{}", String::from_utf8_lossy(&o.stdout)),
+        None => std::io::Write::write_all(&mut std::io::stdout(), &o.stdout)
+            .expect("write stdout"),
     }
 }
 
@@ -330,9 +340,9 @@ fn artifact_s3(cfg: &AthenaConfig, krate: &str, version: &str, bin: &str) -> (S3
 }
 
 fn do_upload(s3: &S3Ref, path: &std::path::Path, dest: &str) {
-    eprintln!("uploading {}  ->  {dest}", path.display());
+    let st = feedback::step(format!("Uploading {} -> {dest}", path.display()));
     emulate::s3_put(s3, path);
-    eprintln!("published.");
+    st.finish();
     // Scriptable: the destination on stdout (all else on stderr).
     println!("s3://{}/{}", s3.bucket, s3.key);
 }
@@ -363,11 +373,6 @@ fn build_tarball(
 
     eprintln!("crate={krate} version={version} bin={bin}");
     eprintln!("targets: {}", targets.join(", "));
-    for t in &targets {
-        eprintln!("  cargo zigbuild --release --target {t} -p {krate} --bin {bin}  ->  app-{t}");
-    }
-    eprintln!("tarball: {tarball}");
-    eprintln!("upload key: {}", s3.key);
     eprintln!("destination: {dest}");
 
     if print {
@@ -382,6 +387,7 @@ fn build_tarball(
     std::fs::create_dir_all(stage).expect("mkdir stage");
 
     for t in &targets {
+        let st = feedback::step(format!("Cross-compiling for {t}"));
         let status = Command::new("cargo")
             .args([
                 "zigbuild",
@@ -396,14 +402,17 @@ fn build_tarball(
             .status()
             .expect("cargo zigbuild failed to start");
         if !status.success() {
-            eprintln!("zigbuild failed for {t}");
+            // Drop without finish so the `✗` line marks the failure.
+            drop(st);
             exit(status.code().unwrap_or(1));
         }
         let from = format!("target/{t}/release/{bin}");
         let to = stage.join(format!("app-{t}"));
         std::fs::copy(&from, &to)
             .unwrap_or_else(|e| panic!("copy {from} -> {}: {e}", to.display()));
+        st.finish();
     }
+    let st = feedback::step(format!("Packaging {tarball}"));
 
     // Pack with pure-Rust `tar`+`flate2` (no host `tar`) under a
     // single top-level `bin/` subdir — see `tarball.rs` for why
@@ -419,9 +428,11 @@ fn build_tarball(
         .map(|(p, n)| (p.as_path(), n.as_str()))
         .collect();
     if let Err(e) = tarball::create(std::path::Path::new(&tarball), &refs) {
+        drop(st);
         eprintln!("tarball create failed: {e}");
         exit(1);
     }
+    st.finish();
     Some((tarball, s3, dest))
 }
 

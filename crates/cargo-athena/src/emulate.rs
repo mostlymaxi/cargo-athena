@@ -19,7 +19,7 @@
 use cargo_athena::{ContainerRunMeta, S3Ref, serde_json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, exit};
+use std::process::{Command, Stdio, exit};
 
 use crate::pkg::PkgSel;
 
@@ -100,11 +100,12 @@ pub fn describe_print(a: DescribeArgs) {
 fn fetch_list(pkg: Option<&str>, bin: Option<&str>) -> Vec<ContainerRunMeta> {
     let mut cmd = crate::cargo_run(pkg, bin);
     cmd.env("CARGO_ATHENA_LIST", "1");
+    // Stream cargo's "Compiling..." progress to the user's terminal.
+    cmd.stderr(Stdio::inherit());
     let out = cmd
         .output()
         .unwrap_or_else(|e| die(&format!("failed to spawn `cargo run`: {e}")));
     if !out.status.success() || out.stdout.is_empty() {
-        eprint!("{}", String::from_utf8_lossy(&out.stderr));
         die("could not list templates (run from your workflow crate, or pass --package/--bin)");
     }
     serde_json::from_slice(&out.stdout)
@@ -211,7 +212,12 @@ pub fn container_emulate(a: EmulateArgs) {
                 )
             });
             let dst = work.join("dist.tar.gz");
+            let st = crate::feedback::step(format!(
+                "Pulling deployed tarball s3://{}/{}",
+                ba.s3.bucket, ba.s3.key
+            ));
             s3_get(&ba.s3, &dst);
+            st.finish();
             dst
         }
     };
@@ -222,6 +228,7 @@ pub fn container_emulate(a: EmulateArgs) {
         // `app-<triple>` at the same paths it would in-pod (zero-drift).
         // Pure-Rust tar+flate2 — no host `tar` dependency.
         let dst = host_of(&ba.path);
+        let st = crate::feedback::step("Extracting tarball");
         crate::tarball::extract_argo_compat(&tarball, &dst).unwrap_or_else(|e| {
             die(&format!(
                 "extract {} into {}: {e}",
@@ -229,15 +236,21 @@ pub fn container_emulate(a: EmulateArgs) {
                 dst.display()
             ))
         });
+        st.finish();
     }
 
     // Input artifact ports ← S3.
-    if !a.skip_artifacts {
+    if !a.skip_artifacts && !meta.input_artifacts.is_empty() {
+        let st = crate::feedback::step(format!(
+            "Pulling {} input artifact(s)",
+            meta.input_artifacts.len()
+        ));
         for art in &meta.input_artifacts {
             let dst = host_of(&art.path);
             mkparent(&dst);
             s3_get(&art.s3, &dst);
         }
+        st.finish();
     }
 
     // docker/podman run — image + the emitted bootstrap verbatim.
@@ -271,18 +284,28 @@ pub fn container_emulate(a: EmulateArgs) {
     c.args(rest);
     c.args(&meta.args);
 
-    eprintln!("→ {runtime} run {} ({})", meta.image, meta.name);
+    eprintln!("→ Running: {runtime} run {} ({})", meta.image, meta.name);
     let status = c
         .status()
         .unwrap_or_else(|e| die(&format!("failed to start {runtime}: {e}")));
 
     // 6. Output artifact ports → S3.
-    if !a.skip_artifacts {
+    if !a.skip_artifacts && !meta.output_artifacts.is_empty() {
+        let mut count = 0;
         for art in &meta.output_artifacts {
             let src = host_of(&art.path);
             if src.exists() {
+                count += 1;
+                let st = crate::feedback::step(format!(
+                    "Uploading output artifact s3://{}/{}",
+                    art.s3.bucket, art.s3.key
+                ));
                 s3_put(&art.s3, &src);
+                st.finish();
             }
+        }
+        if count == 0 {
+            eprintln!("(no output artifacts produced)");
         }
     }
 
@@ -332,6 +355,9 @@ pub(crate) fn describe(
     };
     let mut cmd = crate::cargo_run(package, bin);
     cmd.env("CARGO_ATHENA_DESCRIBE", template);
+    // Stream cargo + binary stderr to the user; capture stdout (the
+    // metadata JSON) ourselves.
+    cmd.stderr(Stdio::inherit());
     let out = cmd
         .output()
         .unwrap_or_else(|e| die(&format!("failed to spawn `cargo run`: {e}\n{}", hint())));
@@ -699,29 +725,98 @@ pub(crate) fn rt() -> tokio::runtime::Runtime {
 pub(crate) fn s3_exists(s3: &S3Ref) -> bool {
     let store = s3_store(s3);
     let key = object_store::path::Path::from(s3.key.as_str());
-    rt().block_on(async { object_store::ObjectStore::head(&store, &key).await })
-        .is_ok()
+    let sp = crate::feedback::spinner(format!("checking s3://{}/{}", s3.bucket, s3.key));
+    let ok = rt()
+        .block_on(async { object_store::ObjectStore::head(&store, &key).await })
+        .is_ok();
+    sp.finish_and_clear();
+    ok
 }
 
-fn s3_get(s3: &S3Ref, dst: &Path) {
+/// Stream the S3 object to `dst` with a byte-progress bar.
+pub(crate) fn s3_get(s3: &S3Ref, dst: &Path) {
+    use futures::StreamExt;
+    use std::io::Write;
+
     let store = s3_store(s3);
     let key = object_store::path::Path::from(s3.key.as_str());
-    let bytes = rt()
-        .block_on(async {
-            let r = object_store::ObjectStore::get(&store, &key).await?;
-            r.bytes().await
-        })
-        .unwrap_or_else(|e| die(&format!("S3 GET {}: {e}", s3.key)));
     mkparent(dst);
-    std::fs::write(dst, &bytes).unwrap_or_else(|e| die(&format!("write {}: {e}", dst.display())));
+
+    rt().block_on(async {
+        let res = object_store::ObjectStore::get(&store, &key)
+            .await
+            .unwrap_or_else(|e| die(&format!("S3 GET {}: {e}", s3.key)));
+        let total = res.meta.size as u64;
+        let bar = crate::feedback::xfer_bar(total, "download");
+        let mut file = std::fs::File::create(dst)
+            .unwrap_or_else(|e| die(&format!("create {}: {e}", dst.display())));
+        let mut stream = res.into_stream();
+        while let Some(chunk) = stream.next().await {
+            let bytes = chunk.unwrap_or_else(|e| die(&format!("S3 GET {}: {e}", s3.key)));
+            file.write_all(&bytes)
+                .unwrap_or_else(|e| die(&format!("write {}: {e}", dst.display())));
+            bar.inc(bytes.len() as u64);
+        }
+        bar.finish_and_clear();
+    });
 }
 
+/// Stream `src` to S3 with a byte-progress bar, using multipart upload
+/// for any file larger than a single part.
 pub(crate) fn s3_put(s3: &S3Ref, src: &Path) {
+    use std::io::Read;
+
+    /// 8 MB parts. S3's multipart minimum is 5 MB except for the final
+    /// part; 8 keeps round trips low while still updating the bar
+    /// often enough to feel live on slow uplinks.
+    const PART: usize = 8 * 1024 * 1024;
+
     let store = s3_store(s3);
     let key = object_store::path::Path::from(s3.key.as_str());
-    let data = std::fs::read(src).unwrap_or_else(|e| die(&format!("read {}: {e}", src.display())));
-    rt().block_on(async { object_store::ObjectStore::put(&store, &key, data.into()).await })
-        .unwrap_or_else(|e| die(&format!("S3 PUT {}: {e}", s3.key)));
+    let meta = std::fs::metadata(src)
+        .unwrap_or_else(|e| die(&format!("stat {}: {e}", src.display())));
+    let total = meta.len();
+    let mut file = std::fs::File::open(src)
+        .unwrap_or_else(|e| die(&format!("open {}: {e}", src.display())));
+
+    rt().block_on(async {
+        // Tiny files: single PUT, still show a (brief) bar.
+        if total as usize <= PART {
+            let mut buf = Vec::with_capacity(total as usize);
+            file.read_to_end(&mut buf)
+                .unwrap_or_else(|e| die(&format!("read {}: {e}", src.display())));
+            let bar = crate::feedback::xfer_bar(total, "upload");
+            object_store::ObjectStore::put(&store, &key, buf.into())
+                .await
+                .unwrap_or_else(|e| die(&format!("S3 PUT {}: {e}", s3.key)));
+            bar.inc(total);
+            bar.finish_and_clear();
+            return;
+        }
+
+        let bar = crate::feedback::xfer_bar(total, "upload");
+        let mut upload = object_store::ObjectStore::put_multipart(&store, &key)
+            .await
+            .unwrap_or_else(|e| die(&format!("S3 start multipart {}: {e}", s3.key)));
+        let mut buf = vec![0u8; PART];
+        loop {
+            let n = file
+                .read(&mut buf)
+                .unwrap_or_else(|e| die(&format!("read {}: {e}", src.display())));
+            if n == 0 {
+                break;
+            }
+            let part: object_store::PutPayload = buf[..n].to_vec().into();
+            object_store::MultipartUpload::put_part(&mut *upload, part)
+                .await
+                .unwrap_or_else(|e| die(&format!("S3 PUT part {}: {e}", s3.key)));
+            bar.inc(n as u64);
+        }
+        object_store::MultipartUpload::complete(&mut *upload)
+            .await
+            .unwrap_or_else(|e| die(&format!("S3 complete {}: {e}", s3.key)));
+        bar.finish_and_clear();
+    });
 }
 
 // ---- --build (local, host-arch musl only) ---------------------------------

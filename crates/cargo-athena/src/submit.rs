@@ -92,10 +92,11 @@ fn from_bin(
 ) -> serde_json::Value {
     let out = crate::cargo_run(pkg, bin)
         .env(env, val)
+        // Stream cargo's compile progress through to the user.
+        .stderr(std::process::Stdio::inherit())
         .output()
         .unwrap_or_else(|e| die(&format!("failed to spawn `cargo run`: {e}")));
     if !out.status.success() || out.stdout.is_empty() {
-        eprint!("{}", String::from_utf8_lossy(&out.stderr));
         die(&format!(
             "could not get {what} from your workflow binary \
              (run from the crate, or pass --package/--bin)"
@@ -394,9 +395,13 @@ pub fn submit(a: SubmitArgs) {
         .unwrap_or_else(|| AthenaConfig::load().defaults.service_account.clone());
 
     let cluster = connect(&a);
-    eprintln!("→ {} (namespace {ns})", cluster.describe());
+    eprintln!("cluster: {} (namespace {ns})", cluster.describe());
 
     // 5. Register / drift-check every reachable WorkflowTemplate.
+    let st = crate::feedback::step(format!(
+        "Checking {} WorkflowTemplate(s) against cluster",
+        wts.len()
+    ));
     let mut to_apply: Vec<(&api::WorkflowTemplate, &str)> = Vec::new();
     for wt in &wts {
         let name = wt.metadata.as_ref().map(|m| m.name.as_str()).unwrap_or("");
@@ -412,6 +417,7 @@ pub fn submit(a: SubmitArgs) {
             }
         }
     }
+    st.finish();
     if !to_apply.is_empty() {
         eprintln!("\nWorkflowTemplates needing apply in `{ns}`:");
         for (wt, why) in &to_apply {
@@ -424,10 +430,11 @@ pub fn submit(a: SubmitArgs) {
         ) {
             die("aborted (templates not applied)");
         }
+        let st = crate::feedback::step(format!("Applying {} template(s)", to_apply.len()));
         for (wt, _) in &to_apply {
             cluster.apply_template(&ns, wt);
         }
-        eprintln!("applied {} template(s).", to_apply.len());
+        st.finish();
     } else {
         eprintln!("all {} template(s) up to date.", wts.len());
     }
@@ -483,11 +490,14 @@ pub fn submit(a: SubmitArgs) {
     ) {
         die("aborted (not submitted)");
     }
+    let st = crate::feedback::step(format!("Creating Workflow `{}`", a.template));
     let name = cluster.submit_workflow(&ns, &wf);
     if name.is_empty() {
+        drop(st);
         die("submit returned no workflow name");
     }
-    eprintln!("submitted ✓  (watch: argo get -n {ns} {name})");
+    st.finish();
+    eprintln!("\nwatch:  argo get -n {ns} {name}");
     // The created name on stdout — scriptable (`W=$(cargo athena submit …)`).
     println!("{name}");
 }

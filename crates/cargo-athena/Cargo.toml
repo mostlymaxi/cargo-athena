@@ -31,6 +31,8 @@ cli = [
     "dep:reqwest",
     "dep:tar",
     "dep:flate2",
+    "dep:indicatif",
+    "dep:futures",
 ]
 # Enable `async fn` bodies on `#[container]` (driven by Tokio). Pulls
 # a minimal `tokio` (workspace features = ["rt", "net", "time"]) and
@@ -51,6 +53,8 @@ k8s-openapi = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
+indicatif = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 
 [dev-dependencies]
 # trybuild builds tests/ui/*.rs as crates that depend on this package, so
