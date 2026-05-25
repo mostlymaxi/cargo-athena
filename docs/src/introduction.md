@@ -3,7 +3,7 @@
 **Write a normal Rust program. Get an Argo Workflow.**
 
 cargo-athena compiles ordinary, annotated Rust into
-[Argo Workflows](https://argoproj.github.io/workflows/) YAML — and ships
+[Argo Workflows](https://argoproj.github.io/workflows/) YAML - and ships
 your compiled binary so every step runs your *real* code.
 
 ```rust,ignore
@@ -49,13 +49,13 @@ spec:
   compiler, not a templating language.
 - **Type-checked data flow.** Passing the wrong type between steps, a
   missing struct field, or consuming a step that returns nothing is a
-  **compile error** — caught long before a cluster ever sees it.
+  **compile error** - caught long before a cluster ever sees it.
 - **Composable.** A workflow is a Rust type. Reference it from another
-  crate to force-link it — workflows compose across modules and crates
+  crate to force-link it - workflows compose across modules and crates
   with no registry or hand-run codegen.
 - **Real Rust in any image.** Your binary is fetched at runtime, so
-  each step runs your Rust *on top of* any image you pick — a vendor's
-  `postgres:16`, a CUDA base, your team's tooling image — with no
+  each step runs your Rust *on top of* any image you pick - a vendor's
+  `postgres:16`, a CUDA base, your team's tooling image - with no
   custom Dockerfile per step. The image just needs `sh` and `uname`.
 
 ## How it fits together
@@ -69,7 +69,7 @@ spec:
 
 Ship and run it in two commands: `cargo athena publish` (cross-compile
 + upload the binary), then `cargo athena submit <workflow>` (registers
-the templates and starts the run) — see the [CLI](cli.md).
+the templates and starts the run) - see the [CLI](cli.md).
 
 Read [Getting Started](getting-started.md) to go hands-on, then
 [Core Concepts](concepts.md) for the mental model. The

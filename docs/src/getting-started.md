@@ -1,6 +1,6 @@
 # Getting Started
 
-From nothing to a running workflow — assuming you have an S3-compatible
+From nothing to a running workflow - assuming you have an S3-compatible
 bucket and a reachable Argo cluster.
 
 ## Install
@@ -25,7 +25,7 @@ and tells you what's missing).
 
 ## A tiny pipeline
 
-Three containers in a chain — data flow becomes the DAG.
+Three containers in a chain - data flow becomes the DAG.
 [Source](https://github.com/mostlymaxi/cargo-athena/blob/main/examples/getting-started/src/main.rs)
 · [Emitted YAML](https://github.com/mostlymaxi/cargo-athena/blob/main/examples/getting-started/emit.yaml)
 
@@ -55,7 +55,7 @@ fn publish(report: String) {
 }
 
 fn main() {
-    cargo_athena::entrypoint::<pipeline>();
+    cargo_athena::entrypoint!(pipeline);
 }
 ```
 
@@ -69,9 +69,6 @@ bucket   = "my-bucket"
 region   = "us-east-1"
 access_key_secret = { name = "my-s3", key = "accessKey" }
 secret_key_secret = { name = "my-s3", key = "secretKey" }
-
-[artifact]
-key = "athena/{crate}/{version}/{bin}.tar.gz"
 
 [bootstrap]
 targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]
@@ -89,7 +86,7 @@ cargo athena submit cargo-athena-example-getting-started-pipeline
 the `WorkflowTemplate`s (y/N on drift), creates the run, and prints its
 name. Credentials come from `AWS_*` env vars or instance-role identity.
 `-y` skips prompts, `--update` re-applies, `--argo-server`/`$ARGO_SERVER`
-selects the REST path — see [the CLI page](cli.md#submit).
+selects the REST path - see [the CLI page](cli.md#submit).
 
 > **GitOps alternative:** `cargo athena emit | kubectl apply -f -`
 > registers the templates; `argo submit --from workflowtemplate/<root>`

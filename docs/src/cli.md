@@ -2,7 +2,7 @@
 
 After `cargo install cargo-athena` you have the `cargo athena`
 subcommand. It drives *your* workflow crate's binary (the one whose
-`main` calls `cargo_athena::entrypoint::<Root>()`) in the right mode.
+`main` calls `cargo_athena::entrypoint!(Root)`) in the right mode.
 
 ```text
 cargo athena [-c F] emit  [--package PKG] [--bin B] [--out F] [--with-workflow]
@@ -26,10 +26,10 @@ the nearest one walking up from the cwd is used (like `Cargo.toml`), or
 
 Relays the multi-document YAML: one `WorkflowTemplate` per reachable
 template, cross-referenced by `templateRef`. The names are **stable and
-deterministic** (`<crate>-<fn>`) — register them and trigger runs with
+deterministic** (`<crate>-<fn>`) - register them and trigger runs with
 `argo submit --from workflowtemplate/<root>`.
 
-The ergonomic path is **`publish` + [`cargo athena submit`](#submit)** —
+The ergonomic path is **`publish` + [`cargo athena submit`](#submit)** -
 `submit` does this `emit` + register **and** starts the run for you.
 Reach for `emit` directly to *inspect* the YAML, or for a GitOps
 `kubectl apply` pipeline.
@@ -43,12 +43,12 @@ cargo athena emit --package my-crate | kubectl apply -f -   # register
 `--with-workflow` also appends a convenience runnable `Workflow`
 (`generateName`, `workflowTemplateRef` → root), so
 `cargo athena emit --with-workflow … | kubectl create -f -` registers
-*and* fires one run — handy for demos. Off by default: a `generateName`
+*and* fires one run - handy for demos. Off by default: a `generateName`
 object isn't idempotent and isn't something you'd GitOps; the
 deterministic templates are.
 
 Needs only an [`athena.toml`](configuration.md) (it bakes the artifact
-source into the YAML) — no cluster, S3, or cross-build. The fast
+source into the YAML) - no cluster, S3, or cross-build. The fast
 iteration loop.
 
 ## `container emulate`
@@ -56,7 +56,7 @@ iteration loop.
 Runs one `#[container]` locally under **docker/podman, exactly as Argo
 would**: the same image, the *same injected bootstrap*, the same
 `ATHENA_PARAM_*` env, the `/athena` scratch dir, `host!` binds, and S3
-artifact ports. Test a single node locally — no Kubernetes, no source
+artifact ports. Test a single node locally - no Kubernetes, no source
 on the node.
 
 ```sh
@@ -71,15 +71,15 @@ Fidelity is by construction: the binary reports its run metadata from
 the *same* `Template::build()` `emit` uses, so there's nothing to keep
 in sync.
 
-- `<name>` (positional) — the full template name (`<crate>-<fn>` kebab,
-  or the `#[container(name = "…")]` override). `cargo athena container
-  ls` lists them. A `#[workflow]` is rejected (it's a DAG, not a pod —
-  emulate its containers individually).
-- `-a name=value` (repeatable, **`--arg`**) / `--input-file F` — the
+- `<name>` (positional) - the full template name (`<crate>-<fn>` kebab,
+  or the `#[container(name = "…")]` override). Run
+  `cargo athena container ls` to list them. A `#[workflow]` is rejected
+  (it's a DAG, not a pod; emulate its containers individually).
+- `-a name=value` (repeatable, **`--arg`**) / `--input-file F` - the
   function arguments. A value is parsed as JSON if it parses (`-a n=4` →
   number), else a string; all are JSON-encoded into the env exactly as
   Argo passes them. Arguments are **type-checked against the fn's real
-  signature before anything launches** — missing, unknown (with
+  signature before anything launches** - missing, unknown (with
   did-you-mean), and wrong scalar/array kinds fail fast.
 - `-p`/`--package`, `--bin` select the cargo target (see
   [package selection](#package-selection)).
@@ -90,7 +90,7 @@ in sync.
 - `--runtime docker|podman` (default: autodetect, prefer docker);
   `--skip-artifacts` to bypass S3 `load/save_artifact!` sync.
 
-**Limitations — this runs the container *body* faithfully, not the
+**Limitations - this runs the container *body* faithfully, not the
 pod's Kubernetes context.** `docker run` has no notion of a
 `ServiceAccount`, so `#[container(service_account=…)]` and any
 podSpec-level concerns (RBAC, `nodeSelector`, podSpecPatch) are **not**
@@ -98,7 +98,7 @@ emulated. For those, exercise the real Argo path (`emit` + submit).
 
 ## `container describe`
 
-Prints, as JSON, the exact runner metadata one template reports — its
+Prints, as JSON, the exact runner metadata one template reports - its
 image, parameters **and their Rust types**, the binary/`host!`/artifact
 S3 ports, and the scratch + result paths. It's *the same* metadata
 `emulate` consumes (derived from the same `Template::build()` as
@@ -111,8 +111,8 @@ cargo athena container describe my-crate-transform
 
 ## `container ls`
 
-Lists the templates your workflow binary reports — full name, kind, and
-typed args — so they're discoverable for `emulate`/`describe` (no
+Lists the templates your workflow binary reports - full name, kind, and
+typed args - so they're discoverable for `emulate`/`describe` (no
 guessing the `<crate>-<fn>` name):
 
 ```sh
@@ -141,7 +141,7 @@ cargo athena workflow ls --include-synthetic  # + the if/else machinery
 ## `workflow describe`
 
 Same metadata dump as [`container describe`](#container-describe), for
-any template — handy on a `#[workflow]` to see its resolved inputs:
+any template - handy on a `#[workflow]` to see its resolved inputs:
 
 ```sh
 cargo athena workflow describe my-crate-pipeline
@@ -149,11 +149,11 @@ cargo athena workflow describe my-crate-pipeline
 
 ## `submit`
 
-Run a `#[workflow]` (or a single `#[container]`) on a real cluster —
+Run a `#[workflow]` (or a single `#[container]`) on a real cluster -
 `argo submit --from workflowtemplate/<name>` with the safety rails you'd
 otherwise do by hand. Paired with **`publish`** this is the recommended
 deploy+run flow: `publish` ships the binary, `submit` registers the
-templates and starts the run — no hand-run `emit`/`kubectl apply`:
+templates and starts the run - no hand-run `emit`/`kubectl apply`:
 
 ```sh
 cargo athena submit my-crate-pipeline -a seed=hello
@@ -168,7 +168,7 @@ Before anything is created it:
    `--skip-binary-check` to bypass);
 3. **registers + drift-checks** every reachable `WorkflowTemplate`:
    missing ones are *created*, ones that differ from `emit` are
-   *updated* — after a **y/N prompt** (the change list is shown;
+   *updated* - after a **y/N prompt** (the change list is shown;
    `--update` re-applies all, `-y/--yes` skips every prompt);
 4. creates the `Workflow` (a second **y/N**), then prints its **name to
    stdout** (everything else is on stderr, so `W=$(… -y)` works).
@@ -178,13 +178,13 @@ set it uses the **Argo Server REST API** (`$ARGO_TOKEN` for auth,
 `--insecure-skip-tls-verify` if needed); otherwise it creates the CR
 through the **Kubernetes API** via your kubeconfig / in-cluster config
 (client-certs, tokens, and EKS/GKE/AKS exec-credential plugins all work
-— it's `kube-rs`).
+- it's `kube-rs`).
 
 Overrides: `-n/--namespace` (`$ARGO_NAMESPACE` →
 [`[defaults].namespace`](configuration.md) → `default`),
 `--service-account` (→ `[defaults].service_account`), and
 `--node-selector k=v` (repeatable; set root-scoped on the submitted
-Workflow — Argo applies it to every pod).
+Workflow - Argo applies it to every pod).
 
 ## `build`
 
@@ -207,7 +207,7 @@ cargo athena build --package my-crate --print   # dry run: just resolve + print 
 
 The one-shot **build + upload**: cross-compiles + packages (exactly
 like `build`) and then uploads the tarball to
-[`athena.toml`](configuration.md)'s artifact repository — the same key
+[`athena.toml`](configuration.md)'s artifact repository - the same key
 `emit` resolves, so it lands where the injected bootstrap fetches it:
 
 ```sh
@@ -218,17 +218,17 @@ cargo athena publish --package my-crate   # cross-compile + package + upload
   `--print` is a dry run (resolve + print the key, no build/upload).
   Use plain `build` when you want the tarball locally *without*
   uploading (CI artifact, inspection).
-- `--tarball F` uploads `F` verbatim and **skips the build** —
+- `--tarball F` uploads `F` verbatim and **skips the build** -
   build-once / upload-many (reuse one CI-built artifact; the kind e2e
   uses this).
 - S3 credentials: the standard `AWS_ACCESS_KEY_ID` /
   `AWS_SECRET_ACCESS_KEY` (/ `AWS_SESSION_TOKEN`) env vars, else the
   ambient cloud identity (EC2 IMDS / ECS task role / IRSA web-identity)
-  — the same `object_store` path `submit`/`emulate` use. The shared
+  - the same `object_store` path `submit`/`emulate` use. The shared
   `~/.aws/credentials` file and `AWS_PROFILE` are **not** read
   (`object_store` is not the AWS SDK).
 - `AWS_ENDPOINT_URL` (AWS-SDK standard; `AWS_ENDPOINT_URL_S3` too)
-  overrides the `athena.toml` endpoint **for this upload only** — for
+  overrides the `athena.toml` endpoint **for this upload only** - for
   when S3 is reached differently here than from the pods (a
   port-forward, or a public vs in-cluster host). It does *not* change
   what `emit` bakes into the templates.
@@ -236,8 +236,8 @@ cargo athena publish --package my-crate   # cross-compile + package + upload
   (scriptable); progress on stderr.
 
 `emit` injects that tarball plus a tiny `sh` bootstrap into every
-container template, so one artifact serves every step on any node
-architecture.
+container template, so the same upload serves every step on any
+node architecture.
 
 ## Package selection
 
@@ -246,21 +246,21 @@ order:
 
 1. **`-p`/`--package` and `--bin`** flags (same meaning as for `cargo`
    itself);
-2. else **`[defaults]` in `athena.toml`** — `package = "…"` /
+2. else **`[defaults]` in `athena.toml`** - `package = "…"` /
    `bin = "…"` (set them once instead of repeating the flags, like a
    project default);
 3. else cargo's single-package / default-bin autodetect.
 
 So in a configured workspace `cargo athena container ls` and
 `cargo athena container emulate my-crate-fetch -a url=…` just work with
-no target flags. (`-p` is **package** here — function arguments to
+no target flags. (`-p` is **package** here - function arguments to
 `emulate` are `-a`/`--arg`.)
 
 This precedence (and the `-p` short flag) is for
 `container`/`workflow`/`submit`. `emit`/`build`/`publish` take
-`--package`/`--bin` explicitly — no `-p`, no `[defaults]` fallback
+`--package`/`--bin` explicitly - no `-p`, no `[defaults]` fallback
 (pass them, or rely on cargo's single-package autodetect).
 
 > Working in this repo instead of an installed binary? Any
-> `cargo athena <cmd>` above is `cargo run -p cargo-athena --bin
-> cargo-athena -- athena <cmd>`.
+> `cargo athena <cmd>` above becomes
+> `cargo run -p cargo-athena --bin cargo-athena -- athena <cmd>`.
