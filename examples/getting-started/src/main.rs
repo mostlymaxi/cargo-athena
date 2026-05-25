@@ -27,5 +27,5 @@ fn publish(report: String) {
 }
 
 fn main() {
-    cargo_athena::entrypoint::<pipeline>();
+    cargo_athena::entrypoint!(pipeline);
 }

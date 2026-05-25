@@ -3,5 +3,5 @@
 //! workflow-level annotations on the dag template.
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline_pod_attrs>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline_pod_attrs);
 }

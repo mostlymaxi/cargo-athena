@@ -5,5 +5,5 @@
 //! `workflow.parameters['env']`).
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline_mutex>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline_mutex);
 }

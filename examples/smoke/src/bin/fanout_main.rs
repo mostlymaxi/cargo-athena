@@ -3,5 +3,5 @@
 //! `Vec<U>` consumed downstream.
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline_fanout>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline_fanout);
 }

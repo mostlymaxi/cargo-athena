@@ -3,5 +3,5 @@
 //! that hook templates are force-linked + emitted via the wormhole.
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline_hooks>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline_hooks);
 }

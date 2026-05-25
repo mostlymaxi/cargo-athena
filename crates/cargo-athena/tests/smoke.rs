@@ -3,7 +3,7 @@
 //! the home for "does the compiler lower things right" coverage (it
 //! supersedes the old `examples/basic` inline tests and adds more).
 
-use cargo_athena::{Collector, Template, container, fragment, workflow};
+use cargo_athena::{BuildCtx, Collector, Template, container, fragment, workflow};
 
 // --- a representative graph ------------------------------------------------
 
@@ -54,7 +54,12 @@ fn emit<T: Template>() -> String {
     let mut c = Collector::new();
     <T as Template>::collect(&mut c);
     // These assertions cover the runnable Workflow too, so emit it.
-    c.emit::<T>(true)
+    let ctx = BuildCtx::collect(
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        env!("CARGO_PKG_NAME"),
+    );
+    c.emit::<T>(&ctx, true)
 }
 
 #[test]

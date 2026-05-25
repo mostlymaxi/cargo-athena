@@ -21,7 +21,7 @@
 //! }
 //!
 //! // entrypoint is a *type*; referencing it force-links the closure.
-//! fn main() { cargo_athena::entrypoint::<run_foo>(); }
+//! fn main() { cargo_athena::entrypoint!(run_foo); }
 //! ```
 
 // Runtime: modes, registration, BuildCtx, YAML emit, `host!`, re-exported
@@ -43,6 +43,23 @@ pub use cargo_athena_core::{
 
 // Attribute macros.
 pub use cargo_athena_macros::{container, fragment, workflow};
+
+/// User-facing entrypoint. Captures the calling binary's identity
+/// (`CARGO_PKG_NAME`/`CARGO_PKG_VERSION`/`CARGO_BIN_NAME`) at the user
+/// binary's compile time and threads it into [`entrypoint_impl`] so the
+/// emitted S3 artifact key (`{crate}/{version}/{bin}.tar.gz`) matches
+/// what `cargo athena publish` uploads. Use as
+/// `cargo_athena::entrypoint!(MyRootWorkflow)`.
+#[macro_export]
+macro_rules! entrypoint {
+    ($root:ty) => {
+        $crate::entrypoint_impl::<$root>(
+            ::core::env!("CARGO_PKG_NAME"),
+            ::core::env!("CARGO_PKG_VERSION"),
+            ::core::env!("CARGO_BIN_NAME"),
+        )
+    };
+}
 
 // `async fn` `#[container]` support, driven by Tokio. The macro
 // detects `async fn` and wraps the body's call in `__async::block_on`,

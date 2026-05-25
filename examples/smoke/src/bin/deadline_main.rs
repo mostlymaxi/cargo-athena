@@ -4,5 +4,5 @@
 //! `#[…(active_deadline_if_root = …)]` (int-seconds + humantime forms).
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline_deadline>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline_deadline);
 }

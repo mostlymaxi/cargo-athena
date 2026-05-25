@@ -329,7 +329,7 @@ pub fn container_emulate(a: EmulateArgs) {
 /// Spawn the user binary in describe-mode and parse its metadata.
 ///
 /// The binary is *your workflow crate's* (the one whose `main` calls
-/// `cargo_athena::entrypoint::<Root>()`). Run from that crate, or pass
+/// `cargo_athena::entrypoint!(Root)`). Run from that crate, or pass
 /// `--package`/`--bin`. A common gotcha: running inside the
 /// `cargo-athena` crate itself makes `cargo run` build the CLI, not a
 /// workflow — hence the explicit guidance below instead of dumping its
@@ -349,7 +349,7 @@ pub(crate) fn describe(
         format!(
             "could not get container metadata from your workflow binary ({where_}).\n\
              \x20 - run this from your workflow crate, or pass --package/--bin;\n\
-             \x20 - its `main` must call `cargo_athena::entrypoint::<Root>()`;\n\
+             \x20 - its `main` must call `cargo_athena::entrypoint!(Root)`;\n\
              \x20 - {template:?} must be a template reachable from that root \
              (`<crate>-<fn>` kebab, or the #[container(name=…)] override)."
         )

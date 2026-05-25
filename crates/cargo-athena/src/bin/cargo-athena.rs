@@ -4,7 +4,7 @@
 //! you the `cargo athena` subcommand.
 //!
 //! The entrypoint is fixed in the user binary's `main`
-//! (`cargo_athena::entrypoint::<Root>()`); the artifact repository +
+//! (`cargo_athena::entrypoint!(Root)`); the artifact repository +
 //! target matrix come from `athena.toml`.
 
 use cargo_athena::{AthenaConfig, S3Ref, serde_json};
@@ -253,13 +253,6 @@ fn package_meta(pkg: Option<&str>) -> (String, String, String) {
     (name.clone(), version, name)
 }
 
-fn render_key(template: &str, krate: &str, version: &str, bin: &str) -> String {
-    template
-        .replace("{crate}", krate)
-        .replace("{version}", version)
-        .replace("{bin}", bin)
-}
-
 /// `cmd args…` exits 0 (tool is present + runnable).
 fn tool_ok(cmd: &str, args: &[&str]) -> bool {
     Command::new(cmd)
@@ -311,12 +304,16 @@ fn build(package: Option<&str>, bin: Option<&str>, cli_targets: &[String], print
     }
 }
 
-/// The artifact's S3 location: the exact key `emit` resolves from
-/// `athena.toml` (so an upload lands where the injected bootstrap reads
-/// it) + a human `dest` string. `AWS_ENDPOINT_URL` can override the
-/// endpoint at upload time without changing what `emit` injects.
+/// The artifact's S3 location (the exact key `emit` injects into every
+/// container, so the upload lands where the in-pod bootstrap reads it)
+/// plus a human-readable `dest` string. The key is hardcoded as
+/// `{crate}/{version}/{bin}.tar.gz`, the same form `BuildCtx::collect`
+/// builds in-binary, so the two sites can never drift.
+///
+/// `AWS_ENDPOINT_URL` can override the endpoint at upload time without
+/// changing what `emit` injects.
 fn artifact_s3(cfg: &AthenaConfig, krate: &str, version: &str, bin: &str) -> (S3Ref, String) {
-    let key = render_key(&cfg.artifact.key, krate, version, bin);
+    let key = format!("{krate}/{version}/{bin}.tar.gz");
     let repo = &cfg.artifact_repository.s3;
     // Same field mapping core uses to emit the binary artifact.
     let s3 = S3Ref {

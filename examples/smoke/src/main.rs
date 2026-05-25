@@ -4,5 +4,5 @@
 //!   CARGO_ATHENA_TEMPLATE=<name> ... --bin smoke          # run one container
 
 fn main() {
-    cargo_athena::entrypoint::<cargo_athena_example_smoke::pipeline>();
+    cargo_athena::entrypoint!(cargo_athena_example_smoke::pipeline);
 }

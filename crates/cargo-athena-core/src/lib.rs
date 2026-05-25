@@ -9,7 +9,8 @@
 //!
 //! Two worlds share one binary:
 //!
-//! * **Emit** — `main` calls [`entrypoint::<E>()`]; we walk the closure
+//! * **Emit**: `main` calls `cargo_athena::entrypoint!(E)` (which calls
+//!   [`entrypoint_impl::<E>()`]); we walk the closure
 //!   from `E` and print one Argo `WorkflowTemplate` document per template
 //!   (cross-refs via `templateRef`) plus a runnable `Workflow` for `E`.
 //! * **Run** — Argo invokes the binary with `--cargo-athena-template <name>`;
@@ -433,7 +434,6 @@ pub trait Template {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct AthenaConfig {
     pub artifact_repository: ArtifactRepository,
-    pub artifact: ArtifactSpec,
     #[serde(default)]
     pub bootstrap: Bootstrap,
     #[serde(default)]
@@ -502,14 +502,6 @@ pub struct S3Repo {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct SecretRef {
     pub name: String,
-    pub key: String,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct ArtifactSpec {
-    /// Object key of the per-binary tarball (holds `app-<triple>` for every
-    /// `bootstrap.targets`). `cargo athena build` fills any
-    /// `{crate}`/`{version}`/`{bin}` placeholders before publish.
     pub key: String,
 }
 
@@ -831,7 +823,7 @@ pub fn container_delivery(
     let artifact = api::Artifact {
         name: "athena-dist".to_string(),
         path: ATHENA_BIN_DIR.to_string(),
-        s3: Some(s3_loc(s3, &cfg.artifact.key)),
+        s3: Some(s3_loc(s3, ctx.artifact_key())),
         archive: None,
         mode: None,
     };
@@ -863,12 +855,21 @@ inventory::collect!(FragmentReg);
 pub struct BuildCtx {
     fragments: HashMap<&'static str, &'static FragmentReg>,
     config: AthenaConfig,
+    /// Fully-resolved S3 object key for this binary's tarball
+    /// (`{crate}/{version}/{bin}.tar.gz`). Built once by
+    /// [`entrypoint_impl`] from the user binary's own
+    /// `CARGO_PKG_*` / `CARGO_BIN_NAME` env
+    /// vars (captured at the bin's compile time by the `entrypoint!`
+    /// macro). `cargo athena publish` derives the same key from
+    /// `cargo metadata`, so the upload and the emitted YAML always
+    /// agree by construction.
+    artifact_key: String,
 }
 
 impl BuildCtx {
     /// Emit-only: gathers fragments AND loads `athena.toml`. Never called
     /// in run-mode, so the in-pod binary needs no `athena.toml`.
-    pub fn collect() -> Self {
+    pub fn collect(krate: &str, version: &str, bin: &str) -> Self {
         let mut fragments = HashMap::new();
         for f in inventory::iter::<FragmentReg> {
             fragments.insert(f.rust_name, f);
@@ -876,11 +877,18 @@ impl BuildCtx {
         Self {
             fragments,
             config: AthenaConfig::load(),
+            artifact_key: format!("{krate}/{version}/{bin}.tar.gz"),
         }
     }
 
     pub fn config(&self) -> &AthenaConfig {
         &self.config
+    }
+
+    /// The S3 object key of this binary's tarball, hardcoded as
+    /// `{crate}/{version}/{bin}.tar.gz`.
+    pub fn artifact_key(&self) -> &str {
+        &self.artifact_key
     }
 
     /// Own literal decls ∪ the transitive `#[fragment]` closure for one
@@ -1182,13 +1190,12 @@ impl Collector {
     /// hook stamped on its own template. Shared by YAML emit and the
     /// `CARGO_ATHENA_EMIT_JSON` mode `cargo athena submit` consumes for
     /// its register/drift checks.
-    pub fn build_templates(&self) -> Vec<api::WorkflowTemplate> {
-        let ctx = BuildCtx::collect();
+    pub fn build_templates(&self, ctx: &BuildCtx) -> Vec<api::WorkflowTemplate> {
         let mut tpls: Vec<api::WorkflowTemplate> = self
             .builders
             .iter()
             .map(|b| {
-                let inner = b(&ctx);
+                let inner = b(ctx);
                 wrap_workflow_template(inner.name.clone(), inner)
             })
             .collect();
@@ -1258,8 +1265,8 @@ impl Collector {
         }
     }
 
-    pub fn emit<E: Template>(&self, with_workflow: bool) -> String {
-        let tpls = self.build_templates();
+    pub fn emit<E: Template>(&self, ctx: &BuildCtx, with_workflow: bool) -> String {
+        let tpls = self.build_templates(ctx);
         let mut docs: Vec<String> = tpls
             .iter()
             .map(|t| serde_norway::to_string(t).expect("WorkflowTemplate is serializable"))
@@ -1269,7 +1276,6 @@ impl Collector {
             return docs.join("---\n");
         }
 
-        let ctx = BuildCtx::collect();
         // Start from a default + the two fields specific to the runnable
         // Workflow (`workflowTemplateRef → root`, default SA from
         // athena.toml), then `stamp_spec` overlays every `*_if_root`
@@ -1495,7 +1501,16 @@ pub fn container_volumes(
 /// The entrypoint a user's `main` calls, parameterised by the root
 /// workflow type. Referencing `E` force-links the entire reachable
 /// closure (each `collect` calls callees' `collect` directly).
-pub fn entrypoint<E: Template>() {
+///
+/// `krate`/`version`/`bin` identify the *current binary* and are baked
+/// into every emitted container's S3 artifact key
+/// (`{krate}/{version}/{bin}.tar.gz`). They're captured at the user
+/// binary's compile time by the `entrypoint!` macro (the facade
+/// crate) from `CARGO_PKG_NAME`/`CARGO_PKG_VERSION`/`CARGO_BIN_NAME`,
+/// so `cargo athena publish` (which derives the same key from
+/// `cargo metadata` + `--bin`) and the emitted YAML always agree by
+/// construction, with no `[artifact]` config field needed.
+pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
     let mut collector = Collector::new();
     E::collect(&mut collector);
 
@@ -1541,7 +1556,7 @@ pub fn entrypoint<E: Template>() {
     // template's metadata as a JSON array (same per-template derivation
     // as describe — so names/params shown are exactly what runs).
     if std::env::var_os("CARGO_ATHENA_LIST").is_some() {
-        let ctx = BuildCtx::collect();
+        let ctx = BuildCtx::collect(krate, version, bin);
         let all: Vec<ContainerRunMeta> = collector
             .builders
             .iter()
@@ -1566,7 +1581,7 @@ pub fn entrypoint<E: Template>() {
     // makes the local run identical to Argo by construction — same
     // image, bootstrap, env, volumes, and artifacts as `emit`.
     if let Ok(name) = std::env::var("CARGO_ATHENA_DESCRIBE") {
-        let ctx = BuildCtx::collect();
+        let ctx = BuildCtx::collect(krate, version, bin);
         let tpl = collector
             .builders
             .iter()
@@ -1588,9 +1603,10 @@ pub fn entrypoint<E: Template>() {
     // register-if-missing / drift-detect / apply checks), instead of
     // re-parsing the YAML `emit` prints.
     if std::env::var_os("CARGO_ATHENA_EMIT_JSON").is_some() {
+        let ctx = BuildCtx::collect(krate, version, bin);
         println!(
             "{}",
-            serde_json::to_string(&collector.build_templates())
+            serde_json::to_string(&collector.build_templates(&ctx))
                 .expect("WorkflowTemplate is serializable")
         );
         return;
@@ -1600,7 +1616,8 @@ pub fn entrypoint<E: Template>() {
     // convenience runnable Workflow is appended (default: templates
     // only — deterministic, `kubectl apply`-able, GitOps-clean).
     let with_workflow = std::env::var_os("CARGO_ATHENA_WITH_WORKFLOW").is_some_and(|v| v == "1");
-    print!("{}", collector.emit::<E>(with_workflow));
+    let ctx = BuildCtx::collect(krate, version, bin);
+    print!("{}", collector.emit::<E>(&ctx, with_workflow));
 }
 
 #[cfg(test)]
