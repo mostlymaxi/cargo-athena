@@ -309,23 +309,38 @@ pub fn pipeline_inject() {
     tag_meta(m);
 }
 
-// --- #[workflow] node_selector (literal-only, cascades to task pods) --------
+// --- #[workflow] boundary_node_selector + node_selector_if_root ------------
 
-/// `#[workflow(node_selector = { ... })]` — unlike `#[container]`, keys
-/// **and values** are *literal strings only* (no `"lit" + arg`
-/// injection). A workflow is a DAG, not a pod: athena sets the selector
-/// on this dag template and the Argo controller cascades it onto every
-/// task pod it `templateRef`s. A template-scoped
+/// Workflow-level node-selector attrs, literal-only (no `"lit" + arg`
+/// injection — a workflow has no args to inject from). Two distinct
+/// knobs because Argo's pod nodeSelector lookup is 3-tier
+/// (`tmpl → boundary → wfSpec`):
+///
+/// * `boundary_node_selector` lands on this dag/steps's
+///   `Template.NodeSelector`. Argo uses it as the **boundary** value
+///   for pods whose IMMEDIATE enclosing dag/steps is this template —
+///   does NOT cascade through nested sub-workflows.
+/// * `node_selector_if_root` lands on this WT's
+///   `WorkflowSpec.NodeSelector`. Root-only (only applies when this
+///   WT is the submitted workflow; same family as `ttl_if_root`/
+///   `pod_gc_if_root`/`active_deadline_if_root`). Becomes the default
+///   for every pod that doesn't have its own template- or
+///   boundary-level override.
+///
+/// A template-scoped
 /// `{{=fromJSON(inputs.parameters…)}}` would be cascaded *raw* (k8s
 /// rejects the literal), so the only dynamic form is the eyes-open
 /// escape hatch below: a raw `{{workflow.parameters.region}}` literal —
 /// **always** the submitted root workflow's params, never this
 /// template's inputs when it's a sub-`templateRef` (proven on real Argo
 /// v4.0.5).
-#[workflow(node_selector = {
-    "kubernetes.io/arch" = "amd64",
-    "topology.kubernetes.io/region" = "{{workflow.parameters.region}}",
-})]
+#[workflow(
+    boundary_node_selector = {
+        "kubernetes.io/arch" = "amd64",
+        "topology.kubernetes.io/region" = "{{workflow.parameters.region}}",
+    },
+    node_selector_if_root = { "tier" = "platform" },
+)]
 pub fn pipeline_ns() {
     let raw = fetch("https://example.com".to_string());
     transform(raw, 3);

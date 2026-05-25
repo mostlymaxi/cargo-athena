@@ -294,11 +294,13 @@ pub fn cleanup() {
     println!("cleanup ran");
 }
 
-/// The whole feature matrix in one DAG. `node_selector` cascades onto
-/// every task pod; `on_exit_if_root` fires `cleanup` once at the end
-/// (only because *this* is the submitted root).
+/// The whole feature matrix in one DAG. `node_selector_if_root` lands
+/// on every pod in the run (via WorkflowSpec.NodeSelector — the only
+/// nodeSelector tier that reaches nested sub-workflows' pods);
+/// `on_exit_if_root` fires `cleanup` once at the end (only because
+/// *this* is the submitted root).
 #[workflow(
-    node_selector = { "kubernetes.io/arch" = "amd64" },
+    node_selector_if_root = { "kubernetes.io/arch" = "amd64" },
     on_exit_if_root = cleanup,
 )]
 pub fn pipeline() {
@@ -367,12 +369,11 @@ pub fn pipeline() {
 /// macro-only/golden-only steps coverage regressing on a real cluster.
 /// Reuses existing containers; nothing new needed in-pod.
 ///
-/// `node_selector` is re-stated here so its sub-pods carry the same
-/// selector when this template is `templateRef`'d under `pipeline`
-/// (Argo's parent→child nodeSelector cascade is single-hop; the e2e
-/// script's pod-selector assertion picks an arbitrary pod via
-/// `.items[0]`, so every pod in the run needs the label).
-#[workflow(steps, node_selector = { "kubernetes.io/arch" = "amd64" })]
+/// Pipeline declares `node_selector_if_root` (WorkflowSpec.NodeSelector,
+/// root-only) — that's Argo's only nodeSelector tier that lands on
+/// every pod in the run regardless of nesting. So this sub-workflow's
+/// pods inherit it from wfSpec without any re-declaration here.
+#[workflow(steps)]
 pub fn pipeline_steps() {
     let s = stamp();
     let r = echo(s);

@@ -1,5 +1,5 @@
 error: expected string literal
- --> tests/ui/wf_node_selector_not_literal.rs:6:57
+ --> tests/ui/wf_node_selector_not_literal.rs:6:66
   |
-6 | #[cargo_athena::workflow(node_selector = { "disktype" = profile })]
-  |                                                         ^^^^^^^
+6 | #[cargo_athena::workflow(boundary_node_selector = { "disktype" = profile })]
+  |                                                                  ^^^^^^^
