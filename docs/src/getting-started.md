@@ -82,11 +82,16 @@ cargo athena publish                                 # cross-compile + upload th
 cargo athena submit cargo-athena-example-getting-started-pipeline
 ```
 
-`submit` type-checks args, confirms the binary is uploaded, registers
-the `WorkflowTemplate`s (y/N on drift), creates the run, and prints its
-name. Credentials come from `AWS_*` env vars or instance-role identity.
-`-y` skips prompts, `--update` re-applies, `--argo-server`/`$ARGO_SERVER`
-selects the REST path - see [the CLI page](cli.md#submit).
+`submit` does the safe-deploy steps for you:
+
+1. type-checks the arguments against the function signature,
+2. confirms the binary is uploaded,
+3. registers every WorkflowTemplate (asking y/N if any drifted),
+4. creates the run and prints its name.
+
+S3 credentials come from the standard AWS env vars or instance-role
+identity. See [the CLI page](cli.md#submit) for the `-y`, `--update`,
+and `--argo-server` flags.
 
 > **GitOps alternative:** `cargo athena emit | kubectl apply -f -`
 > registers the templates; `argo submit --from workflowtemplate/<root>`

@@ -52,7 +52,7 @@ side. The two paths agree by construction.
 | Key | Meaning |
 |---|---|
 | `targets` | The static-musl target triples to cross-compile. Each becomes `app-<triple>` in the tarball; in-pod the bootstrap picks the one matching `uname`. |
-| `default_image` | (optional) Image for `#[container]`s with no explicit `image`. Needs only POSIX `sh` and `uname` (distroless works). |
+| `default_image` | (optional) Default image when a `#[container]` doesn't set its own `image`. Needs only POSIX `sh` and `uname` (distroless works). |
 
 ## `[defaults]`
 

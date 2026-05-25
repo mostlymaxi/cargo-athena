@@ -31,61 +31,20 @@ return, or calling a `#[fragment]` / regular function from a
 
 All are optional.
 
-**`name = "my-name"`**: override the Argo template name. Default
-`<crate>-<fn>` (kebab).
-
-**`steps`**: emit an Argo `steps:` (sequential) template instead of
-the default data-dependency `dag:`.
-
-**`boundary_node_selector = { "k" = "v" }`**: a `nodeSelector`
-constraint that applies only to pods whose immediate enclosing
-dag/steps is this template; it does NOT cascade through nested
-sub-workflows. Literal keys *and* values. For a default that covers
-every pod in the run, use `node_selector_if_root` instead. See
-[Node selector](#node-selector).
-
-**`node_selector_if_root = { "k" = "v", "k2" = "lit" + arg }`**: a
-default `nodeSelector` for every pod in the submitted run that
-doesn't have a tighter override. **Root-only**: inert when this WT
-is referenced as a sub-workflow. Literal keys; values support
-`"lit" + arg` / `"lit" + arg.field` injection of the workflow's own
-arguments.
-
-**`annotations = { "k" = "v" }`**: template-level annotations on the
-dag/steps template. Literal keys *and* values.
-
-**`on_exit_if_root = t`**: whole-workflow exit handler that fires
-only when *this* template is the workflow you submit. Distinct from
-the per-task `.on_exit(t)` builder.
-
-**`retry(limit = N | unlimited, policy = "…", backoff = <dur>)`**:
-template-level Argo `retryStrategy`. `limit` is required (`unlimited`
-means no cap); `policy` is one of `Always`, `OnFailure`, `OnError`,
-`OnTransientError`; `backoff` is an int (seconds) or a
-[humantime](https://docs.rs/humantime) string.
-
-**`ttl_if_root(after_completion = <s>, after_success = <s>, after_failure = <s>)`**:
-GC the finished Workflow after the given duration. At least one of
-the three is required (int seconds or humantime). **Root-only.**
-
-**`pod_gc_if_root(strategy = "<S>")`**: pod garbage collection.
-`strategy` is one of `OnPodCompletion`, `OnPodSuccess`,
-`OnWorkflowCompletion`, `OnWorkflowSuccess`. **Root-only.**
-
-**`active_deadline_if_root = <secs | "2h">`**: the whole-workflow
-runtime cap. The only timeout that works on a `#[workflow]`.
-**Root-only.** See [Timeouts](#timeouts).
-
-**`mutexes = [{ name = "...", namespace = "..." }, …]`**: serialize
-this template against other holders of the same mutex name (within
-one run AND across separate Workflow runs). Both `name` and
-`namespace` accept the same `"lit" + arg + arg.field` injection as
-`image` / `env`. See [Mutexes](#mutexes).
-
-**`mutexes_if_root = [{ name = "...", namespace = "..." }, …]`**:
-serialize the whole submitted run against other runs holding the
-same mutex. **Root-only**, inert when this WT is referenced as a
-sub-workflow.
+| Arg | Effect |
+|---|---|
+| `name = "my-name"` | Override the Argo template name. Default `<crate>-<fn>` (kebab). |
+| `steps` | Emit an Argo `steps:` (sequential) template instead of the default data-dependency `dag:`. |
+| `boundary_node_selector = { … }` | A `nodeSelector` constraint on pods whose immediate enclosing dag/steps is this template. Does NOT cascade through nested sub-workflows. Literal only. See [Node selector](#node-selector). |
+| `node_selector_if_root = { … }` | Default `nodeSelector` for every pod in the submitted run. **Root-only**. Values support `"lit" + arg` / `"lit" + arg.field` injection of the workflow's own arguments. |
+| `annotations = { "k" = "v" }` | Template-level annotations on the dag/steps template. Literal keys and values. |
+| `on_exit_if_root = t` | Whole-workflow exit handler that fires only when *this* template is the workflow you submit. Distinct from the per-task `.on_exit(t)` builder. |
+| `retry(limit, policy, backoff)` | Template-level retry. `limit` is required (`unlimited` means no cap); `policy` ∈ `Always` / `OnFailure` / `OnError` / `OnTransientError`; `backoff` is seconds or a [humantime](https://docs.rs/humantime) string. |
+| `ttl_if_root(after_completion, after_success, after_failure)` | GC the finished Workflow after the given duration. At least one of the three is required. **Root-only.** |
+| `pod_gc_if_root(strategy)` | Pod garbage collection. `strategy` ∈ `OnPodCompletion` / `OnPodSuccess` / `OnWorkflowCompletion` / `OnWorkflowSuccess`. **Root-only.** |
+| `active_deadline_if_root = <dur>` | Whole-workflow runtime cap. The only timeout that works on a `#[workflow]`. **Root-only.** See [Timeouts](#timeouts). |
+| `mutexes = [{ name, namespace }, …]` | Serialize this template against other holders of the same mutex name (within one run AND across separate Workflow runs). Both fields accept `"lit" + arg + arg.field` injection. See [Mutexes](#mutexes). |
+| `mutexes_if_root = [{ name, namespace }, …]` | Serialize the whole submitted run against other runs holding the same mutex. **Root-only.** |
 
 A parameter *name* (i.e. a function argument) or a `name = "…"`
 value that a YAML 1.1 parser reads as a boolean/null (`y` / `yes` /

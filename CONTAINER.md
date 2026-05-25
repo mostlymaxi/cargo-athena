@@ -47,76 +47,25 @@ distroless and read-only-rootfs images work fine.
 
 All optional.
 
-**`image = "…"`**: container image. Default
-`[bootstrap].default_image` from `athena.toml`.
-
-**`name = "…"`**: override the Argo template name. Default
-`<crate>-<fn>` (kebab).
-
-**`service_account = "…"`**: pod `ServiceAccount`. Default
-`[defaults].service_account`.
-
-**`node_selector = { "k" = "v", … }`**: pin pods of this template
-to nodes matching the labels. Literal keys; values may be injected
-(see [Parameter injection](#parameter-injection)).
-
-**`env = { "K" = "v", … }`**: extra container `env` entries the
-body reads via `std::env::var(…)`. Literal keys; values follow the
-same `"lit" + arg + …` injection grammar as `image`.
-
-**`host_mount = [{ host_path = "/h", mount_path = "/m", read_only = false }, …]`**:
-explicit hostPath mounts with chosen mount paths. Use when you
-really do want a specific in-container path (`/dev/shm`, sidecar
-data, …); `host!` is the safer form (the macro picks a non-clobbering
-path). Both `host_path` and `mount_path` are literal strings;
-`read_only` defaults to false. Dedup'd against `host!` paths on the
-same `host_path`.
-
-**`annotations = { "k" = "v", … }`**: pod-template annotations.
-Literal keys; values injectable like `env`.
-
-**`privileged = true`**: K8s `securityContext.privileged: true` on
-this container. Off by default; opt in only when you really do need
-host devices / kernel-level access (mounting NVIDIA gear, running
-`iptables`, …). Your cluster's PodSecurity admission still has the
-final say.
-
-**`on_exit_if_root = t`**: whole-workflow exit handler that fires
-only when *this* template is the workflow you submit. Distinct from
-the per-task `.on_exit(t)` builder.
-
-**`retry(limit = N | unlimited, policy = "…", backoff = <dur>)`**:
-template-level Argo `retryStrategy`. `limit` is required (`unlimited`
-means no cap); `policy` is one of `Always`, `OnFailure`, `OnError`,
-`OnTransientError`; `backoff` is an int (seconds) or a
-[humantime](https://docs.rs/humantime) string.
-
-**`timeout = <secs | "5m">`**: per-step timeout that **counts
-Pending time**. See [Timeouts](#timeouts).
-
-**`pod_running_timeout = <secs | "1h30m">`**: per-step timeout that
-only counts time the pod is **Running**.
-
-**`ttl_if_root(after_completion = <s>, after_success = <s>, after_failure = <s>)`**:
-GC the finished Workflow after the given duration. At least one of
-the three is required (int seconds or humantime). **Root-only.**
-
-**`pod_gc_if_root(strategy = "<S>")`**: pod garbage collection.
-`strategy` is one of `OnPodCompletion`, `OnPodSuccess`,
-`OnWorkflowCompletion`, `OnWorkflowSuccess`. **Root-only.**
-
-**`active_deadline_if_root = <secs | "2h">`**: the whole-workflow
-runtime cap. **Root-only.** See [Timeouts](#timeouts).
-
-**`mutexes = [{ name = "...", namespace = "..." }, …]`**: serialize
-pods of this template against any other holder of the same mutex
-name (within one run AND across separate Workflow runs). Both
-`name` and `namespace` accept `"lit" + arg + arg.field` injection.
-
-**`mutexes_if_root = [{ name = "...", namespace = "..." }, …]`**:
-serialize the whole submitted run against other runs holding the
-same mutex. **Root-only**, inert when this WT is referenced as a
-sub-workflow.
+| Arg | Effect |
+|---|---|
+| `image = "…"` | Container image. Default `[bootstrap].default_image` from `athena.toml`. |
+| `name = "…"` | Override the Argo template name. Default `<crate>-<fn>` (kebab). |
+| `service_account = "…"` | Pod `ServiceAccount`. Default `[defaults].service_account`. |
+| `node_selector = { … }` | Pin pods of this template to nodes matching the labels. Literal keys; values may be injected (see [Parameter injection](#parameter-injection)). |
+| `env = { "K" = "v", … }` | Extra container env entries the body reads via `std::env::var(…)`. Literal keys; values follow the same `"lit" + arg + …` injection grammar as `image`. |
+| `host_mount = [{ host_path, mount_path, read_only }, …]` | Explicit hostPath mounts with chosen mount paths. Use when you really do want a specific in-container path (`/dev/shm`, sidecar data, …); `host!` is the safer form. `read_only` defaults to false. Dedup'd against `host!` paths on the same `host_path`. |
+| `annotations = { "k" = "v", … }` | Pod-template annotations. Literal keys; values injectable like `env`. |
+| `privileged = true` | K8s `securityContext.privileged: true` on this container. Off by default; opt in only when you really do need host devices / kernel-level access. Your cluster's PodSecurity admission still has the final say. |
+| `on_exit_if_root = t` | Whole-workflow exit handler that fires only when *this* template is the workflow you submit. Distinct from the per-task `.on_exit(t)` builder. |
+| `retry(limit, policy, backoff)` | Template-level retry. `limit` is required (`unlimited` means no cap); `policy` ∈ `Always` / `OnFailure` / `OnError` / `OnTransientError`; `backoff` is seconds or a [humantime](https://docs.rs/humantime) string. |
+| `timeout = <dur>` | Per-step timeout that **counts Pending time**. See [Timeouts](#timeouts). |
+| `pod_running_timeout = <dur>` | Per-step timeout that only counts time the pod is **Running**. |
+| `ttl_if_root(after_completion, after_success, after_failure)` | GC the finished Workflow after the given duration. At least one of the three is required. **Root-only.** |
+| `pod_gc_if_root(strategy)` | Pod garbage collection. `strategy` ∈ `OnPodCompletion` / `OnPodSuccess` / `OnWorkflowCompletion` / `OnWorkflowSuccess`. **Root-only.** |
+| `active_deadline_if_root = <dur>` | Whole-workflow runtime cap. **Root-only.** See [Timeouts](#timeouts). |
+| `mutexes = [{ name, namespace }, …]` | Serialize pods of this template against any other holder of the same mutex name (within one run AND across separate Workflow runs). Both fields accept `"lit" + arg + arg.field` injection. |
+| `mutexes_if_root = [{ name, namespace }, …]` | Serialize the whole submitted run against other runs holding the same mutex. **Root-only.** |
 
 As with `#[workflow]`, an argument *name* or a `name = "…"` value
 that a YAML 1.1 parser reads as a boolean/null is a compile error.
@@ -238,7 +187,7 @@ Key properties:
 - **Artifacts are decoupled.** A producer and consumer that share
   only an S3 key have no DAG dependency or ordering. A missing
   object is a runtime error in the consumer.
-- **Carried through `#[fragment]`s** transitively, as above.
+- **Carried through fragments** transitively, as above.
 
 Used path-qualified (`cargo_athena::host!`) by convention so it
 doesn't require a `use` and the gating compile errors stay obvious.
