@@ -715,6 +715,29 @@ pub const ATHENA_DIST_ARTIFACT: &str = "athena-dist";
 /// own parameters.
 pub const CARGO_ATHENA_TEMPLATE_ENV: &str = "CARGO_ATHENA_TEMPLATE";
 
+/// `true` if this binary is dispatching a container body (in-pod,
+/// started by Argo via the emitted bootstrap); `false` for every other
+/// mode (`cargo athena emit` / `ls` / `describe` / `submit`-emit-JSON).
+///
+/// Use this in `main()` to gate one-time setup you only want to fire
+/// in-pod -- a tracing/OTLP subscriber, a metrics exporter, anything
+/// that costs network or has side effects. Without the gate, those
+/// would also fire on every local `cargo athena emit` etc. that spawns
+/// the binary to introspect templates.
+///
+/// ```ignore
+/// fn main() {
+///     let _otel = cargo_athena::is_container_run().then(|| {
+///         tracing_subscriber::fmt().init();
+///         OtelFlushGuard::new()        // drops at end of main()
+///     });
+///     cargo_athena::entrypoint!(MyRoot);
+/// }
+/// ```
+pub fn is_container_run() -> bool {
+    std::env::var_os(CARGO_ATHENA_TEMPLATE_ENV).is_some()
+}
+
 /// Resolved S3 coordinates for one artifact (creds are supplied
 /// locally, e.g. via AWS env vars — `cargo athena container run` uses
 /// `object_store`; the in-cluster path uses the k8s Secret refs).

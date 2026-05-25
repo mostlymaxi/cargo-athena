@@ -451,6 +451,38 @@ Each container that calls `open_db()` gets the `/secrets/db` mount
 and the `DB_USER` / `DB_PASSWORD` env entries automatically. The
 calling containers don't have to know what's inside the fragment.
 
+## Set up tracing (or any pod-only init) once for every container
+
+Your workflow binary doubles as the in-pod runner AND the local
+introspector that `cargo athena emit` / `ls` / `describe` / `submit`
+spawn. So putting `tracing_subscriber::fmt().init()` directly in
+`main()` would also fire on every local CLI invocation -- harmless
+for stdout logging, but a real footgun for OTLP exporters, metrics
+push, anything that dials out or costs money.
+
+Gate it with `cargo_athena::is_container_run()` so the setup only
+runs in-pod:
+
+```rust,ignore
+fn main() {
+    // None for `cargo athena emit` / `ls` / etc.; Some(_) in-pod.
+    // The returned guard (if any) drops at end of main(), so any
+    // tracing/OTLP flush you stick on Drop fires after the body.
+    let _otel = cargo_athena::is_container_run().then(|| {
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .init();
+        OtelFlushGuard::new()
+    });
+    cargo_athena::entrypoint!(MyRoot);
+}
+```
+
+The pattern works for anything you only want in-pod: a Prometheus
+push gateway, a Sentry init, an audit-log open. Per-container span
+scoping (one `tracing::info_span!` per body) isn't covered by this
+pattern -- if you need it, open an issue.
+
 ## Async `#[container]` fns
 
 Mark a container `async fn` and the macro wraps the body in a
