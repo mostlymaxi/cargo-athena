@@ -64,9 +64,7 @@ pub fn xfer_bar(total: u64, label: &str) -> ProgressBar {
 /// up front (a HEAD check, a brief drift comparison, etc.).
 pub fn spinner(msg: impl Into<String>) -> ProgressBar {
     let bar = ProgressBar::with_draw_target(None, ProgressDrawTarget::stderr());
-    bar.set_style(
-        ProgressStyle::with_template("  {spinner:.cyan} {msg}").expect("valid template"),
-    );
+    bar.set_style(ProgressStyle::with_template("  {spinner:.cyan} {msg}").expect("valid template"));
     bar.set_message(msg.into());
     bar.enable_steady_tick(std::time::Duration::from_millis(100));
     bar

@@ -773,11 +773,11 @@ pub(crate) fn s3_put(s3: &S3Ref, src: &Path) {
 
     let store = s3_store(s3);
     let key = object_store::path::Path::from(s3.key.as_str());
-    let meta = std::fs::metadata(src)
-        .unwrap_or_else(|e| die(&format!("stat {}: {e}", src.display())));
+    let meta =
+        std::fs::metadata(src).unwrap_or_else(|e| die(&format!("stat {}: {e}", src.display())));
     let total = meta.len();
-    let mut file = std::fs::File::open(src)
-        .unwrap_or_else(|e| die(&format!("open {}: {e}", src.display())));
+    let mut file =
+        std::fs::File::open(src).unwrap_or_else(|e| die(&format!("open {}: {e}", src.display())));
 
     rt().block_on(async {
         // Tiny files: single PUT, still show a (brief) bar.

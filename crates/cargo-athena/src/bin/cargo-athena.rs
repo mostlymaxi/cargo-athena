@@ -236,8 +236,7 @@ fn emit(package: Option<&str>, bin: Option<&str>, out: Option<&str>, with_workfl
             std::fs::write(path, &o.stdout).expect("write --out file");
             eprintln!("wrote {path}");
         }
-        None => std::io::Write::write_all(&mut std::io::stdout(), &o.stdout)
-            .expect("write stdout"),
+        None => std::io::Write::write_all(&mut std::io::stdout(), &o.stdout).expect("write stdout"),
     }
 }
 
