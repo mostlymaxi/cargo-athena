@@ -566,3 +566,26 @@ pub fn pipeline_artifact() {
     let m = make_meta_artifact();
     use_meta_artifact(m);
 }
+
+/// Sub-workflow that *returns* `Artifact<Meta>` (bubbled from its
+/// terminal container task) and another sub-workflow that *accepts*
+/// `Artifact<Meta>` as an input (forwarded to a container). The root
+/// `pipeline_artifact_wf` wires them via a parent dag task, exercising
+/// the workflow-side `outputs.artifacts.return.from` bubble AND the
+/// workflow-side `inputs.artifacts.<name>` forward, both across the
+/// templateRef wormhole.
+#[workflow]
+pub fn sub_returning_artifact() -> cargo_athena::Artifact<Meta> {
+    make_meta_artifact()
+}
+
+#[workflow]
+pub fn sub_consuming_artifact(m: cargo_athena::Artifact<Meta>) {
+    use_meta_artifact(m);
+}
+
+#[workflow]
+pub fn pipeline_artifact_wf() {
+    let m = sub_returning_artifact();
+    sub_consuming_artifact(m);
+}

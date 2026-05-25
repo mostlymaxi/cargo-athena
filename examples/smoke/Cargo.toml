@@ -86,6 +86,10 @@ path = "src/bin/mutex_main.rs"
 name = "smoke-artifact"
 path = "src/bin/artifact_main.rs"
 
+[[bin]]
+name = "smoke-artifact-wf"
+path = "src/bin/artifact_wf_main.rs"
+
 [dependencies]
 # `tokio` enables `async fn` `#[container]` bodies (re-exports tokio).
 cargo-athena = { workspace = true, features = ["tokio"] }
