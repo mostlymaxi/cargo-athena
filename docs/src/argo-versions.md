@@ -27,6 +27,17 @@ in Argo 3.6** - the emitted YAML is correct and passes 3.6/3.7/4.0
 unchanged. Older versions *may* still work for trivial cases; use at
 your own risk.
 
+## What's degraded on 3.6
+
+The args-offload feature (Argo PR #15265) shipped in 3.7. On 3.6 the
+controller does not stage large arguments via ConfigMap, so any task
+whose substituted `args[]` cross the kernel exec `ARG_MAX` (~128 KB
+combined) fails with `argument list too long`. Use `Artifact<T>` for
+any parameter that may exceed that threshold if you need to run on
+3.6. 3.7 and 4.0 are unaffected: the controller stages large args
+automatically; cargo-athena's runtime reads the offloaded value back
+transparently.
+
 ## Live badges
 
 GitHub has no per-matrix-job badge, so each matrix job publishes its

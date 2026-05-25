@@ -277,14 +277,24 @@ pub fn read_note(_after: String) {
 
 // --- non-trivial parameter round-trip --------------------------------------
 //
-// Exercises the env -> argv migration end-to-end: a multi-kilobyte
-// string crosses a task boundary as `outputs.parameters.return` ->
-// `{{tasks.X.outputs.parameters.return}}` -> positional argv on the
-// next pod -> serde-decoded back to `String`. The blob is well below
-// Argo's per-parameter limit and intentionally NOT >128 KB (that
-// would test Argo's argv offload feature, but offload applies only
-// at pod-spec creation, not to cross-task output-parameter transfer
-// — large blobs between steps should use artifacts, not parameters).
+// Two complementary paths exercised:
+//
+//   1. `make_blob` -> `verify_blob`: cross-task transfer. Producer
+//      writes the blob to `outputs.parameters.return`; consumer reads
+//      it as positional argv after Argo substitutes
+//      `{{tasks.X.outputs.parameters.return}}`. Capped at 16 KB - the
+//      output side has no offload feature; the wait container ships
+//      values to the controller via a 2 MB gRPC channel, well above
+//      this but below the practical safe ceiling.
+//
+//   2. `verify_input_blob`: workflow-input -> consumer arg. The e2e
+//      script submits with a 200 KB literal via `--parameter-file`
+//      (downsized on Argo 3.6, which lacks args-offload). Past 128 KB
+//      Argo's controller offloads the consumer's whole `c.Args[]` to
+//      a per-pod ConfigMap and replaces any single arg > 128 KB with
+//      a `@/tmp/argo_arg_<i>.txt` sentinel; athena's runtime
+//      (`entrypoint_impl` -> `deref_offloaded_arg`) reads that file
+//      back transparently.
 
 const BLOB_BYTES: usize = 16 * 1024;
 
@@ -298,6 +308,15 @@ pub fn verify_blob(blob: String) {
     assert_eq!(blob.len(), BLOB_BYTES, "blob round-trip size drift");
     assert!(blob.chars().all(|c| c == 'x'), "blob content drift");
     println!("OK verify_blob {} bytes", blob.len());
+}
+
+/// Asserts content (all `'x'`) but not a fixed size: the e2e script
+/// downsizes on Argo 3.6, where the offload feature is absent.
+#[container]
+pub fn verify_input_blob(blob: String) {
+    assert!(!blob.is_empty(), "input_blob arrived empty");
+    assert!(blob.chars().all(|c| c == 'x'), "input_blob content drift");
+    println!("OK verify_input_blob {} bytes", blob.len());
 }
 
 // --- per-task builders + the exit handler ----------------------------------
@@ -328,7 +347,7 @@ pub fn cleanup() {
     node_selector_if_root = { "kubernetes.io/arch" = "amd64" },
     on_exit_if_root = cleanup,
 )]
-pub fn pipeline() {
+pub fn pipeline(input_blob: String) {
     let a = produce();
     let b = transform(a); // container -> container param dep
     consume(b);
@@ -384,6 +403,12 @@ pub fn pipeline() {
     // it as positional argv -> serde decodes back to String.
     let blob = make_blob();
     verify_blob(blob);
+
+    // Workflow-input -> consumer arg. The e2e script submits with a
+    // >128 KB literal on Argo 3.7+ to exercise the controller's
+    // args-offload + athena's @filename de-reference (a smaller value
+    // on 3.6, which lacks the feature).
+    verify_input_blob(input_blob);
 
     // Force-link the steps-mode workflow into this entrypoint's emit
     // closure so its template registers + Argo executes it as a

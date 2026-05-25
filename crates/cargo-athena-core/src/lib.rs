@@ -1693,6 +1693,36 @@ pub fn container_volumes(
     (vols, mounts)
 }
 
+/// De-reference one argv slot if Argo's emissary rewrote it as a
+/// `@/tmp/argo_arg_<i>.txt` sentinel.
+///
+/// When `c.Args` exceeds 128 KB the controller offloads the whole vector
+/// to a `ConfigMap` and clears `c.Args`. The emissary then re-hydrates
+/// the args from `$ARGO_CONTAINER_ARGS_FILE` and, separately, replaces
+/// any single arg whose length still exceeds 128 KB with a sentinel
+/// `@/tmp/argo_arg_<i>.txt` whose contents are the real value
+/// (`cmd/argoexec/commands/emissary.go` PR #15265). The container is
+/// expected to know that convention and read the file.
+///
+/// Gating on `$ARGO_CONTAINER_ARGS_FILE` (set by the controller only on
+/// offload) keeps this safe: a Regime-B parameter value never starts
+/// with `@` (string literals start with `"`, numbers with a digit/sign,
+/// bools with `t`/`f`), so even if a user shell wires up a workflow
+/// outside Argo we won't mis-interpret a literal `@`-prefixed argv.
+fn deref_offloaded_arg(raw: String) -> String {
+    if std::env::var_os("ARGO_CONTAINER_ARGS_FILE").is_none() {
+        return raw;
+    }
+    let Some(path) = raw.strip_prefix('@') else {
+        return raw;
+    };
+    if !path.starts_with("/tmp/argo_arg_") {
+        return raw;
+    }
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("failed reading offloaded arg {path}: {e}"))
+}
+
 /// The entrypoint a user's `main` calls, parameterised by the root
 /// workflow type. Referencing `E` force-links the entire reachable
 /// closure (each `collect` calls callees' `collect` directly).
@@ -1720,7 +1750,7 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
             .runners
             .get(&t)
             .unwrap_or_else(|| panic!("no runnable container template named {t:?}"));
-        let argv: Vec<String> = std::env::args().skip(1).collect();
+        let argv: Vec<String> = std::env::args().skip(1).map(deref_offloaded_arg).collect();
         let output = run(&argv);
         if let Ok(path) = std::env::var("CARGO_ATHENA_OUTPUT") {
             std::fs::write(path, &output).expect("write CARGO_ATHENA_OUTPUT");

@@ -101,6 +101,41 @@ subjects:
   namespace: argo
 EOF
 
+say "controller RBAC for large-args ConfigMap offload (Argo 3.7+)"
+# Argo's container-args offload (workflow/controller/workflowpod.go L497+
+# in 4.0.5, gated by PR #15265 since 3.7) creates a ConfigMap holding
+# the original `c.Args` JSON when their JSON-marshaled size exceeds
+# 128 KB. The upstream `namespace-install.yaml` grants the controller SA
+# only `get/list/watch` on configmaps; without `create` here, any task
+# whose substituted args cross the threshold errors immediately with
+#   "configmaps is forbidden: ... cannot create resource configmaps".
+# 3.6 lacks the offload code entirely (the binding is harmless there).
+kubectl apply -f - <<'EOF'
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: athena-argo-configmaps
+  namespace: argo
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: athena-argo-configmaps
+  namespace: argo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: athena-argo-configmaps
+subjects:
+- kind: ServiceAccount
+  name: argo
+  namespace: argo
+EOF
+
 say "point Argo at MinIO"
 kubectl -n argo patch configmap workflow-controller-configmap \
   --type merge --patch-file "$SCRIPT_DIR/artifact-repo-cm.yaml"

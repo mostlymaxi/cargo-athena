@@ -104,7 +104,24 @@ say "apply WorkflowTemplates"
 kubectl apply -n "$NS" -f /tmp/athena-wts.yaml
 
 say "submit Workflow (waits for completion)"
-argo submit -n "$NS" --wait --log "$WFDOC"
+# `pipeline` takes an `input_blob: String`. We submit a >128 KB literal
+# on Argo 3.7+ to exercise the controller's args-offload path and
+# athena's `@/tmp/argo_arg_<i>.txt` de-reference. Argo 3.6 lacks
+# args-offload (PR #15265 didn't backport), so we downsize there to
+# 8 KB - still proves the workflow-input -> positional argv plumbing,
+# but stays inside the kernel exec ARG_MAX.
+case "${ARGO_VERSION:-v4.0.5}" in
+  v3.6.*) BLOB_BYTES=$((8 * 1024)) ;;
+  *)      BLOB_BYTES=$((200 * 1024)) ;;
+esac
+PARAM_FILE=$(mktemp -t athena-params.XXXXXX.yaml)
+{
+  printf 'input_blob: "'
+  head -c "$BLOB_BYTES" /dev/zero | tr '\0' x
+  printf '"\n'
+} > "$PARAM_FILE"
+argo submit -n "$NS" --wait --log --parameter-file "$PARAM_FILE" "$WFDOC"
+rm -f "$PARAM_FILE"
 
 say "assertions"
 PHASE=$(argo get -n "$NS" @latest -o json | jq -r '.status.phase')
@@ -158,6 +175,7 @@ need 'note:L4'                     "value-if + statement-if (chose left(4))"
 need 'id=abc'                      "struct-field access (m.id)"
 need 'tagged image busybox:1.36-musl' "image injection (busybox: + tag)"
 need 'read e2e-note = payload-42'  "save_artifact! -> load_artifact! roundtrip"
+need "OK verify_input_blob $BLOB_BYTES bytes" "workflow-input arg (offload path on 3.7+)"
 need 'cleanup ran'                 "on_exit_if_root + per-task .on_exit"
 
 # #[workflow(node_selector=…)] must cascade onto every task pod.
