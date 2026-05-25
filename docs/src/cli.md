@@ -14,7 +14,8 @@ cargo athena [-c F] container describe <name> [-p PKG] [--bin B]
 cargo athena [-c F] workflow  ls       [-p PKG] [--bin B] [--include-synthetic]
 cargo athena [-c F] workflow  describe <name> [-p PKG] [--bin B]
 cargo athena [-c F] submit <name> [-a k=v].. [-n NS] [--service-account SA]
-                          [--node-selector k=v].. [--argo-server URL] [-y] [--update]
+                          [--node-selector k=v].. [--priority N]
+                          [--argo-server URL] [-y] [--update]
 cargo athena [-c F] build [-p PKG] [--bin B] [--target T].. [--print]
 cargo athena [-c F] publish [-p PKG] [--bin B] [--target T].. [--tarball F] [--print]
 ```
@@ -110,6 +111,8 @@ Flags:
 - `-n NS` / `--namespace` - target namespace.
 - `--service-account SA` - override `[defaults].service_account`.
 - `--node-selector k=v` (repeatable) - root-scoped, applies to every pod.
+- `--priority N` - workflow priority (int32); higher = scheduled first
+  when the controller hits its parallelism limit.
 - `--argo-server URL` - use Argo Server REST instead of Kubernetes API.
 - `-y` / `--yes` - skip every y/N prompt.
 - `--update` - re-apply all WorkflowTemplates.

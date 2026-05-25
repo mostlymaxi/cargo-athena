@@ -1,0 +1,5 @@
+error: `while`/`loop` aren't lowered. A #[workflow] body is read once to build the DAG, not iterated at runtime. Move the loop inside a #[container] body, or use `.fan_out` for parallelism.
+ --> tests/ui/wf_while.rs:5:5
+  |
+5 |     while false {}
+  |     ^^^^^^^^^^^^^^

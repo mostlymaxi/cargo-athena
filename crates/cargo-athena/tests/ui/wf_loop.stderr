@@ -1,4 +1,4 @@
-error: unsupported statement in a #[workflow]: only `let x = template(args);` and `template(args);` are lowered. if/match, for/while/loop, macros, method calls and other expressions aren't supported yet — they'll be lowered differently later.
+error: `for` loops aren't lowered. For per-element parallel work use `list.fan_out(|x| step(x))`; for sequential work, thread a return value through to make the dependency explicit.
  --> tests/ui/wf_loop.rs:5:5
   |
 5 |     for _ in 0..3 {}
