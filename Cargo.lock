@@ -176,14 +176,14 @@ dependencies = [
 
 [[package]]
 name = "cargo-athena-example-basic"
-version = "0.5.1"
+version = "0.0.0"
 dependencies = [
  "cargo-athena",
 ]
 
 [[package]]
 name = "cargo-athena-example-e2e"
-version = "0.5.1"
+version = "0.0.0"
 dependencies = [
  "cargo-athena",
  "serde",
@@ -191,14 +191,14 @@ dependencies = [
 
 [[package]]
 name = "cargo-athena-example-getting-started"
-version = "0.5.1"
+version = "0.0.0"
 dependencies = [
  "cargo-athena",
 ]
 
 [[package]]
 name = "cargo-athena-example-importing"
-version = "0.5.1"
+version = "0.0.0"
 dependencies = [
  "cargo-athena",
  "cargo-athena-example-smoke",
@@ -206,7 +206,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-athena-example-smoke"
-version = "0.5.1"
+version = "0.0.0"
 dependencies = [
  "cargo-athena",
  "serde",

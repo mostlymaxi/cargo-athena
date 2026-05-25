@@ -16,7 +16,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.5.0/importing.tar.gz
+          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -73,7 +73,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.5.0/importing.tar.gz
+          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -174,7 +174,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.5.0/importing.tar.gz
+          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -260,7 +260,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.5.0/importing.tar.gz
+          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -348,7 +348,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.5.0/importing.tar.gz
+          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -410,7 +410,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.5.0/importing.tar.gz
+          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -571,7 +571,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.5.0/importing.tar.gz
+          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -660,7 +660,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.5.0/importing.tar.gz
+          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey

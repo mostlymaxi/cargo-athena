@@ -1,9 +1,9 @@
-   Compiling cargo-athena-api v0.5.0 (/home/maxi/build/cargo-athena/crates/cargo-athena-api)
-   Compiling cargo-athena-macros v0.5.0 (/home/maxi/build/cargo-athena/crates/cargo-athena-macros)
-   Compiling cargo-athena-core v0.5.0 (/home/maxi/build/cargo-athena/crates/cargo-athena-core)
-   Compiling cargo-athena v0.5.0 (/home/maxi/build/cargo-athena/crates/cargo-athena)
-   Compiling cargo-athena-example-getting-started v0.5.0 (/home/maxi/build/cargo-athena/examples/getting-started)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.28s
+   Compiling cargo-athena-api v0.5.1 (/home/maxi/build/cargo-athena/crates/cargo-athena-api)
+   Compiling cargo-athena-macros v0.5.1 (/home/maxi/build/cargo-athena/crates/cargo-athena-macros)
+   Compiling cargo-athena-core v0.5.1 (/home/maxi/build/cargo-athena/crates/cargo-athena-core)
+   Compiling cargo-athena v0.5.1 (/home/maxi/build/cargo-athena/crates/cargo-athena)
+   Compiling cargo-athena-example-getting-started v0.0.0 (/home/maxi/build/cargo-athena/examples/getting-started)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.33s
      Running `target/debug/cargo-athena-example-getting-started`
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -23,7 +23,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-getting-started/0.5.0/cargo-athena-example-getting-started.tar.gz
+          key: cargo-athena-example-getting-started/0.0.0/cargo-athena-example-getting-started.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -121,7 +121,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-getting-started/0.5.0/cargo-athena-example-getting-started.tar.gz
+          key: cargo-athena-example-getting-started/0.0.0/cargo-athena-example-getting-started.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -179,7 +179,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-getting-started/0.5.0/cargo-athena-example-getting-started.tar.gz
+          key: cargo-athena-example-getting-started/0.0.0/cargo-athena-example-getting-started.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey

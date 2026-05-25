@@ -14,7 +14,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.5.0/smoke-ttl.tar.gz
+          key: cargo-athena-example-smoke/0.0.0/smoke-ttl.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
