@@ -24,6 +24,7 @@ const BIN_SECRETS: &str = env!("CARGO_BIN_EXE_smoke-secrets");
 const BIN_POD_ATTRS: &str = env!("CARGO_BIN_EXE_smoke-pod-attrs");
 const BIN_MUTEX: &str = env!("CARGO_BIN_EXE_smoke-mutex");
 const BIN_ARTIFACT: &str = env!("CARGO_BIN_EXE_smoke-artifact");
+const BIN_ARTIFACT_WF: &str = env!("CARGO_BIN_EXE_smoke-artifact-wf");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -302,6 +303,17 @@ fn emit_pipeline_mutex() {
 #[test]
 fn emit_pipeline_artifact() {
     assert_golden("pipeline_artifact.yaml", &run_bin(BIN_ARTIFACT, &[]));
+}
+
+/// Workflow-level `Artifact<T>` flow: a sub-workflow that returns
+/// `Artifact<Meta>` (bubbled via `outputs.artifacts.return.from`) fed
+/// into a sibling sub-workflow that accepts `Artifact<Meta>` as input
+/// (forwarded via `inputs.artifacts.<name>` to a downstream container).
+/// Pins the workflow-side artifact bubble + forward shapes that the
+/// container-only `pipeline_artifact` doesn't exercise.
+#[test]
+fn emit_pipeline_artifact_wf() {
+    assert_golden("pipeline_artifact_wf.yaml", &run_bin(BIN_ARTIFACT_WF, &[]));
 }
 
 /// Run mode: with Argo's secretKeyRef env vars planted by the

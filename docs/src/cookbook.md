@@ -219,6 +219,45 @@ fn pipeline() {
 }
 ```
 
+## Pass a large value between steps
+
+A plain return goes inline through Argo, which is fine for small
+JSON. For payloads measured in tens of KB or more, or any binary
+blob, wrap the return in `Artifact<T>` and the value flows through
+your bucket instead. Wiring is unchanged:
+
+```rust,ignore
+use cargo_athena::{container, workflow, Artifact};
+
+#[container]
+fn make_report() -> Artifact<Vec<u8>> {
+    Artifact::new(build_pdf())          // big binary
+}
+
+#[container]
+fn ship(r: Artifact<Vec<u8>>) {
+    upload(r.into_inner());
+}
+
+#[workflow]
+fn pipeline() {
+    let r = make_report();
+    ship(r);                            // looks like any binding-to-arg
+}
+```
+
+When to pick which:
+
+- **Plain `T`** for small structured values - configuration, IDs,
+  counts, modest JSON. Easy to see in the Argo UI.
+- **`Artifact<T>`** for large or binary returns. No size cliff to
+  worry about, but the value isn't inspectable from the workflow
+  status without downloading the object.
+- **`save_artifact!` / `load_artifact!`** (the two recipes above) for
+  fixed, known S3 keys where the producer and consumer can be wired
+  separately or out of band. `Artifact<T>` is the DAG-wired sibling
+  for the common one-producer/one-consumer case.
+
 ## Per-task hooks
 
 `.continue_on` / `.on_success` / `.on_failure` / `.on_error` /

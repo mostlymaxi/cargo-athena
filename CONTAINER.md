@@ -25,6 +25,36 @@ distroless and read-only-rootfs images work fine.
   `Serialize`). Borrows can't cross this boundary - take and return
   owned types (`String`, not `&str`).
 
+## Large or binary return values
+
+By default a step's return rides Argo as an inline parameter, which
+is fine for small JSON. For large or binary payloads, wrap the value
+in `cargo_athena::Artifact<T>` and it flows through your bucket
+instead:
+
+```rust,ignore
+use cargo_athena::{container, Artifact};
+
+#[container]
+fn make_report() -> Artifact<Vec<u8>> {
+    Artifact::new(build_pdf())
+}
+
+#[container]
+fn ship(r: Artifact<Vec<u8>>) {
+    upload(r.into_inner());
+}
+```
+
+The wiring is automatic: any `#[workflow]` task that consumes an
+`Artifact<T>`-typed value is hooked up via S3 instead of inline
+parameters. Reach for it when the value is "big enough you'd worry
+about it" - tens of KB or more, encoded binary blobs, file-shaped
+data.
+
+Plain returns and `Artifact<T>` returns mix freely inside the same
+workflow; choose per step.
+
 ## Attribute arguments
 
 ```rust,ignore

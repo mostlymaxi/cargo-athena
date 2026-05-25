@@ -158,6 +158,11 @@ Notes:
   input they're rejected: they'd change the Rust type without
   changing the wire value, a silent mismatch. Any literal value is
   fine.
+- **`Artifact<T>`-typed bindings wire through S3 automatically.** If
+  the producer returns `Artifact<T>` and the consumer accepts
+  `Artifact<T>`, the call site looks identical to any other
+  binding-to-arg flow. See
+  [`#[container]` -> Large or binary return values](container.md#large-or-binary-return-values).
 
 ### Return values
 
@@ -182,6 +187,19 @@ fn parent() {
 The terminal is the tail template call, a returned/tail binding, or
 a value-`if` (below). A return type with no resolvable terminal is a
 compile error.
+
+A workflow may also return `Artifact<T>` to pass a large or binary
+value up to its parent through S3 instead of inline:
+
+```rust,ignore
+#[workflow]
+fn sub() -> cargo_athena::Artifact<Vec<u8>> {
+    make_report()    // tail call returns Artifact<Vec<u8>>
+}
+```
+
+Same wiring shape as a plain return; the parent just sees an
+`Artifact<T>` value.
 
 ## Per-task builder chain
 
