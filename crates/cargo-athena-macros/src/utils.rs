@@ -233,6 +233,21 @@ pub(crate) fn str_slice(items: &[String]) -> TokenStream2 {
 
 /// Defining crate's name (set by Cargo while this crate compiles), used to
 /// namespace Argo template names so they're globally unique across crates.
+/// `true` if `ty` is `Artifact<...>` in any of its three written forms
+/// (`Artifact<T>`, `cargo_athena::Artifact<T>`, `::cargo_athena::Artifact<T>`).
+/// Used by `#[container]` and `#[workflow]` to discriminate parameter-
+/// flow from artifact-flow per arg and per return; everything else falls
+/// back to parameter-flow so existing templates stay byte-identical.
+pub(crate) fn is_artifact_ty(ty: &Type) -> bool {
+    let Type::Path(tp) = ty else {
+        return false;
+    };
+    tp.path
+        .segments
+        .last()
+        .is_some_and(|s| s.ident == "Artifact" && !s.arguments.is_empty())
+}
+
 pub(crate) fn crate_ns() -> String {
     std::env::var("CARGO_CRATE_NAME")
         .or_else(|_| std::env::var("CARGO_PKG_NAME"))

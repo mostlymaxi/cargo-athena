@@ -343,6 +343,73 @@ pub enum TemplateKind {
     Workflow,
 }
 
+/// How a single Argo input or output flows: inline as a `parameter` (Argo
+/// stores it in workflow status, sized like a JSON parameter) or via S3
+/// as an `artifact` (DAG-wired via `outputs.artifacts` /
+/// `arguments.artifacts.from`). The `#[container]` and `#[workflow]`
+/// macros derive these per-slot from the function signature: a fn
+/// argument or return type of `cargo_athena::Artifact<T>` is `Artifact`,
+/// everything else is `Parameter`. Stamped into
+/// [`Template::INPUT_KINDS`] / [`Template::OUTPUT_KIND`] and read at
+/// emit-time by the workflow's per-task wiring (parallel to how
+/// [`Template::INPUTS`] is read for parameter names).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum IoKind {
+    Parameter,
+    Artifact,
+}
+
+/// A DAG-wired S3-backed value. Wrap a `#[container]` (or `#[workflow]`)
+/// return in `Artifact<T>` to flow the value via Argo's native artifact
+/// passing (`outputs.artifacts.return` + `arguments.artifacts.from`)
+/// instead of the inline-parameter path (`outputs.parameters.return`).
+/// Lifts the parameter-size ceiling and is the natural shape for
+/// binary/large payloads. A consumer accepting `Artifact<T>` reads the
+/// same value on the other side; the wire is the user's serialized `T`
+/// (JSON, tar+gzip'd by Argo on the producer and untarred on the
+/// consumer, transparent to user code).
+///
+/// The inner `T` is private by design: no field-access (`a.field`) on
+/// an `Artifact<T>` binding, no `Deref<Target=T>`, no `AthenaList<_>`
+/// impl. Those constraints fall out of Rust's own type rules in the
+/// `#[workflow]` ghost (see `feedback-ghost-first.md` in agent
+/// memory) — they are NOT enforced by bespoke macro checks. The only
+/// public surface is `Artifact::new` / `Artifact::into_inner`.
+pub struct Artifact<T> {
+    inner: T,
+    _marker: ::core::marker::PhantomData<fn() -> T>,
+}
+
+impl<T> Artifact<T> {
+    pub fn new(v: T) -> Self {
+        Self {
+            inner: v,
+            _marker: ::core::marker::PhantomData,
+        }
+    }
+
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
+}
+
+// Serde-transparent: the wire form is plain serialized `T`. The wrapper
+// is purely a Rust type marker that the macros key on; on disk it is
+// indistinguishable from `T` itself. Lets `#[container]`'s `run()` body
+// write `serde_json::to_writer(File::create(...), &val)` after
+// `.into_inner()` without any wrapper bytes leaking through.
+impl<T: ::serde::Serialize> ::serde::Serialize for Artifact<T> {
+    fn serialize<S: ::serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.inner.serialize(s)
+    }
+}
+
+impl<'de, T: ::serde::Deserialize<'de>> ::serde::Deserialize<'de> for Artifact<T> {
+    fn deserialize<D: ::serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        T::deserialize(d).map(Self::new)
+    }
+}
+
 /// The cross-crate identity of a template, implemented by the unit struct
 /// the `#[workflow]`/`#[container]` macros generate.
 ///
@@ -360,6 +427,22 @@ pub trait Template {
     /// listings. Emitted by `#[container]` and `#[workflow]`; defaulted
     /// empty for synthetic/hand impls.
     const INPUT_TYPES: &'static [&'static str] = &[];
+    /// Per-input I/O kind, parallel to [`Self::INPUTS`]. An empty slice
+    /// (the backwards-compat default) means "all parameters" — what
+    /// every template did before [`Artifact`] landed. The
+    /// `#[container]` / `#[workflow]` macros set entries to
+    /// [`IoKind::Artifact`] for any argument typed `Artifact<T>` and
+    /// [`IoKind::Parameter`] for everything else. The workflow's
+    /// per-task wiring reads this at emit-time to decide between
+    /// `arguments.parameters[].value` and `arguments.artifacts[].from`.
+    const INPUT_KINDS: &'static [IoKind] = &[];
+    /// I/O kind of the function's return value. Default
+    /// [`IoKind::Parameter`] keeps every existing template's
+    /// `outputs.parameters.return` emission byte-identical; macros set
+    /// this to [`IoKind::Artifact`] when the return type is
+    /// `Artifact<T>` so the template emits `outputs.artifacts.return`
+    /// (S3-backed) instead.
+    const OUTPUT_KIND: IoKind = IoKind::Parameter;
     /// `true` for athena-synthesized templates (the `if`/`else`
     /// wrapper + per-arm sub-workflows). They're an implementation
     /// detail, so `workflow ls` hides them unless `--include-synthetic`.
@@ -589,10 +672,27 @@ pub const ATHENA_BIN_DIR: &str = "/athena/bin";
 /// attr is the explicit escape hatch for same-path / chosen-path
 /// mounts.
 pub const ATHENA_MOUNTS_DIR: &str = "/athena/mounts";
+/// Where a *parameter-output* `#[container]` body writes its serialized
+/// return value (read by the template's
+/// `outputs.parameters.return.valueFrom.path`). The bootstrap exports
+/// this as `CARGO_ATHENA_OUTPUT` for parameter-output templates.
+pub const ATHENA_RESULT_FILE: &str = "/athena/result";
+/// Where an *artifact-output* `#[container]` body writes its serialized
+/// return value (read by the template's `outputs.artifacts.return.path`,
+/// then tar+gzip'd and uploaded by Argo's executor). The bootstrap
+/// exports this as `CARGO_ATHENA_OUTPUT` for artifact-output templates;
+/// the run-side body has one write site (`CARGO_ATHENA_OUTPUT`) and
+/// stays kind-agnostic.
+pub const ATHENA_RESULT_ARTIFACT_FILE: &str = "/athena/result-artifact";
+/// Where an `Artifact<T>`-typed input lands inside the container, one
+/// file per arg, named after the arg. The template declares
+/// `inputs.artifacts[].path = "/athena/in/<name>"`; the run-side body
+/// reads + deserializes from there.
+pub const ATHENA_INPUT_ARTIFACT_DIR: &str = "/athena/in";
 /// The in-pod arch-resolving + exec bootstrap, kept in a separate
 /// `bootstrap.sh` so it can be read, edited, and `shellcheck`'d as a
 /// plain shell file rather than buried in a Rust `format!`. `@@ARMS@@`
-/// / `@@BIN_DIR@@` / `@@TEMPLATE@@` are substituted at emit time in
+/// / `@@BIN_DIR@@` / `@@OUTPUT_PATH@@` are substituted at emit time in
 /// `container_delivery`.
 const BOOTSTRAP_TEMPLATE: &str = include_str!("bootstrap.sh");
 /// Name of the scratch `emptyDir` volume.
@@ -850,6 +950,7 @@ pub fn container_delivery(
     ctx: &BuildCtx,
     param_names: &[&str],
     image_override: Option<&str>,
+    output_kind: IoKind,
 ) -> ContainerDelivery {
     let cfg = ctx.config();
     let s3 = &cfg.artifact_repository.s3;
@@ -868,13 +969,28 @@ pub fn container_delivery(
         arms.push_str(&format!("  {pat}) __t={triple} ;;\n"));
     }
 
+    // The body's serialized return value lands at `CARGO_ATHENA_OUTPUT`.
+    // Parameter-output containers route it to ATHENA_RESULT_FILE (which
+    // the template's `outputs.parameters.return.valueFrom.path` reads).
+    // Artifact-output containers route it to ATHENA_RESULT_ARTIFACT_FILE
+    // (which the template's `outputs.artifacts.return.path` reads;
+    // Argo's executor then tar+gzips and uploads to S3). The bootstrap
+    // exports the right path before exec-ing the binary; the run-side
+    // body has one write site (`CARGO_ATHENA_OUTPUT`) and stays kind-
+    // agnostic.
+    let output_path = match output_kind {
+        IoKind::Parameter => ATHENA_RESULT_FILE,
+        IoKind::Artifact => ATHENA_RESULT_ARTIFACT_FILE,
+    };
+
     // Argo's executor (init container) auto-extracts the `.tar.gz` into
     // ATHENA_BIN_DIR, so the bootstrap just picks + execs. The template
     // lives in a sibling `bootstrap.sh` file (legible / greppable /
     // shellcheck-able); we just substitute the @@-delimited slots.
     let script = BOOTSTRAP_TEMPLATE
         .replace("@@ARMS@@", &arms)
-        .replace("@@BIN_DIR@@", ATHENA_BIN_DIR);
+        .replace("@@BIN_DIR@@", ATHENA_BIN_DIR)
+        .replace("@@OUTPUT_PATH@@", output_path);
 
     // `sh -c "<script>" -- arg1 arg2 ...` puts "--" in $0 (placeholder)
     // and arg1/arg2 in "$@", which the bootstrap forwards to the binary.
@@ -891,6 +1007,7 @@ pub fn container_delivery(
         s3: Some(s3_loc(s3, ctx.artifact_key())),
         archive: None,
         mode: None,
+        from: String::new(),
     };
 
     ContainerDelivery {
@@ -1096,6 +1213,7 @@ pub fn artifact_inputs(ctx: &BuildCtx, keys: &[String]) -> Vec<api::Artifact> {
             s3: Some(s3_loc(s3, k)),
             archive: Some(archive_none()),
             mode: None,
+            from: String::new(),
         })
         .collect()
 }
@@ -1111,6 +1229,7 @@ pub fn artifact_outputs(ctx: &BuildCtx, keys: &[String]) -> Vec<api::Artifact> {
             s3: Some(s3_loc(s3, k)),
             archive: Some(archive_none()),
             mode: None,
+            from: String::new(),
         })
         .collect()
 }

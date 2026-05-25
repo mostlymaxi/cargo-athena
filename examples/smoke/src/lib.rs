@@ -536,3 +536,33 @@ pub fn shard_writer(shard: String) {
 pub fn pipeline_mutex(env: String) {
     shard_writer(env);
 }
+
+// --- Artifact<T> return-type: DAG-wired S3 passthrough ---------------------
+
+/// `#[container]` whose return is `Artifact<Bag>` instead of plain
+/// `Bag` -- the value flows via Argo's `outputs.artifacts.return` (S3-
+/// backed, tar+gzip'd by the executor) rather than `outputs.parameters
+/// .return` (inline in workflow status). Pins both producer-side
+/// emission (`outputs.artifacts.return` with the templated `s3.key`
+/// keyed off `{{pod.name}}`) and consumer-side wiring
+/// (`arguments.artifacts.return.from: "{{tasks.<dep>.outputs.artifacts
+/// .return}}"`). Lifts the parameter-size ceiling for large payloads.
+#[container]
+pub fn make_meta_artifact() -> cargo_athena::Artifact<Meta> {
+    cargo_athena::Artifact::new(Meta {
+        id: "abc".to_string(),
+        n: 7,
+    })
+}
+
+#[container]
+pub fn use_meta_artifact(m: cargo_athena::Artifact<Meta>) {
+    let meta = m.into_inner();
+    println!("meta id={} n={}", meta.id, meta.n);
+}
+
+#[workflow]
+pub fn pipeline_artifact() {
+    let m = make_meta_artifact();
+    use_meta_artifact(m);
+}

@@ -108,27 +108,81 @@ pub(crate) fn arg_value(arg: &Arg, steps: bool) -> (String, Option<String>) {
     }
 }
 
+/// Same shape as [`arg_value`] but for an `Artifact<T>`-typed consumer
+/// slot: the substitution string lives in `from:` of an
+/// `arguments.artifacts[]` entry, referencing the producer's
+/// `outputs.artifacts.return` (or `inputs.artifacts.<n>` for a
+/// workflow-input forward). Argo wires artifacts by name, never via
+/// expressions, so dotted-form is fine here.
+///
+/// Only `Arg::Ref` and `Arg::Input` are valid sources for an artifact
+/// slot in v1 -- other Arg variants are blocked by the ghost via type
+/// mismatch (e.g. `Arg::Lit` of a `String` literal can't satisfy an
+/// `Artifact<String>` parameter). For belt-and-suspenders, those
+/// variants fall back to the parameter-form string, which would be
+/// rejected at submission if it ever escaped the ghost.
+pub(crate) fn arg_value_artifact(arg: &Arg, steps: bool) -> (String, Option<String>) {
+    let task_scope = if steps { "steps" } else { "tasks" };
+    let dep = |t: &str| (!steps).then(|| t.to_string());
+    match arg {
+        Arg::Ref(t) => (
+            format!("{{{{{task_scope}.{t}.outputs.artifacts.return}}}}"),
+            dep(t),
+        ),
+        Arg::Input(n) => (format!("{{{{inputs.artifacts.{n}}}}}"), None),
+        // Fallback to the parameter form; the ghost type-check
+        // prevents these from ever reaching an artifact-typed slot in
+        // valid programs.
+        _ => arg_value(arg, steps),
+    }
+}
+
 pub(crate) fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
     let task = &node.task;
     let callee = &node.callee;
 
-    // Per-task arg: push the value template into `__params` and, if the
-    // arg references an upstream task in dag mode, also push the dep.
+    // Per-task arg: push the value template into `__params` (parameter
+    // arg) or `__artifacts` (artifact arg) and, if the arg references
+    // an upstream task in dag mode, also push the dep. Kind comes from
+    // `<callee>::INPUT_KINDS[i]` at emit-time; backwards-compat default
+    // (empty/short slice) is Parameter, so any callee that hasn't been
+    // recompiled against the new trait keeps its old wiring.
     let arg_stmts = node.args.iter().enumerate().map(|(i, a)| {
-        let (value, dep) = arg_value(a, steps);
-        let dep_push = match dep {
+        let (param_value, param_dep) = arg_value(a, steps);
+        let (art_value, art_dep) = arg_value_artifact(a, steps);
+        let param_dep_push = match param_dep {
+            Some(d) => quote! { __deps.push(#d.to_string()); },
+            None => quote! {},
+        };
+        let art_dep_push = match art_dep {
             Some(d) => quote! { __deps.push(#d.to_string()); },
             None => quote! {},
         };
         quote! {
             {
                 let __name = __inputs.get(#i).copied().unwrap_or_default().to_string();
-                #dep_push
-                __params.push(::cargo_athena::api::Parameter {
-                    name: __name,
-                    value: ::core::option::Option::Some(#value.to_string()),
-                    ..::core::default::Default::default()
-                });
+                let __kind = __kinds
+                    .get(#i)
+                    .copied()
+                    .unwrap_or(::cargo_athena::IoKind::Parameter);
+                match __kind {
+                    ::cargo_athena::IoKind::Parameter => {
+                        #param_dep_push
+                        __params.push(::cargo_athena::api::Parameter {
+                            name: __name,
+                            value: ::core::option::Option::Some(#param_value.to_string()),
+                            ..::core::default::Default::default()
+                        });
+                    }
+                    ::cargo_athena::IoKind::Artifact => {
+                        #art_dep_push
+                        __artifacts.push(::cargo_athena::api::Artifact {
+                            name: __name,
+                            from: #art_value.to_string(),
+                            ..::core::default::Default::default()
+                        });
+                    }
+                }
             }
         }
     });
@@ -265,7 +319,16 @@ pub(crate) fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                 <#callee as ::cargo_athena::Template>::ARGO_NAME;
             let __inputs: &[&str] =
                 <#callee as ::cargo_athena::Template>::INPUTS;
+            // Per-input I/O kind: drives `arguments.parameters` vs
+            // `arguments.artifacts.from` dispatch per arg slot. Empty
+            // slice (the backwards-compat default on a callee that
+            // predates `Artifact<T>`) means "all parameters", same as
+            // today.
+            let __kinds: &[::cargo_athena::IoKind] =
+                <#callee as ::cargo_athena::Template>::INPUT_KINDS;
             let mut __params: ::std::vec::Vec<::cargo_athena::api::Parameter> =
+                ::std::vec::Vec::new();
+            let mut __artifacts: ::std::vec::Vec<::cargo_athena::api::Artifact> =
                 ::std::vec::Vec::new();
             let mut __deps: ::std::vec::Vec<::std::string::String> =
                 ::std::vec::Vec::new();
@@ -285,7 +348,7 @@ pub(crate) fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                 dependencies: __deps,
                 arguments: ::core::option::Option::Some(::cargo_athena::api::Arguments {
                     parameters: __params,
-                    ..::core::default::Default::default()
+                    artifacts: __artifacts,
                 }),
                 template_ref: ::core::option::Option::Some(
                     ::cargo_athena::api::TemplateRef {

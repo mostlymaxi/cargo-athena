@@ -23,6 +23,7 @@ const BIN_ASYNC: &str = env!("CARGO_BIN_EXE_smoke-async");
 const BIN_SECRETS: &str = env!("CARGO_BIN_EXE_smoke-secrets");
 const BIN_POD_ATTRS: &str = env!("CARGO_BIN_EXE_smoke-pod-attrs");
 const BIN_MUTEX: &str = env!("CARGO_BIN_EXE_smoke-mutex");
+const BIN_ARTIFACT: &str = env!("CARGO_BIN_EXE_smoke-artifact");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -290,6 +291,17 @@ fn emit_pipeline_secrets() {
 #[test]
 fn emit_pipeline_mutex() {
     assert_golden("pipeline_mutex.yaml", &run_bin(BIN_MUTEX, &[]));
+}
+
+/// `Artifact<T>` DAG-wired flow: pins the producer's
+/// `outputs.artifacts.return` (templated `s3.key`, no archive so
+/// Argo's default tar+gzip applies), the consumer's
+/// `inputs.artifacts`, and the workflow's
+/// `arguments.artifacts.return.from` wiring across the templateRef
+/// wormhole. Live-validated on Argo v4.0.5 (probe step, 2026-05-25).
+#[test]
+fn emit_pipeline_artifact() {
+    assert_golden("pipeline_artifact.yaml", &run_bin(BIN_ARTIFACT, &[]));
 }
 
 /// Run mode: with Argo's secretKeyRef env vars planted by the

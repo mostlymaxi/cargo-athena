@@ -22,7 +22,7 @@ use crate::conditional::emit_synth;
 use crate::ghost::ghost_fn;
 use crate::node_tokens::node_tokens;
 use crate::utils::{
-    check_yaml_safe_names, fn_args, make_argo_name, scan_body, sig_shim, str_slice,
+    check_yaml_safe_names, fn_args, is_artifact_ty, make_argo_name, scan_body, sig_shim, str_slice,
 };
 
 pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -80,34 +80,62 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     let synth_items: Vec<TokenStream2> = synths.iter().map(emit_synth).collect();
 
     // A returned value bubbles the terminal task's `return` up as this
-    // template's own `outputs.parameters.return`, so a parent can wire
-    // {{tasks.X.outputs.parameters.return}} to a sub-workflow exactly
-    // like a container.
+    // template's own `outputs.parameters.return` (or
+    // `outputs.artifacts.return` when the workflow returns
+    // `Artifact<T>`), so a parent can wire either flavor to a sub-
+    // workflow exactly like a container.
+    let workflow_returns_artifact = matches!(
+        &func.sig.output,
+        syn::ReturnType::Type(_, t) if is_artifact_ty(t),
+    );
     let outputs_tokens = match &output_task {
         Some(t) => {
             let scope = if steps_mode { "steps" } else { "tasks" };
-            let refstr = format!("{{{{{scope}.{t}.outputs.parameters.return}}}}");
-            quote! {
-                outputs: ::core::option::Option::Some(
-                    ::cargo_athena::api::Outputs {
-                        parameters: ::std::vec![
-                            ::cargo_athena::api::Parameter {
-                                name: "return".to_string(),
-                                value_from: ::core::option::Option::Some(
-                                    ::cargo_athena::api::ValueFrom {
-                                        parameter: #refstr.to_string(),
-                                        ..::core::default::Default::default()
-                                    }
-                                ),
-                                ..::core::default::Default::default()
-                            }
-                        ],
-                        ..::core::default::Default::default()
-                    }
-                ),
+            if workflow_returns_artifact {
+                let refstr = format!("{{{{{scope}.{t}.outputs.artifacts.return}}}}");
+                quote! {
+                    outputs: ::core::option::Option::Some(
+                        ::cargo_athena::api::Outputs {
+                            artifacts: ::std::vec![
+                                ::cargo_athena::api::Artifact {
+                                    name: "return".to_string(),
+                                    from: #refstr.to_string(),
+                                    ..::core::default::Default::default()
+                                }
+                            ],
+                            ..::core::default::Default::default()
+                        }
+                    ),
+                }
+            } else {
+                let refstr = format!("{{{{{scope}.{t}.outputs.parameters.return}}}}");
+                quote! {
+                    outputs: ::core::option::Option::Some(
+                        ::cargo_athena::api::Outputs {
+                            parameters: ::std::vec![
+                                ::cargo_athena::api::Parameter {
+                                    name: "return".to_string(),
+                                    value_from: ::core::option::Option::Some(
+                                        ::cargo_athena::api::ValueFrom {
+                                            parameter: #refstr.to_string(),
+                                            ..::core::default::Default::default()
+                                        }
+                                    ),
+                                    ..::core::default::Default::default()
+                                }
+                            ],
+                            ..::core::default::Default::default()
+                        }
+                    ),
+                }
             }
         }
         None => quote! {},
+    };
+    let output_kind_tok = if workflow_returns_artifact {
+        quote! { ::cargo_athena::IoKind::Artifact }
+    } else {
+        quote! { ::cargo_athena::IoKind::Parameter }
     };
 
     // Distinct callee + hook-template + on_exit paths -> recurse their
@@ -120,15 +148,45 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         .filter(|p| seen_callees.insert(quote!(#p).to_string()))
         .collect();
 
-    let arg_names: Vec<String> = fn_args(&func).iter().map(|(i, _)| i.to_string()).collect();
+    let wf_args = fn_args(&func);
+    let arg_names: Vec<String> = wf_args.iter().map(|(i, _)| i.to_string()).collect();
     let inputs_slice = str_slice(&arg_names);
     // Stringified arg types, parallel to INPUTS — `workflow ls` shows
     // them (same as `container ls`).
-    let arg_type_strs: Vec<String> = fn_args(&func)
+    let arg_type_strs: Vec<String> = wf_args
         .iter()
         .map(|(_, t)| quote!(#t).to_string())
         .collect();
     let input_types_slice = str_slice(&arg_type_strs);
+    // Per-arg I/O kind: `Artifact<T>` workflow inputs land on
+    // `inputs.artifacts[]` (so a parent passes them through
+    // `arguments.artifacts.from`); everything else stays on
+    // `inputs.parameters[]`. Stamped into `INPUT_KINDS` so the parent
+    // workflow's per-task wiring reads it at emit-time.
+    let arg_is_artifact: Vec<bool> = wf_args.iter().map(|(_, t)| is_artifact_ty(t)).collect();
+    let input_kind_toks: Vec<TokenStream2> = arg_is_artifact
+        .iter()
+        .map(|a| {
+            if *a {
+                quote! { ::cargo_athena::IoKind::Artifact }
+            } else {
+                quote! { ::cargo_athena::IoKind::Parameter }
+            }
+        })
+        .collect();
+    let param_input_names: Vec<&String> = arg_names
+        .iter()
+        .zip(arg_is_artifact.iter())
+        .filter_map(|(n, a)| if *a { None } else { Some(n) })
+        .collect();
+    let art_input_names: Vec<&String> = arg_names
+        .iter()
+        .zip(arg_is_artifact.iter())
+        .filter_map(|(n, a)| if *a { Some(n) } else { None })
+        .collect();
+    let param_input_names_strs: Vec<String> =
+        param_input_names.iter().map(|s| (*s).clone()).collect();
+    let art_input_names_strs: Vec<String> = art_input_names.iter().map(|s| (*s).clone()).collect();
     let inputs_tokens = if arg_names.is_empty() {
         quote! { ::core::option::Option::None }
     } else {
@@ -136,11 +194,16 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             ::core::option::Option::Some(::cargo_athena::api::Inputs {
                 parameters: ::std::vec![
                     #( ::cargo_athena::api::Parameter {
-                        name: #arg_names.to_string(),
+                        name: #param_input_names_strs.to_string(),
                         ..::core::default::Default::default()
                     } ),*
                 ],
-                ..::core::default::Default::default()
+                artifacts: ::std::vec![
+                    #( ::cargo_athena::api::Artifact {
+                        name: #art_input_names_strs.to_string(),
+                        ..::core::default::Default::default()
+                    } ),*
+                ],
             })
         }
     };
@@ -389,6 +452,10 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             const ARGO_NAME: &'static str = #argo_name;
             const INPUTS: &'static [&'static str] = #inputs_slice;
             const INPUT_TYPES: &'static [&'static str] = #input_types_slice;
+            const INPUT_KINDS: &'static [::cargo_athena::IoKind] = &[
+                #( #input_kind_toks ),*
+            ];
+            const OUTPUT_KIND: ::cargo_athena::IoKind = #output_kind_tok;
             const KIND: ::cargo_athena::TemplateKind =
                 ::cargo_athena::TemplateKind::Workflow;
             #on_exit_const

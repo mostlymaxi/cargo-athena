@@ -18,8 +18,8 @@ use crate::attrs::{
     template_synchronization_tokens, timeout_tokens, ttl_const_tokens,
 };
 use crate::utils::{
-    check_yaml_safe_names, fn_args, make_argo_name, scan_body, secret_slice_tokens, sig_shim,
-    str_slice, with_host_rewritten,
+    check_yaml_safe_names, fn_args, is_artifact_ty, make_argo_name, scan_body, secret_slice_tokens,
+    sig_shim, str_slice, with_host_rewritten,
 };
 
 pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -67,13 +67,164 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         quote! { #impl_ident( #( #arg_idents ),* ) }
     };
     let arg_names: Vec<String> = arg_idents.iter().map(|i| i.to_string()).collect();
-    // Positional argv index per parameter (in declaration order).
-    let arg_indices: Vec<usize> = (0..arg_names.len()).collect();
     let inputs_slice = str_slice(&arg_names);
     // Stringified arg types, parallel to INPUTS — `container emulate`
     // type-checks supplied params against these before launching.
     let arg_type_strs: Vec<String> = arg_types.iter().map(|t| quote!(#t).to_string()).collect();
     let input_types_slice = str_slice(&arg_type_strs);
+
+    // Per-arg I/O kind: an `Artifact<T>` parameter or return type means
+    // the value flows via Argo's `outputs.artifacts` / `arguments
+    // .artifacts.from` channel (S3-backed). Everything else stays on the
+    // inline-parameter path. Used to (a) stamp the `INPUT_KINDS` /
+    // `OUTPUT_KIND` consts for the workflow side to read at emit-time,
+    // (b) split inputs into `inputs.parameters` vs `inputs.artifacts`,
+    // (c) branch the `run()` body's deserialization per arg (argv vs
+    // file), (d) emit `outputs.parameters.return` vs
+    // `outputs.artifacts.return`, and (e) drive the bootstrap's
+    // CARGO_ATHENA_OUTPUT path.
+    let arg_is_artifact: Vec<bool> = arg_types.iter().map(|t| is_artifact_ty(t)).collect();
+    let output_is_artifact = matches!(
+        &func.sig.output,
+        syn::ReturnType::Type(_, t) if is_artifact_ty(t),
+    );
+    let output_kind_tok = if output_is_artifact {
+        quote! { ::cargo_athena::IoKind::Artifact }
+    } else {
+        quote! { ::cargo_athena::IoKind::Parameter }
+    };
+    let input_kind_toks: Vec<proc_macro2::TokenStream> = arg_is_artifact
+        .iter()
+        .map(|a| {
+            if *a {
+                quote! { ::cargo_athena::IoKind::Artifact }
+            } else {
+                quote! { ::cargo_athena::IoKind::Parameter }
+            }
+        })
+        .collect();
+    // Parameter-only args: the names that survive into `inputs
+    // .parameters[]` and into `container.args` positional substitution.
+    // Artifact args are out-of-band, so they don't get a positional
+    // slot.
+    let param_only_names: Vec<&String> = arg_names
+        .iter()
+        .zip(arg_is_artifact.iter())
+        .filter_map(|(n, a)| if *a { None } else { Some(n) })
+        .collect();
+    let param_only_names_strs: Vec<String> =
+        param_only_names.iter().map(|s| (*s).clone()).collect();
+
+    // Per-arg `run()` body deserialization statement. Parameter args
+    // read from `__argv` (positional, in PARAMETER-only order);
+    // artifact args read from `/athena/in/<name>` (one file per arg,
+    // written by Argo's input-artifact tar+untar). The split lets a
+    // container mix the two kinds without messing up argv indexing.
+    let mut param_idx: usize = 0;
+    let arg_deser_stmts: Vec<proc_macro2::TokenStream> = arg_idents
+        .iter()
+        .zip(arg_types.iter())
+        .zip(arg_names.iter())
+        .zip(arg_is_artifact.iter())
+        .map(|(((ident, ty), name), is_art)| {
+            if *is_art {
+                quote! {
+                    let #ident: #ty = {
+                        let __path = ::std::format!(
+                            "{}/{}",
+                            ::cargo_athena::ATHENA_INPUT_ARTIFACT_DIR,
+                            #name,
+                        );
+                        let __file = ::std::fs::File::open(&__path)
+                            .unwrap_or_else(|e| ::std::panic!(
+                                "open artifact input `{}` at {}: {}",
+                                #name, __path, e
+                            ));
+                        ::cargo_athena::serde_json::from_reader(__file)
+                            .unwrap_or_else(|e| ::std::panic!(
+                                "deserialize artifact input `{}`: {}",
+                                #name, e
+                            ))
+                    };
+                }
+            } else {
+                let pi = param_idx;
+                param_idx += 1;
+                quote! {
+                    let __raw: &::std::primitive::str = &__argv[#pi];
+                    let #ident: #ty =
+                        ::cargo_athena::serde_json::from_str(__raw)
+                            .or_else(|_| {
+                                ::cargo_athena::serde_json::from_value(
+                                    ::cargo_athena::serde_json::Value::String(__raw.to_string())
+                                )
+                            })
+                            .expect(concat!(
+                                "deserialize container input `", #name, "`"
+                            ));
+                }
+            }
+        })
+        .collect();
+    let param_arg_count = param_idx;
+    // The list of artifact-typed arg names; each becomes its own
+    // `inputs.artifacts[]` entry with path `/athena/in/<name>`. The
+    // run() body reads + deserializes the file at that path.
+    let art_arg_names: Vec<&String> = arg_names
+        .iter()
+        .zip(arg_is_artifact.iter())
+        .filter_map(|(n, a)| if *a { Some(n) } else { None })
+        .collect();
+    let art_arg_names_strs: Vec<String> = art_arg_names.iter().map(|s| (*s).clone()).collect();
+
+    // The producer's return-side outputs block, branched at macro
+    // time on the return type's kind. Parameter: today's
+    // `outputs.parameters.return.valueFrom.path` (read from
+    // ATHENA_RESULT_FILE). Artifact: `outputs.artifacts.return` with
+    // an S3 location keyed off `{{pod.name}}` (node-unique within a
+    // workflow, workflow-unique because pod names include the wf
+    // name; verified live on Argo v4.0.5). No `archive:` so Argo's
+    // executor default (tar+gzip on producer, untar on consumer)
+    // round-trips a single file through S3 transparently to user code.
+    let return_param_block = quote! {
+        parameters: ::std::vec![ ::cargo_athena::api::Parameter {
+            name: "return".to_string(),
+            value_from: ::core::option::Option::Some(
+                ::cargo_athena::api::ValueFrom {
+                    path: ::cargo_athena::ATHENA_RESULT_FILE.to_string(),
+                    ..::core::default::Default::default()
+                }
+            ),
+            ..::core::default::Default::default()
+        } ],
+    };
+    let return_artifact_block = quote! {
+        parameters: ::std::vec![],
+    };
+    let return_artifact_extra = if output_is_artifact {
+        Some(quote! {
+            {
+                let __s3 = &__ctx.config().artifact_repository.s3;
+                __out_artifacts.push(::cargo_athena::api::Artifact {
+                    name: "return".to_string(),
+                    path: ::cargo_athena::ATHENA_RESULT_ARTIFACT_FILE.to_string(),
+                    s3: ::core::option::Option::Some(
+                        ::cargo_athena::s3_loc(__s3, "{{pod.name}}/return")
+                    ),
+                    archive: ::core::option::Option::None,
+                    mode: ::core::option::Option::None,
+                    from: ::std::string::String::new(),
+                });
+            }
+        })
+    } else {
+        None
+    };
+    let outputs_param_block = if output_is_artifact {
+        return_artifact_block
+    } else {
+        return_param_block
+    };
     let host_slice = str_slice(&scan.host_paths);
     let in_art_slice = str_slice(&scan.in_artifacts);
     let out_art_slice = str_slice(&scan.out_artifacts);
@@ -336,6 +487,10 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             const ARGO_NAME: &'static str = #argo_name;
             const INPUTS: &'static [&'static str] = #inputs_slice;
             const INPUT_TYPES: &'static [&'static str] = #input_types_slice;
+            const INPUT_KINDS: &'static [::cargo_athena::IoKind] = &[
+                #( #input_kind_toks ),*
+            ];
+            const OUTPUT_KIND: ::cargo_athena::IoKind = #output_kind_tok;
             const KIND: ::cargo_athena::TemplateKind =
                 ::cargo_athena::TemplateKind::Container;
             #on_exit_const
@@ -348,36 +503,33 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             fn run(__argv: &[::std::string::String]) -> ::std::string::String
             {
-                // Argv length must match INPUTS. A mismatch means the
-                // running binary and the WorkflowTemplate that scheduled
-                // it were built from different source revisions; fail
-                // loud rather than silently mis-bind positions.
-                let __expected = <Self as ::cargo_athena::Template>::INPUTS.len();
+                // Argv length must match the count of PARAMETER args
+                // (artifact args arrive via files, not argv). A
+                // mismatch means the binary and the WorkflowTemplate
+                // that scheduled it were built from different source
+                // revisions; fail loud rather than silently mis-bind
+                // positions.
+                let __expected = #param_arg_count;
                 if __argv.len() != __expected {
                     panic!(
-                        "{}: argv has {} arg(s), expected {} (binary <-> template version drift?)",
+                        "{}: argv has {} arg(s), expected {} parameter(s) (binary <-> template version drift?)",
                         <Self as ::cargo_athena::Template>::ARGO_NAME,
                         __argv.len(),
                         __expected,
                     );
                 }
-                #(
-                    // Argo delivers each parameter value JSON-encoded
-                    // (string -> "v", number/bool bare). Fall back to a
-                    // raw-string interpretation for the unquoted case.
-                    let __raw: &::std::primitive::str = &__argv[#arg_indices];
-                    let #arg_idents: #arg_types =
-                        ::cargo_athena::serde_json::from_str(__raw)
-                            .or_else(|_| {
-                                ::cargo_athena::serde_json::from_value(
-                                    ::cargo_athena::serde_json::Value::String(__raw.to_string())
-                                )
-                            })
-                            .expect(concat!(
-                                "deserialize container input `", #arg_names, "`"
-                            ));
-                )*
+                // Per-arg deserialization, branched by kind:
+                // parameter args read from `__argv` (positional in
+                // PARAMETER-only order); artifact args read a JSON file
+                // at `/athena/in/<name>` written by Argo's input-
+                // artifact tar+untar.
+                #( #arg_deser_stmts )*
                 let __out = #call_expr;
+                // Serde-transparent `Artifact<T>` serializes as T, so
+                // this write site stays kind-agnostic; the bootstrap
+                // has already routed CARGO_ATHENA_OUTPUT to the right
+                // file path (ATHENA_RESULT_FILE for parameter,
+                // ATHENA_RESULT_ARTIFACT_FILE for artifact).
                 ::cargo_athena::serde_json::to_string(&__out)
                     .expect("serialize container output")
             }
@@ -400,10 +552,16 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                     );
                 // Arbitrary user image + the arch-resolving bootstrap that
                 // pulls & exec's the athena binary delivered as an artifact.
+                // Only parameter args become positional argv; artifact
+                // args arrive via files and aren't substituted into
+                // `container.args`. The bootstrap also keys the
+                // CARGO_ATHENA_OUTPUT path off OUTPUT_KIND so the
+                // parameter/artifact write site picks the right file.
                 let __d = ::cargo_athena::container_delivery(
                     __ctx,
-                    &[ #( #arg_names ),* ],
+                    &[ #( #param_only_names_strs ),* ],
                     #image_opt,
+                    <Self as ::cargo_athena::Template>::OUTPUT_KIND,
                 );
                 // Native Argo artifact ports (no S3): own load/save decls
                 // ∪ the #[fragment] closure.
@@ -414,6 +572,30 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 let mut __in_artifacts = ::std::vec![ __d.artifact ];
                 __in_artifacts.extend(
                     ::cargo_athena::artifact_inputs(__ctx, &__in_names));
+                // `Artifact<T>`-typed fn args declared as Argo input
+                // artifacts; each lands as a single file at
+                // `/athena/in/<name>` (Argo's executor unpacks the
+                // tar+gzip transparently).
+                #(
+                    __in_artifacts.push(::cargo_athena::api::Artifact {
+                        name: #art_arg_names_strs.to_string(),
+                        path: ::std::format!(
+                            "{}/{}",
+                            ::cargo_athena::ATHENA_INPUT_ARTIFACT_DIR,
+                            #art_arg_names_strs,
+                        ),
+                        s3: ::core::option::Option::None,
+                        archive: ::core::option::Option::None,
+                        mode: ::core::option::Option::None,
+                        from: ::std::string::String::new(),
+                    });
+                )*
+                let mut __out_artifacts =
+                    ::cargo_athena::artifact_outputs(__ctx, &__out_names);
+                // Append `outputs.artifacts.return` when this container
+                // returns an `Artifact<T>` (the S3-backed DAG-wired
+                // path); a no-op otherwise.
+                #return_artifact_extra
                 // `#[container(annotations = { "k" = "lit" + arg, … })]`
                 // lands on `Template.metadata.annotations`. Built-then-
                 // checked: when the BTreeMap stays empty (no attr) we
@@ -436,30 +618,27 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                     name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
                     metadata: __metadata,
                     inputs: ::core::option::Option::Some(::cargo_athena::api::Inputs {
+                        // Only parameter-typed args appear here;
+                        // artifact-typed args are pushed into
+                        // `__in_artifacts` above.
                         parameters: ::std::vec![
                             #( ::cargo_athena::api::Parameter {
-                                name: #arg_names.to_string(),
+                                name: #param_only_names_strs.to_string(),
                                 ..::core::default::Default::default()
                             } ),*
                         ],
                         artifacts: __in_artifacts,
                     }),
                     outputs: ::core::option::Option::Some(::cargo_athena::api::Outputs {
-                        parameters: ::std::vec![ ::cargo_athena::api::Parameter {
-                            // Named `return` (NOT `result`): `outputs.result`
-                            // is Argo's script-stdout alias — a distinct
-                            // thing. This is the serialized fn return value,
-                            // captured from the /athena/result file.
-                            name: "return".to_string(),
-                            value_from: ::core::option::Option::Some(
-                                ::cargo_athena::api::ValueFrom {
-                                    path: "/athena/result".to_string(),
-                                    ..::core::default::Default::default()
-                                }
-                            ),
-                            ..::core::default::Default::default()
-                        } ],
-                        artifacts: ::cargo_athena::artifact_outputs(__ctx, &__out_names),
+                        // Named `return` (NOT `result`): `outputs.result`
+                        // is Argo's script-stdout alias — a distinct
+                        // thing. The return is on `outputs.parameters
+                        // .return` (read from ATHENA_RESULT_FILE) by
+                        // default; an `Artifact<T>` return lands on
+                        // `outputs.artifacts.return` instead (pushed
+                        // into `__out_artifacts` above).
+                        #outputs_param_block
+                        artifacts: __out_artifacts,
                     }),
                     container: ::core::option::Option::Some(::cargo_athena::api::Container {
                         image: __d.image,

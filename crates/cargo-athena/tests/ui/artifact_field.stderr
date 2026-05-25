@@ -1,0 +1,5 @@
+error[E0616]: field `inner` of struct `cargo_athena::Artifact` is private
+  --> tests/ui/artifact_field.rs:19:15
+   |
+19 |     use_str(a.inner);
+   |               ^^^^^ private field

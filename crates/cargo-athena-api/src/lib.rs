@@ -299,6 +299,13 @@ argo! {
         pub archive: Option<ArchiveStrategy>,
         /// Octal file mode applied to the downloaded file.
         pub mode: Option<i32>,
+        /// DAG-wired artifact reference: `from: "{{tasks.<dep>.outputs
+        /// .artifacts.return}}"` on an `arguments.artifacts[]` slot (or
+        /// the equivalent bubble on a sub-workflow's own
+        /// `outputs.artifacts[]`). Skip-empty so existing artifact
+        /// emissions (binary tarball / `save_artifact!` ports) stay
+        /// byte-identical.
+        pub from: String,
     }
 
     /// Mirrors a k8s SecretKeySelector — a key in a Secret. `optional`
