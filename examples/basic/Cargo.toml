@@ -1,7 +1,7 @@
 [package]
 name = "cargo-athena-example-basic"
 edition.workspace = true
-version.workspace = true
+version = "0.0.0"
 license.workspace = true
 publish = false
 

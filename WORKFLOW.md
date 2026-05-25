@@ -124,8 +124,8 @@ Three knobs at three scopes. Pick by reach:
   `"lit" + arg` injection of the workflow's own arguments.
 
 **`boundary_node_selector` is intentionally literal-only.** If you
-want a value that depends on an argument, use `node_selector_if_root`
-- it's the only `#[workflow]` knob where per-arg injection has clear,
+want a value that depends on an argument, use `node_selector_if_root`:
+it's the only `#[workflow]` knob where per-arg injection has clear,
 predictable semantics. Hand-written `{{workflow.parameters.X}}` is
 accepted in a literal as an eyes-open escape hatch, but the natural
 mental model of "this template's arg" doesn't hold for the boundary
