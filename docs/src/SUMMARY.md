@@ -17,4 +17,5 @@
 - [Cookbook](cookbook.md)
 - [Troubleshooting](troubleshooting.md)
 - [Testing](testing.md)
+- [Examples](examples.md)
 - [Supported Argo Versions](argo-versions.md)
