@@ -145,6 +145,7 @@ dependencies = [
  "cargo-athena-core",
  "cargo-athena-macros",
  "clap",
+ "console",
  "flate2",
  "futures",
  "indicatif",

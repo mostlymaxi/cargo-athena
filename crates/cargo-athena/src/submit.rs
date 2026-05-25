@@ -21,11 +21,15 @@ use std::io::Write;
 use std::process::exit;
 
 #[derive(clap::Args)]
+#[command(after_help = "\
+Tip: `cargo athena workflow describe <TEMPLATE>` lists the template's \
+expected inputs (name + Rust type) plus a copy-pasteable submit line.")]
 pub struct SubmitArgs {
     /// Template to submit — a `#[workflow]` (the whole DAG) or one
     /// `#[container]`. Full name (`<crate>-<fn>` kebab, or the
     /// `#[..(name = "…")]` override); list with
-    /// `cargo athena workflow ls` / `container ls`.
+    /// `cargo athena workflow ls` / `container ls`. Run
+    /// `cargo athena workflow describe <TEMPLATE>` to see its inputs.
     template: String,
     #[command(flatten)]
     pkg: crate::pkg::PkgSel,
@@ -342,9 +346,12 @@ pub fn submit(a: SubmitArgs) {
         "template list",
     ))
     .unwrap_or_else(|e| die(&format!("could not parse template list ({e})")));
+    // Accept either the full `<crate>-<fn>` name or the short form
+    // (no package prefix) — the user already passed `--package`/`--bin`,
+    // so re-typing the package prefix is just noise.
     let root = metas
         .iter()
-        .find(|m| m.name == a.template)
+        .find(|m| m.name == a.template || m.name == format!("{}-{}", m.package, a.template))
         .unwrap_or_else(|| {
             die(&format!(
                 "no template named {:?} (see `cargo athena workflow ls` / `container ls`)",
@@ -463,17 +470,20 @@ pub fn submit(a: SubmitArgs) {
             (k.to_string(), v.to_string())
         })
         .collect();
+    // Use the resolved full template name (`root.name`); `a.template`
+    // may be the short form the user typed (no package prefix).
+    let tpl_name = &root.name;
     let wf = api::Workflow {
         api_version: api::API_VERSION.to_string(),
         kind: api::KIND_WORKFLOW.to_string(),
         metadata: Some(api::ObjectMeta {
-            generate_name: format!("{}-", a.template),
+            generate_name: format!("{tpl_name}-"),
             namespace: ns.clone(),
             ..Default::default()
         }),
         spec: Some(api::WorkflowSpec {
             workflow_template_ref: Some(api::WorkflowTemplateRef {
-                name: a.template.clone(),
+                name: tpl_name.clone(),
                 cluster_scope: false,
             }),
             arguments: (!params.is_empty()).then(|| api::Arguments {
@@ -488,15 +498,12 @@ pub fn submit(a: SubmitArgs) {
     };
 
     if !confirm(
-        &format!(
-            "submit `{}` (workflowTemplateRef) in `{ns}` as serviceAccount `{sa}`?",
-            a.template
-        ),
+        &format!("submit `{tpl_name}` (workflowTemplateRef) in `{ns}` as serviceAccount `{sa}`?"),
         a.yes,
     ) {
         die("aborted (not submitted)");
     }
-    let st = crate::feedback::step(format!("Creating Workflow `{}`", a.template));
+    let st = crate::feedback::step(format!("Creating Workflow `{tpl_name}`"));
     let name = cluster.submit_workflow(&ns, &wf);
     if name.is_empty() {
         drop(st);

@@ -68,5 +68,9 @@ k8s-openapi = { version = "0.24", features = ["latest"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # progress bars / spinners on uploads + downloads. tiny dep, no transitives.
 indicatif = "0.18"
+# ANSI styling (`console::Style`) for `describe` output - TTY-aware,
+# auto no-color when piped or under NO_COLOR. Already in the tree via
+# indicatif; declaring it explicitly so we can use the API directly.
+console = "0.16"
 # stream chunks during S3 multipart upload (bound the bar's `Stream`).
 futures = "0.3"

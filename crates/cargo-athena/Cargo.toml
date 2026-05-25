@@ -32,6 +32,7 @@ cli = [
     "dep:tar",
     "dep:flate2",
     "dep:indicatif",
+    "dep:console",
     "dep:futures",
 ]
 # Enable `async fn` bodies on `#[container]` (driven by Tokio). Pulls
@@ -54,6 +55,7 @@ reqwest = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
 indicatif = { workspace = true, optional = true }
+console = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 
 [dev-dependencies]

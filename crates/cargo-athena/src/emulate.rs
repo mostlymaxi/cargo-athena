@@ -61,105 +61,161 @@ pub struct DescribeArgs {
     template: String,
     #[command(flatten)]
     pkg: PkgSel,
-}
-
-#[derive(clap::Args)]
-pub struct LsArgs {
-    #[command(flatten)]
-    pkg: PkgSel,
-    /// Include `#[workflow]`s and synthetic templates too (default:
-    /// only `#[container]`s — the things `emulate` runs).
+    /// Print the raw `ContainerRunMeta` JSON (scriptable). Default is
+    /// a short human-readable summary listing inputs + resources.
     #[arg(long)]
-    all: bool,
+    json: bool,
 }
 
-#[derive(clap::Args)]
-pub struct WorkflowLsArgs {
-    #[command(flatten)]
-    pkg: PkgSel,
-    /// Also list athena-synthesized `if`/`else` wrapper + arm
-    /// sub-workflows (an implementation detail, hidden by default).
-    #[arg(long)]
-    include_synthetic: bool,
+/// `workflow describe <name>` - print one template's metadata
+/// (inputs, image, resources). Accepts either a `#[container]` or a
+/// `#[workflow]` since a workflow is the more general thing.
+pub fn describe_workflow(a: DescribeArgs) {
+    print_describe(a, /*containers_only=*/ false);
 }
 
-/// `container describe` / `workflow describe` — print the metadata one
-/// template reports (image, params+types, the binary/`host!`/artifact
-/// ports, scratch + result paths). Exactly what `emulate` consumes.
-pub fn describe_print(a: DescribeArgs) {
+/// `container describe <name>` - same as `workflow describe` for
+/// containers, but errors if the target is a `#[workflow]` (the
+/// `container` namespace is the narrow view, used alongside
+/// `container ls` and `container emulate` which are container-only).
+pub fn describe_container(a: DescribeArgs) {
+    print_describe(a, /*containers_only=*/ true);
+}
+
+fn print_describe(a: DescribeArgs, containers_only: bool) {
     let (pkg, bin) = a.pkg.resolve();
     let meta = describe(&a.template, pkg.as_deref(), bin.as_deref());
+    if containers_only && meta.kind != "container" {
+        eprintln!(
+            "cargo athena container describe: {:?} is a #[{}]; use \
+             `cargo athena workflow describe {}` instead (workflow \
+             accepts either kind).",
+            meta.name, meta.kind, meta.name
+        );
+        exit(2);
+    }
+    if a.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&meta).expect("ContainerRunMeta is serializable")
+        );
+    } else {
+        print_human(&meta);
+    }
+}
+
+/// Human-readable describe output: a flat metadata block, then the
+/// Rust-style fn signature, then a copy-pasteable submit command. The
+/// raw JSON form (back-compat for scripts) is one `--json` away.
+///
+/// Coloring uses `console::Style`, which auto-disables when stdout
+/// isn't a TTY or `NO_COLOR` is set, so piped output stays clean.
+fn print_human(m: &ContainerRunMeta) {
+    use console::Style;
+    // `Style::for_stderr/stdout` would inherit each stream's TTY state,
+    // but we write to stdout exclusively here.
+    let kind_s = Style::new().cyan().bold();
+    let name_s = Style::new().bold();
+    let pkg_s = Style::new().dim();
+    let label_s = Style::new().dim();
+    let sig_kw = Style::new().magenta();
+    let cmd_s = Style::new().green();
+
+    let kind = if m.kind.is_empty() {
+        "template"
+    } else {
+        &m.kind
+    };
+    // Default emit names are `<crate>-<fn>`; show just the short form
+    // here (the package is right next to it). Overridden names without
+    // that prefix stay verbatim.
+    let pfx = format!("{}-", m.package);
+    let short = m.name.strip_prefix(&pfx).unwrap_or(&m.name);
+
+    // Header: `<kind> <name>  (<package>)`
+    println!();
+    let head_pkg = if m.package.is_empty() {
+        String::new()
+    } else {
+        format!("  {}", pkg_s.apply_to(format!("({})", m.package)))
+    };
     println!(
-        "{}",
-        serde_json::to_string_pretty(&meta).expect("ContainerRunMeta is serializable")
+        "{} {}{head_pkg}",
+        kind_s.apply_to(kind),
+        name_s.apply_to(short)
     );
-}
+    println!();
 
-/// Spawn the workflow binary in list-mode and parse every template's
-/// metadata (shared by `container ls` and `workflow ls`).
-fn fetch_list(pkg: Option<&str>, bin: Option<&str>) -> Vec<ContainerRunMeta> {
-    let mut cmd = crate::cargo_run(pkg, bin);
-    cmd.env("CARGO_ATHENA_LIST", "1");
-    // Stream cargo's "Compiling..." progress to the user's terminal.
-    cmd.stderr(Stdio::inherit());
-    let out = cmd
-        .output()
-        .unwrap_or_else(|e| die(&format!("failed to spawn `cargo run`: {e}")));
-    if !out.status.success() || out.stdout.is_empty() {
-        die("could not list templates (run from your workflow crate, or pass --package/--bin)");
+    // Flat metadata block - only the lines that are populated. Aligned
+    // column so the values line up.
+    let mut rows: Vec<(&str, String)> = Vec::new();
+    if m.kind == "container" && !m.image.is_empty() {
+        rows.push(("image", m.image.clone()));
     }
-    serde_json::from_slice(&out.stdout)
-        .unwrap_or_else(|e| die(&format!("could not parse template list ({e})")))
-}
+    if !m.host_paths.is_empty() {
+        rows.push(("host mounts", m.host_paths.join(", ")));
+    }
+    if !m.input_artifacts.is_empty() {
+        let keys: Vec<String> = m.input_artifacts.iter().map(|a| a.s3.key.clone()).collect();
+        rows.push(("input artifacts", keys.join(", ")));
+    }
+    if !m.output_artifacts.is_empty() {
+        let keys: Vec<String> = m
+            .output_artifacts
+            .iter()
+            .map(|a| a.s3.key.clone())
+            .collect();
+        rows.push(("output artifacts", keys.join(", ")));
+    }
+    if !rows.is_empty() {
+        let w = rows.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
+        for (k, v) in &rows {
+            println!("  {}  {v}", label_s.apply_to(format!("{k:<w$}")));
+        }
+        println!();
+    }
 
-/// Render a `NAME  KIND  ARGS` table (rows pre-filtered + sorted).
-fn print_table(mut rows: Vec<&ContainerRunMeta>) {
-    rows.sort_by(|x, y| x.name.cmp(&y.name));
-    if rows.is_empty() {
-        eprintln!("(no matching templates)");
-        return;
-    }
-    let w = rows.iter().map(|m| m.name.len()).max().unwrap_or(4).max(4);
-    println!("{:<w$}  KIND       ARGS", "NAME", w = w);
-    for m in rows {
-        let sig = m
+    // Rust-style fn signature - the same shape `ls` shows as
+    // `SIGNATURE`, but with the leading `fn <name>`.
+    let inner = m
+        .params
+        .iter()
+        .map(|p| {
+            if p.ty.is_empty() {
+                p.name.clone()
+            } else {
+                format!("{}: {}", p.name, p.ty)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!(
+        "  {} {}({inner})",
+        sig_kw.apply_to("fn"),
+        name_s.apply_to(short)
+    );
+
+    // Copy-pasteable submit line. Short name (submit accepts either).
+    println!();
+    let cmd = if m.params.is_empty() {
+        format!("cargo athena submit {short}")
+    } else {
+        let args: Vec<String> = m
             .params
             .iter()
             .map(|p| {
-                if p.ty.is_empty() {
-                    p.name.clone()
+                let ty = if p.ty.is_empty() {
+                    "?".into()
                 } else {
-                    format!("{}: {}", p.name, p.ty)
-                }
+                    p.ty.clone()
+                };
+                format!("-a {}=<{}>", p.name, ty)
             })
-            .collect::<Vec<_>>()
-            .join(", ");
-        println!("{:<w$}  {:<9}  {sig}", m.name, m.kind, w = w);
-    }
-}
-
-/// `cargo athena container ls` — discoverable names for
-/// `emulate`/`describe`. Containers only unless `--all`.
-pub fn container_ls(a: LsArgs) {
-    let (pkg, bin) = a.pkg.resolve();
-    let all = fetch_list(pkg.as_deref(), bin.as_deref());
-    print_table(
-        all.iter()
-            .filter(|m| a.all || m.kind == "container")
-            .collect(),
-    );
-}
-
-/// `cargo athena workflow ls` — the `#[workflow]`s in the package
-/// (synthetic `if` wrappers/arms hidden unless `--include-synthetic`).
-pub fn workflow_ls(a: WorkflowLsArgs) {
-    let (pkg, bin) = a.pkg.resolve();
-    let all = fetch_list(pkg.as_deref(), bin.as_deref());
-    print_table(
-        all.iter()
-            .filter(|m| m.kind == "workflow" && (a.include_synthetic || !m.synthetic))
-            .collect(),
-    );
+            .collect();
+        format!("cargo athena submit {short} {}", args.join(" "))
+    };
+    println!("  {} {}", label_s.apply_to("$"), cmd_s.apply_to(cmd));
+    println!();
 }
 
 fn die(msg: &str) -> ! {

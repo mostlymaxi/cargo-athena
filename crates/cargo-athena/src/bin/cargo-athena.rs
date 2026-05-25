@@ -22,6 +22,8 @@ mod emulate;
 mod feedback;
 #[path = "../init.rs"]
 mod init;
+#[path = "../ls.rs"]
+mod ls;
 #[path = "../pkg.rs"]
 mod pkg;
 #[path = "../submit.rs"]
@@ -131,18 +133,19 @@ enum ContainerCmd {
     /// scratch + result paths. Exactly what `emulate` consumes (derived
     /// from the same `Template::build()` as `emit`).
     Describe(emulate::DescribeArgs),
-    /// List the templates a workflow binary reports (names + args), so
-    /// they're discoverable for `emulate`/`describe`. `--all` includes
-    /// `#[workflow]`s + synthetics; default is `#[container]`s only.
-    Ls(emulate::LsArgs),
+    /// List the `#[container]`s in the package (the things `container
+    /// emulate` runs). For the wider view that also includes
+    /// `#[workflow]`s, run `cargo athena workflow ls`.
+    Ls(ls::LsArgs),
 }
 
 #[derive(Subcommand)]
 enum WorkflowCmd {
-    /// List the `#[workflow]`s in the package (name + typed args).
+    /// List every reachable template - both `#[container]`s and
+    /// `#[workflow]`s (workflow is the more general view).
     /// Synthetic `if`/`else` wrappers + arms are hidden unless
     /// `--include-synthetic`.
-    Ls(emulate::WorkflowLsArgs),
+    Ls(ls::WorkflowLsArgs),
     /// Print one workflow's metadata (same as `container describe`,
     /// for any template).
     Describe(emulate::DescribeArgs),
@@ -179,12 +182,12 @@ fn main() {
         }
         Cmd::Container { cmd } => match cmd {
             ContainerCmd::Emulate(args) => emulate::container_emulate(args),
-            ContainerCmd::Describe(args) => emulate::describe_print(args),
-            ContainerCmd::Ls(args) => emulate::container_ls(args),
+            ContainerCmd::Describe(args) => emulate::describe_container(args),
+            ContainerCmd::Ls(args) => ls::container_ls(args),
         },
         Cmd::Workflow { cmd } => match cmd {
-            WorkflowCmd::Ls(args) => emulate::workflow_ls(args),
-            WorkflowCmd::Describe(args) => emulate::describe_print(args),
+            WorkflowCmd::Ls(args) => ls::workflow_ls(args),
+            WorkflowCmd::Describe(args) => emulate::describe_workflow(args),
         },
         Cmd::Submit(args) => submit::submit(args),
         Cmd::Build {
