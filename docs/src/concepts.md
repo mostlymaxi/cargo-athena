@@ -37,25 +37,18 @@ likewise into `service_account`, `node_selector`, `env`, and the
 mutex `name` / `namespace`). See
 [`#[container]` Parameter injection](container.md#parameter-injection).
 
-## 4. Data between steps is JSON
+## 4. `#[fragment]` carries pod resources
 
-Every value passed between steps is JSON-encoded into a parameter
-and decoded by the receiver. This keeps a `String` `"7"` a string on
-the wire (never silently parsed as a number).
+A fragment is a normal helper that runs as real Rust code in the
+calling container's pod. It can take arguments and return values
+like any function. Its only superpower: every `host!` mount, S3
+artifact port, or `secret!` env it declares is also added to each
+container that transitively calls it.
 
-It also makes more specialised plumbing fall out cleanly: `b.field`
-on a binding wires only that field to the next task, and
-`list.fan_out(|x| step(x))` runs `step` once per element of the list.
+Share setup logic, mounts, and secrets across containers without a
+registry.
 
-## 5. `#[fragment]` carries pod resources
-
-Pod resources (`host!` mounts, S3 artifact ports, `secret!` envs)
-are declared inside a `#[container]` or `#[fragment]`. A fragment is
-a normal helper that runs as real code in the calling pod; every
-resource it declares is added to each container that transitively
-calls it. Share pod resources without a registry.
-
-## 6. Your workflow binary runs in two worlds
+## 5. Your workflow binary runs in two worlds
 
 The binary your workflow crate compiles to plays two roles:
 
