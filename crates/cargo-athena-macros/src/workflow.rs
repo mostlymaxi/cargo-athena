@@ -14,8 +14,9 @@ use syn::{Expr, ItemFn, Path};
 
 use crate::analyze::analyze_workflow;
 use crate::attrs::{
-    WorkflowArgs, inject_lower, parse_attr, pod_gc_const_tokens, retry_strategy_tokens,
-    secs_i64_tok, ttl_const_tokens,
+    WorkflowArgs, inject_lower, lower_mutex_pairs, mutexes_if_root_const_tokens, parse_attr,
+    pod_gc_const_tokens, retry_strategy_tokens, secs_i64_tok, template_synchronization_tokens,
+    ttl_const_tokens,
 };
 use crate::conditional::emit_synth;
 use crate::ghost::ghost_fn;
@@ -197,6 +198,39 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     let node_selector_if_root_tok = quote! {
         &[ #( (#nsi_keys, #nsi_vals) ),* ]
     };
+    // `mutexes = [{ name, namespace }, …]` (template-level) /
+    // `mutexes_if_root = […]` (root-only). Lowers each operand via
+    // `inject_lower` against the right scope; injection operands flow
+    // into `wf_inject_ops` so the existing `__athena_inject_check_<fn>`
+    // shim covers them too:
+    //
+    // * Template scope = `inputs.parameters` (per-dag-invocation
+    //   substitution — empirically safe at `Template.synchronization`,
+    //   no nodeSelector-style boundary-copy footgun).
+    // * `_if_root` scope = `workflow.parameters` (the only form Argo
+    //   resolves at `WorkflowSpec` scope).
+    let mutex_pairs: Vec<(String, String)> = match lower_mutex_pairs(
+        &cfg.mutexes,
+        &argset,
+        &mut wf_inject_ops,
+        "inputs.parameters",
+        "workflow",
+    ) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let mutex_ifroot_pairs: Vec<(String, String)> = match lower_mutex_pairs(
+        &cfg.mutexes_if_root,
+        &argset,
+        &mut wf_inject_ops,
+        "workflow.parameters",
+        "workflow",
+    ) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let synchronization_tok = template_synchronization_tokens(&mutex_pairs);
+    let mutexes_if_root_tok = mutexes_if_root_const_tokens(&mutex_ifroot_pairs);
     // Type-guard for every injected workflow operand — same shape as the
     // container guard (a hidden never-run fn asserting `Injectable`).
     let wf_inject_check = if wf_inject_ops.is_empty() {
@@ -294,6 +328,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #node_selector_tokens
                 #retry_tokens
                 #outputs_tokens
+                synchronization: #synchronization_tok,
                 ..::core::default::Default::default()
             }
         }
@@ -311,6 +346,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #node_selector_tokens
                 #retry_tokens
                 #outputs_tokens
+                synchronization: #synchronization_tok,
                 ..::core::default::Default::default()
             }
         }
@@ -362,6 +398,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #active_deadline_if_root_tok;
             const NODE_SELECTOR_IF_ROOT: &'static [(&'static str, &'static str)] =
                 #node_selector_if_root_tok;
+            const MUTEXES_IF_ROOT: &'static [(&'static str, &'static str)] =
+                #mutexes_if_root_tok;
 
             fn build(_ctx: &::cargo_athena::BuildCtx)
                 -> ::cargo_athena::api::Template

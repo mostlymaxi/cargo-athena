@@ -1,0 +1,22 @@
+error[E0277]: the trait bound `Vec<u8>: cargo_athena::Injectable` is not satisfied
+ --> tests/ui/ctr_mutex_namespace_not_injectable.rs:4:1
+  |
+4 | #[cargo_athena::container(mutexes = [{ name = "lock", namespace = "ns-" + blob }])]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `cargo_athena::Injectable` is not implemented for `Vec<u8>`
+  |
+  = help: the following other types implement trait `cargo_athena::Injectable`:
+            f32
+            f64
+            i128
+            i16
+            i32
+            i64
+            i8
+            isize
+          and $N others
+note: required by a bound in `__athena_assert`
+ --> tests/ui/ctr_mutex_namespace_not_injectable.rs:4:1
+  |
+4 | #[cargo_athena::container(mutexes = [{ name = "lock", namespace = "ns-" + blob }])]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `__athena_assert`
+  = note: this error originates in the attribute macro `cargo_athena::container` (in Nightly builds, run with -Z macro-backtrace for more info)

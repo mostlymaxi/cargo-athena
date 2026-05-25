@@ -230,6 +230,21 @@ pub(crate) struct HostMountEntry {
     pub(crate) read_only: bool,
 }
 
+/// `mutexes = [{ name = "x", namespace = "ns" }, …]` /
+/// `mutexes_if_root = […]` — one entry of either list. Both `name` and
+/// `namespace` accept the same `"lit" + arg + arg.field` injection
+/// grammar as the other injectable string attrs; lowering scope differs
+/// by attr (`inputs.parameters` for template-level `mutexes`,
+/// `workflow.parameters` for `mutexes_if_root` — see the call sites).
+/// Empty namespace ⇒ Argo defaults to the workflow's own ns
+/// (`workflow/sync/lock_name.go:58-67`).
+#[derive(deluxe::ParseMetaItem)]
+pub(crate) struct MutexArg {
+    pub(crate) name: syn::Expr,
+    #[deluxe(default)]
+    pub(crate) namespace: Option<syn::Expr>,
+}
+
 #[derive(deluxe::ParseMetaItem, Default)]
 #[deluxe(default)]
 pub(crate) struct ContainerArgs {
@@ -283,6 +298,26 @@ pub(crate) struct ContainerArgs {
     /// running `iptables`, …). The cluster's PodSecurityPolicy /
     /// PodSecurity admission still has the final say.
     pub(crate) privileged: bool,
+    /// `mutexes = [{ name = "x", namespace = "ns" }, …]` — template-level
+    /// `Template.synchronization.mutexes`. Holder key
+    /// `<ns>/<wf>/<node>`: serialize nodes referencing this template
+    /// within ONE run AND across separate Workflow runs sharing the
+    /// same mutex name + namespace (Argo's sync manager is global per
+    /// namespace per controller). `name`/`namespace` accept the same
+    /// `"lit" + arg + arg.field` injection as `image`/`env` — scope
+    /// `inputs.parameters` (per-step substitution, empirically safe at
+    /// `Template.synchronization` on v4.0.5, no nodeSelector-style
+    /// boundary-copy footgun).
+    pub(crate) mutexes: Vec<MutexArg>,
+    /// `mutexes_if_root = [{ name = "x", namespace = "ns" }, …]` —
+    /// root-only `WorkflowSpec.synchronization.mutexes`. Holder key
+    /// `<ns>/<wf>`: serializes whole separate Workflow runs against
+    /// each other. Same per-WT, root-only plumbing as
+    /// `ttl_if_root`/`pod_gc_if_root`/`active_deadline_if_root`; inert
+    /// when this WT is `templateRef`'d as a sub-workflow. Injection
+    /// scope `workflow.parameters` (the only form Argo resolves at
+    /// `WorkflowSpec` scope).
+    pub(crate) mutexes_if_root: Vec<MutexArg>,
 }
 
 /// `#[workflow(name = "...", steps,
@@ -366,6 +401,16 @@ pub(crate) struct WorkflowArgs {
     /// doesn't cascade. Drop in `{{workflow.parameters.X}}` as a
     /// literal value if you need a dynamic annotation.
     pub(crate) annotations: std::collections::BTreeMap<String, String>,
+    /// `mutexes = [{ name = "x", namespace = "ns" }, …]` — template-level
+    /// `Template.synchronization.mutexes` on this dag/steps template.
+    /// See `ContainerArgs::mutexes`; same shape, same injection scope
+    /// (`inputs.parameters`).
+    pub(crate) mutexes: Vec<MutexArg>,
+    /// `mutexes_if_root = [{ name = "x", namespace = "ns" }, …]` —
+    /// root-only `WorkflowSpec.synchronization.mutexes`. See
+    /// `ContainerArgs::mutexes_if_root`; same shape, same injection
+    /// scope (`workflow.parameters`).
+    pub(crate) mutexes_if_root: Vec<MutexArg>,
 }
 
 /// Parse attribute args into `T`, or return a `compile_error!`.
@@ -731,5 +776,71 @@ pub(crate) fn inject_lower(
             Ok(format!("{{{{=fromJSON({scope}['{root}']){acc}}}}}"))
         }
         other => Err(syn::Error::new_spanned(other, UNSUPPORTED_INJECT)),
+    }
+}
+
+/// Lower a `Vec<MutexArg>` to the resolved `(name, namespace)` string
+/// pairs that the macro stamps into either `api::Template
+/// .synchronization` (template-level) or the `MUTEXES_IF_ROOT` const
+/// (root-level). Each element is run through `inject_lower` against
+/// `scope` (`inputs.parameters` for template-level, `workflow.parameters`
+/// for `_if_root`) so a literal string stays verbatim and a
+/// `"lit" + arg` chain becomes a `{{=fromJSON(scope['arg'])}}` expr.
+/// Empty `namespace` ⇒ `""`, which `argo!`'s skip-if-empty omits so
+/// Argo falls back to the workflow's own namespace.
+pub(crate) fn lower_mutex_pairs(
+    list: &[MutexArg],
+    args: &std::collections::HashSet<String>,
+    ops: &mut Vec<syn::Expr>,
+    scope: &str,
+    kind: &str,
+) -> syn::Result<Vec<(String, String)>> {
+    list.iter()
+        .map(|m| {
+            let name = inject_lower(&m.name, args, ops, scope, kind)?;
+            let ns = match &m.namespace {
+                Some(e) => inject_lower(e, args, ops, scope, kind)?,
+                None => String::new(),
+            };
+            Ok((name, ns))
+        })
+        .collect()
+}
+
+/// Token producer for template-level mutexes: an
+/// `Option<api::Synchronization>` expression inlined into the
+/// `api::Template { synchronization: …, ... }` literal each macro emits
+/// from `build()`. Empty list ⇒ `None` (skip-serialized, byte-identical
+/// goldens for templates without mutexes).
+pub(crate) fn template_synchronization_tokens(
+    pairs: &[(String, String)],
+) -> proc_macro2::TokenStream {
+    if pairs.is_empty() {
+        return quote! { ::core::option::Option::None };
+    }
+    let muts = pairs.iter().map(|(n, ns)| {
+        quote! {
+            ::cargo_athena::api::Mutex {
+                name: #n.to_string(),
+                namespace: #ns.to_string(),
+            }
+        }
+    });
+    quote! {
+        ::core::option::Option::Some(::cargo_athena::api::Synchronization {
+            mutexes: ::std::vec![ #( #muts ),* ],
+        })
+    }
+}
+
+/// Token producer for the `MUTEXES_IF_ROOT` trait const — the
+/// `&'static [(&'static str, &'static str)]` array the `Collector`
+/// then stamps onto each declaring template's own
+/// `spec.synchronization.mutexes` in `stamp_spec`. Empty list ⇒ `&[]`.
+pub(crate) fn mutexes_if_root_const_tokens(pairs: &[(String, String)]) -> proc_macro2::TokenStream {
+    let names: Vec<&String> = pairs.iter().map(|(n, _)| n).collect();
+    let nss: Vec<&String> = pairs.iter().map(|(_, ns)| ns).collect();
+    quote! {
+        &[ #( (#names, #nss) ),* ]
     }
 }

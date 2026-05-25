@@ -349,6 +349,56 @@ README is intentionally lean (user-facing); the *why* lives here.
   `.items[0]` happened to pick a sub-pod and saw empty selector
   (3.6/3.7 picked a direct child — consistent Argo behavior, fragile
   test). TODO harden `.items[0]` ordering.
+- **`#[…]` mutexes — two attrs at two tiers, BOTH safely injectable
+  (final shape 2026-05-25, live-proven Argo v4.0.5 + source-verified).**
+  `mutexes = [{ name = …, namespace = … }, …]` (template-level →
+  `Template.synchronization.mutexes`) and `mutexes_if_root = […]`
+  (root-only → `WorkflowSpec.synchronization.mutexes`) on BOTH
+  `#[workflow]` and `#[container]`. `MutexArg.name`/`.namespace` are
+  `syn::Expr` (literal OR `"lit" + arg + arg.field` injection via the
+  shared `inject_lower(.., scope, kind)` — same Injectable shim
+  containers use). Empty `namespace` skip-serializes (`String::is_empty`
+  in `argo!`'s skip rule); Argo defaults it to the workflow's own ns
+  (`workflow/sync/lock_name.go:58-67`). `Mutex.database` field NOT
+  exposed (deferred — user-flagged "think about it later"); semaphores
+  NOT exposed (out of scope). Full empirical truth-table on real Argo
+  v4.0.5 + kind, 2026-05-25:
+  | Form on mutex `name` (or `namespace`) | Field | Result |
+  |---|---|---|
+  | `{{workflow.parameters.x}}` | `Template.synchronization` (container OR dag/steps) | PASS (resolved before lock acquisition at `operator.go:2154` → `2204-2205`) |
+  | `{{inputs.parameters.x}}` | `Template.synchronization` (container) | PASS |
+  | `{{inputs.parameters.x}}` | `Template.synchronization` (dag/steps) | PASS — `ProcessArgs` runs on dag templates too |
+  | `{{=fromJSON(workflow.parameters.x)}}` | `Template.synchronization` | PASS |
+  | `{{=fromJSON(inputs.parameters.x)}}` | `Template.synchronization` (container OR dag/steps) | PASS — **no nodeSelector-style boundary-copy footgun** here |
+  | `{{workflow.parameters.x}}` | `WorkflowSpec.synchronization` | PASS |
+  | `{{=fromJSON(workflow.parameters.x)}}` | `WorkflowSpec.synchronization` | PASS |
+  | `{{inputs.parameters.x}}` | `WorkflowSpec.synchronization` | (no inputs scope at WorkflowSpec; macro never emits this) |
+  Cross-workflow enforcement (separate Workflow resources, not just
+  `templateRef`'d sub-workflows): the sync manager is global per
+  namespace per controller (`syncLockMap` keyed `<ns>/Mutex/<name>` at
+  `workflow/sync/sync_manager.go:29`+`lock_name.go:117`), so two
+  separate runs sharing a name+ns serialize. Holder key shape differs
+  by tier: `WorkflowSpec` ⇒ `<ns>/<wf>` (one-mutex-per-run);
+  `Template` ⇒ `<ns>/<wf>/<node>` (one-mutex-per-node-step). Both
+  empirically pend the second submitter on the first
+  (`probe-a-mutex`/`probe-b-mutex` 2026-05-25, controller logged
+  `Waiting for argo/Mutex/<x> lock. Lock status: 0/1`). Macro lowering:
+  template-level scope = `inputs.parameters` (the natural per-template
+  scope; safe by source-read + probe); root-level scope =
+  `workflow.parameters` (the only thing resolved at WorkflowSpec, same
+  family as `node_selector_if_root`). Plumbing reuses the
+  Collector/`stamp_spec` path of `TTL` / `POD_GC` /
+  `ACTIVE_DEADLINE_IF_ROOT` / `NODE_SELECTOR_IF_ROOT`: new
+  `Template::MUTEXES_IF_ROOT: &[(name, ns)]` const → `Collector
+  .mutexes_if_root` → per-WT `spec.synchronization.mutexes` overlay in
+  `stamp_spec`. Template-level mutexes inline directly into the
+  `api::Template { synchronization: Some(...) }` literal from `build()`
+  (no Collector needed — they're not root-scoped). Trybuild covers
+  unknown-arg / non-Injectable on both `name` and `namespace`. Smoke
+  `pipeline_mutex` (`#[container(mutexes=…)]` injecting
+  `inputs.parameters['shard']` + `#[workflow]` w/ literal-template
+  mutex + root-scoped injection from `workflow.parameters['env']`)
+  SUBMIT-OK on real v4.0.5 server-side-dry-run.
 - **`#[workflow]` return values (WORK e2e — proven on real Argo).** Every
   template's serialized fn return value is captured as an output
   **parameter named `return`** (`outputs.parameters.return`): container =

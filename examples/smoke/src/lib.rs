@@ -502,3 +502,37 @@ pub fn run_svc(tag: String, zone: String) {
 pub fn pipeline_pod_attrs() {
     run_svc("42".to_string(), "east".to_string());
 }
+
+// --- mutexes / mutexes_if_root ---------------------------------------------
+
+/// Template-level `Template.synchronization.mutexes` (holder key
+/// `<ns>/<wf>/<node>`, serializes across separate Workflow runs in the
+/// same ns). `name` injects from the container's `shard` arg via
+/// `inputs.parameters['shard']` — empirically safe on v4.0.5 (no
+/// nodeSelector-style boundary-copy footgun at
+/// `Template.synchronization`).
+#[container(mutexes = [{ name = "shard-" + shard }])]
+pub fn shard_writer(shard: String) {
+    println!("writing shard {shard}");
+}
+
+/// Both tiers on one workflow:
+///
+/// * `mutexes = [{ name = "pipeline-dag" }]` — template-level on this
+///   dag template (holder key `<ns>/<wf>/<node>`; literal name).
+/// * `mutexes_if_root = [{ name = "global-deploy-" + env,
+///   namespace = "ops-" + env }]` — root-only
+///   `WorkflowSpec.synchronization.mutexes` (Argo's only whole-workflow
+///   mutex; holder key `<ns>/<wf>`, inert when this WT is
+///   `templateRef`'d). Both `name` and `namespace` inject from the
+///   workflow's `env` arg via `workflow.parameters['env']` — the only
+///   substitution scope Argo resolves at `WorkflowSpec`.
+#[workflow(
+    mutexes = [{ name = "pipeline-dag" }],
+    mutexes_if_root = [
+        { name = "global-deploy-" + env, namespace = "ops-" + env },
+    ],
+)]
+pub fn pipeline_mutex(env: String) {
+    shard_writer(env);
+}

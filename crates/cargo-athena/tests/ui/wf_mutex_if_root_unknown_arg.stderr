@@ -1,0 +1,5 @@
+error: `missing` is not a parameter of this #[workflow] — only its arguments can be injected.
+ --> tests/ui/wf_mutex_if_root_unknown_arg.rs:3:64
+  |
+3 | #[cargo_athena::workflow(mutexes_if_root = [{ name = "lock-" + missing }])]
+  |                                                                ^^^^^^^

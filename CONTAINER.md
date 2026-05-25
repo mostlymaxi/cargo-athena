@@ -53,6 +53,8 @@ All athena paths live under a pod-scoped `emptyDir` at `/athena`.
     ttl_if_root(after_completion = 86400, after_success = 3600, after_failure = 7200),
     pod_gc_if_root(strategy = "OnWorkflowSuccess"),
     active_deadline_if_root = "2h",
+    mutexes = [{ name = "writer-" + shard }],
+    mutexes_if_root = [{ name = "global-deploy" }],
 )]
 ```
 
@@ -73,6 +75,8 @@ All athena paths live under a pod-scoped `emptyDir` at `/athena`.
 | `ttl_if_root(after_completion = <s>, after_success = <s>, after_failure = <s>)` | WorkflowSpec `ttlStrategy`: GC the finished Workflow. ≥1 of the three is required (int seconds or humantime). **Root-only.** |
 | `pod_gc_if_root(strategy = "<S>")` | WorkflowSpec `podGC`. `strategy` ∈ `OnPodCompletion\|OnPodSuccess\|OnWorkflowCompletion\|OnWorkflowSuccess`. **Root-only.** |
 | `active_deadline_if_root = <secs \| "2h">` | WorkflowSpec `activeDeadlineSeconds` — the whole-workflow runtime cap. **Root-only.** See [Timeouts](#timeouts). |
+| `mutexes = [{ name = "...", namespace = "..." }, …]` | `Template.synchronization.mutexes` — Argo serializes any pod running this template against any other holder of the same `<ns>/Mutex/<name>` (within one run AND across separate Workflow runs). Holder key `<ns>/<wf>/<node>`. Both `name` and `namespace` accept `"lit" + arg + arg.field` injection, lowered to `{{=fromJSON(inputs.parameters['arg'])}}` (per-pod scope). |
+| `mutexes_if_root = [{ name = "...", namespace = "..." }, …]` | `WorkflowSpec.synchronization.mutexes` — whole-workflow lock (holder key `<ns>/<wf>`). **Root-only**, inert when this WT is `templateRef`'d. Injection scope `workflow.parameters` (the only one Argo resolves at `WorkflowSpec`). |
 
 All optional. As with `#[workflow]`, an argument *name* or a `name = "…"`
 value that a YAML 1.1 parser reads as a boolean/null is a compile error.

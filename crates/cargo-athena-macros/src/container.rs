@@ -13,8 +13,9 @@ use quote::{format_ident, quote};
 use syn::{Expr, ItemFn};
 
 use crate::attrs::{
-    ContainerArgs, inject_lower, parse_attr, pod_gc_const_tokens, retry_strategy_tokens,
-    secs_i32_tok, secs_i64_tok, timeout_tokens, ttl_const_tokens,
+    ContainerArgs, inject_lower, lower_mutex_pairs, mutexes_if_root_const_tokens, parse_attr,
+    pod_gc_const_tokens, retry_strategy_tokens, secs_i32_tok, secs_i64_tok,
+    template_synchronization_tokens, timeout_tokens, ttl_const_tokens,
 };
 use crate::utils::{
     check_yaml_safe_names, fn_args, make_argo_name, scan_body, secret_slice_tokens, sig_shim,
@@ -184,6 +185,41 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };
+    // `mutexes = [{ name, namespace }, …]` (template-level) /
+    // `mutexes_if_root = […]` (root-only WorkflowSpec). Both lists go
+    // through `inject_lower` so a literal stays verbatim and a
+    // `"lit" + arg` chain becomes `{{=fromJSON(<scope>['arg'])}}`:
+    //
+    // * Template scope = `inputs.parameters` (per-step substitution —
+    //   empirically safe on `Template.synchronization`, no nodeSelector-
+    //   style boundary-copy footgun; proven on v4.0.5 2026-05-25).
+    // * `_if_root` scope = `workflow.parameters` (the only form Argo
+    //   resolves at `WorkflowSpec` scope).
+    //
+    // Operands flow into the existing `inject_ops` so the
+    // `Injectable` type-check shim (built below) covers them too.
+    let mutex_pairs: Vec<(String, String)> = match lower_mutex_pairs(
+        &cfg.mutexes,
+        &argset,
+        &mut inject_ops,
+        "inputs.parameters",
+        "container",
+    ) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let mutex_ifroot_pairs: Vec<(String, String)> = match lower_mutex_pairs(
+        &cfg.mutexes_if_root,
+        &argset,
+        &mut inject_ops,
+        "workflow.parameters",
+        "container",
+    ) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let synchronization_tok = template_synchronization_tokens(&mutex_pairs);
+    let mutexes_if_root_tok = mutexes_if_root_const_tokens(&mutex_ifroot_pairs);
     // `host_mount = [{ host_path, mount_path, read_only }, …]`:
     // literal-only triples, threaded into `container_volumes` so the
     // dedup-against-`host!` lives in core.
@@ -315,6 +351,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             const POD_GC: ::core::option::Option<&'static str> = #podgc_tok;
             const ACTIVE_DEADLINE_IF_ROOT: ::core::option::Option<i64> =
                 #active_deadline_if_root_tok;
+            const MUTEXES_IF_ROOT: &'static [(&'static str, &'static str)] =
+                #mutexes_if_root_tok;
 
             fn run(__in: ::cargo_athena::serde_json::Value)
                 -> ::cargo_athena::serde_json::Value
@@ -472,6 +510,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                     retry_strategy: #retry_tok,
                     timeout: #timeout_tok,
                     active_deadline_seconds: #pod_running_timeout_tok,
+                    synchronization: #synchronization_tok,
                     ..::core::default::Default::default()
                 }
             }

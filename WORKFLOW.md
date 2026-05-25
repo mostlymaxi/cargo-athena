@@ -25,7 +25,9 @@ runtime surprises.
            retry(limit = 2, policy = "OnError", backoff = "30s"),
            ttl_if_root(after_completion = 86400, after_success = 3600, after_failure = 7200),
            pod_gc_if_root(strategy = "OnWorkflowSuccess"),
-           active_deadline_if_root = "2h")]
+           active_deadline_if_root = "2h",
+           mutexes = [{ name = "pipeline-dag" }],
+           mutexes_if_root = [{ name = "deploy-" + env }])]
 ```
 
 | Arg | Effect |
@@ -40,6 +42,8 @@ runtime surprises.
 | `ttl_if_root(after_completion = <s>, after_success = <s>, after_failure = <s>)` | WorkflowSpec `ttlStrategy`: GC the finished Workflow. ≥1 of the three is required (int seconds or humantime). **Root-only.** |
 | `pod_gc_if_root(strategy = "<S>")` | WorkflowSpec `podGC`. `strategy` ∈ `OnPodCompletion\|OnPodSuccess\|OnWorkflowCompletion\|OnWorkflowSuccess`. **Root-only.** |
 | `active_deadline_if_root = <secs \| "2h">` | WorkflowSpec `activeDeadlineSeconds` — the whole-workflow runtime cap. The only timeout that works on a `#[workflow]`. **Root-only.** See [Timeouts](#timeouts). |
+| `mutexes = [{ name = "...", namespace = "..." }, …]` | `Template.synchronization.mutexes` on this dag/steps template (Argo serializes any node referencing this template — within ONE run AND across separate Workflow runs sharing the same name+ns). `name`/`namespace` accept the same `"lit" + arg + arg.field` injection as `image`/`env` (lowered to `{{=fromJSON(inputs.parameters['arg'])}}`). See [Mutexes](#mutexes). |
+| `mutexes_if_root = [{ name = "...", namespace = "..." }, …]` | `WorkflowSpec.synchronization.mutexes` — Argo's only **whole-workflow** mutex (serializes whole separate Workflow runs against each other; holder key `<ns>/<wf>`). **Root-only**, inert when this WT is `templateRef`'d. Same `_if_root` family as `ttl_if_root` etc. Injection lowers to `{{=fromJSON(workflow.parameters['arg'])}}` (the only scope Argo resolves at `WorkflowSpec`). |
 
 All are optional. A parameter *name* (i.e. a function argument) or a
 `name = "…"` value that a YAML 1.1 parser reads as a boolean/null
@@ -128,6 +132,37 @@ The `_if_root` semantic makes this safe by construction:
   spec — verified live on v4.0.5). So the sub's `node_selector_if_root`
   is completely dormant; the parent doesn't need to know about its
   args, and no admission error fires for an unresolvable reference.
+
+## Mutexes
+
+Argo `synchronization.mutexes` — at most one workflow/node holds a
+named mutex at a time. The controller's sync manager keys on
+`<namespace>/Mutex/<name>` **globally per namespace**, so two
+*separate* Workflow runs sharing a mutex name contend with each other
+(not just `templateRef`'d sub-workflows within one run).
+
+Two tiers, same shape, different reach:
+
+| Where you put it | Argo field | Reach | Holder key | Injection scope |
+|---|---|---|---|---|
+| `#[workflow(mutexes = [...])]` | `Template.synchronization.mutexes` on this dag/steps | Per-step within one run + across separate runs with the same name+ns. | `<ns>/<wf>/<node>` | `"lit" + arg` → `{{=fromJSON(inputs.parameters['arg'])}}` (per-template invocation). |
+| `#[workflow(mutexes_if_root = [...])]` | `WorkflowSpec.synchronization.mutexes` | **Whole-workflow** lock — Argo's only knob for that. Root-only (inert when this WT is `templateRef`'d). | `<ns>/<wf>` | `"lit" + arg` → `{{=fromJSON(workflow.parameters['arg'])}}` (the only scope Argo resolves at `WorkflowSpec`). |
+
+Each list element is `{ name = …, namespace = … }`. The `namespace`
+field is **optional** — empty means "use this workflow's own
+namespace" (per `workflow/sync/lock_name.go:58-67`); set it explicitly
+to coordinate across namespaces (the resolved lock key becomes
+`<that-ns>/Mutex/<name>`). Both `name` and `namespace` accept the same
+`"lit" + arg + arg.field` injection grammar as `image`/`env`, with the
+scope chosen by the attr name (see table above).
+
+`mutexes` (template-level) does **not** have nodeSelector's
+boundary-copy footgun — both `inputs.parameters` and
+`workflow.parameters` substitution resolve at `Template
+.synchronization` on real Argo v4.0.5, because the controller reads
+the mutex name from the already-substituted `processedTmpl` at
+`workflow/controller/operator.go:2204`. So injection here is safe and
+template-scoped.
 
 ## The body
 
