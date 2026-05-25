@@ -1,0 +1,16 @@
+[package]
+name = "cargo-athena-example-tracing"
+edition.workspace = true
+version = "0.0.0"
+license.workspace = true
+publish = false
+
+# Demonstrates `cargo_athena::is_container_run()`: gating in-pod-only
+# setup (here, a tracing subscriber) so it fires only when Argo
+# dispatches a container body in a pod -- not on every local
+# `cargo athena emit` / `ls` / `describe` / `submit` invocation.
+
+[dependencies]
+cargo-athena = { workspace = true }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
