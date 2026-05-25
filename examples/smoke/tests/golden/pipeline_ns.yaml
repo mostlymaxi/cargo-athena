@@ -68,6 +68,9 @@ spec:
   entrypoint: cargo-athena-example-smoke-pipeline-ns
   templates:
   - name: cargo-athena-example-smoke-pipeline-ns
+    inputs:
+      parameters:
+      - name: env
     dag:
       tasks:
       - name: raw
@@ -94,6 +97,7 @@ spec:
       kubernetes.io/arch: amd64
       topology.kubernetes.io/region: '{{workflow.parameters.region}}'
   nodeSelector:
+    env: prod-{{=fromJSON(workflow.parameters['env'])}}
     tier: platform
 ---
 apiVersion: argoproj.io/v1alpha1

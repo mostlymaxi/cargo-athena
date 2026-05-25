@@ -278,63 +278,77 @@ README is intentionally lean (user-facing); the *why* lives here.
   field + rename) and `pipeline_retry.yaml` (`timeout: 5m`→`300s`
   canonicalization) churn — all other emit goldens byte-identical
   (`argo!` skips `Option::None`/empty-string).**
-- **`nodeSelector` is BOUNDARY-scoped, not cascading (corrected
-  2026-05-24, source-verified from `workflow/controller/workflowpod
-  .go:928-958` `addSchedulingConstraints`).** Argo's three-tier
-  lookup when building a pod:
+- **`#[workflow]` nodeSelector — two attrs at two tiers, asymmetric
+  injection (final shape post-PR #29, proven on live Argo v4.0.5
+  2026-05-24).** `boundary_node_selector` (`Template.NodeSelector` on
+  this dag/steps) = **literals only** (`BTreeMap<String,String>`).
+  `node_selector_if_root` (`WorkflowSpec.NodeSelector`) = literal OR
+  `"lit" + arg` / `"lit" + arg.field` injection
+  (`BTreeMap<String, syn::Expr>` via shared `inject_lower(.., scope,
+  kind)` parameterized 2026-05-24; emits
+  `{{=fromJSON(workflow.parameters['arg'])}}` and the same hidden
+  `__athena_inject_check_<fn>` `Injectable` shim containers use). Why
+  asymmetric — full empirical truth-table (5 probes, real Argo v4.0.5,
+  one-node kind, 2026-05-24, cleaned up):
+  | Form on `nodeSelector` value | Field | Result |
+  |---|---|---|
+  | `{{=fromJSON(inputs.parameters['x'])}}` | `Template.NodeSelector` | **FAIL** — raw string copied to pod by boundary fallback (`workflowpod.go:938`) *before* any per-template `SubstituteParams` could resolve it; k8s rejects `{` as a label value |
+  | `{{=fromJSON(inputs.parameters['x'])}}` | `WorkflowSpec.NodeSelector` | **FAIL** — no inputs scope at spec |
+  | `{{workflow.parameters.x}}` | `WorkflowSpec.NodeSelector` | PASS |
+  | `{{=fromJSON(workflow.parameters.x)}}` | `Template.NodeSelector` | PASS |
+  | `{{=fromJSON(workflow.parameters.x)}}` | `WorkflowSpec.NodeSelector` | PASS |
+  So **`workflow.parameters` (root-scoped) is the only viable
+  substitution at workflow scope**; `inputs.parameters` cannot work
+  anywhere a `#[workflow]` attr lands. Source-read of
+  `common/util.go:225` `SubstituteParams` LOOKED like it should
+  substitute `tmpl.NodeSelector` (it JSON-marshals the whole template
+  and string-replaces), but the boundary copy at `workflowpod.go:938`
+  happens earlier in the pod-build flow — the resolved version never
+  reaches the child pod. **Do not re-attempt `inputs.parameters`
+  injection on any `#[workflow]` attr based on a source read.**
+  Why injection on boundary is intentionally *banned* even though the
+  expression *form* `{{=fromJSON(workflow.parameters['x'])}}` works
+  there: it's a root-scoping footgun. `boundary_node_selector = { "k"
+  = arg }` on a sub-workflow would silently resolve `arg` against the
+  SUBMITTED ROOT's args, not the sub's `arg` input — the user's
+  natural mental model would be "this template's arg". Restrict
+  injection to `_if_root` where the semantic *already* says "only
+  fires when this WT is root", so `workflow.parameters.x` and "this
+  WT's `x` arg" coincide by construction. Sub-WT correctness probe
+  (also 2026-05-24): when a parent templateRef's a sub that has
+  `node_selector_if_root` with `workflow.parameters` injection AND
+  the parent doesn't even know about the sub's arg name, submission
+  succeeds, leaf pod's `.spec.nodeSelector` is **empty** — sub's
+  spec field is dormant per `setExecWorkflow`, NO admission/runtime
+  error fires. Fixtures: smoke `pipeline_ns` exercises both forms
+  (`boundary_node_selector` literal incl. `{{workflow.parameters
+  .region}}` escape-hatch, `node_selector_if_root = { "tier" =
+  "platform", "env" = "prod-" + env }` injection). Trybuild
+  `wf_node_selector_not_literal.rs` (boundary literal-only) +
+  `wf_ifroot_inject_unknown_arg.rs` (`_if_root` injection requires a
+  real arg). Synthesized `if` wrappers (`emit_synth`) do NOT re-stamp
+  either attr — single user template only.
+- **`nodeSelector` boundary lookup — historical context for the above
+  (corrected 2026-05-24, source-verified
+  `workflow/controller/workflowpod.go:928-958`
+  `addSchedulingConstraints`):** Argo's three-tier
   ```
   if tmpl.NodeSelector ≠ ∅:                  pod.NodeSelector = tmpl
   elif boundaryTemplate.NodeSelector ≠ ∅:    pod.NodeSelector = boundary
   elif wfSpec.NodeSelector ≠ ∅:              pod.NodeSelector = wfSpec
   ```
   `boundaryTemplate` = the **immediate enclosing dag/steps** (singular
-  — Argo never walks the ancestor chain). So a `#[workflow(node
-  _selector=…)]` on `pipeline` is invisible to a leaf container's pod
-  when there's a `pipeline → pipeline_steps → container_C` chain
-  (`container_C`'s boundary is `pipeline_steps`, which has no selector
-  → falls through to `wfSpec.NodeSelector`, also empty → no selector).
-  The earlier "DAG `nodeSelector` cascades onto every templateRef'd
-  pod" framing was over-stated — it only reaches the IMMEDIATE
-  template's pods. Same boundary semantics apply to `affinity` and
-  `tolerations` (the only three boundary-fallback fields). Everything
-  else (`schedulerName`, `priorityClassName`, pod `securityContext`)
-  is 2-tier `tmpl → wfSpec` only; `hostAliases` is concat-both.
-  **`wfSpec.NodeSelector`** is sourced from `woc.execWf.Spec` (line
-  140) — the submitted root, per the prior `setExecWorkflow` proof
-  — so it's the proper "apply to every pod by default unless
-  overridden" knob. That makes it the natural `node_selector_if_root`
-  pattern (same family as `ttl_if_root`/`pod_gc_if_root`).
+  — Argo never walks the ancestor chain). The earlier "DAG `nodeSelector`
+  cascades onto every templateRef'd pod" framing was over-stated.
+  Same boundary semantics apply to `affinity` and `tolerations` (the
+  only three boundary-fallback fields). Everything else
+  (`schedulerName`, `priorityClassName`, pod `securityContext`) is
+  2-tier `tmpl → wfSpec` only; `hostAliases` is concat-both.
   **Caught by PR #28's e2e fail (2026-05-22):** `pipeline` selector
   failed to land on `pipeline_steps`'s sub-pods → e2e v4.0.5's
   `.items[0]` happened to pick a sub-pod and saw empty selector
-  (3.6/3.7 picked a direct child and saw the selector — consistent
-  Argo behavior, fragile test). The assertion itself is also fragile
-  (`.items[0]` ordering is non-deterministic) — TODO harden it.
-- **`#[workflow(node_selector = { "k" = "v" })]` — IMPLEMENTED, but
-  LITERALS-ONLY (keys *and* values; `BTreeMap<String,String>` in
-  `WorkflowArgs`, NO `inject_lower`/`Injectable`/`syn::Expr`). Set on
-  the dag/steps `api::Template` (both build_body branches); cascades to
-  every task pod (proven 2026-05-17: emitted `pipeline_ns` golden
-  submitted on live v4.0.5 → leaf `fetch` pod got both the static
-  `kubernetes.io/arch=amd64` AND a `-p region=` resolved
-  `{{workflow.parameters.region}}` cascaded onto `.spec.nodeSelector`).**
-  Why no injection (unlike `#[container]`): a `#[workflow]` is a DAG not
-  a pod. Two probes (2026-05-16/17) proved (a) a template-scoped
-  `{{=fromJSON(inputs.parameters.X)}}` on a dag template is cascaded
-  **raw** to the child pod → k8s rejects the literal label; (b)
-  `serviceAccountName` does NOT cascade from a dag template (stays
-  `default`) — so no `#[workflow]` `service_account`/`image` either;
-  (c) `{{workflow.parameters.X}}` is the ONLY interpolation that
-  survives the cascade and is **always root-scoped**: a sub-`templateRef`
-  workflow whose dag `nodeSelector` used `{{workflow.parameters.subp}}`
-  errored because the *submitted root* (not the sub's `subp` input) is
-  what's resolved. So dynamic values are a documented eyes-open escape
-  hatch (raw `{{workflow.parameters.foo}}` literal; user owns
-  root-scoping). Fixture: smoke `pipeline_ns` + bin `smoke-ns` + golden
-  `pipeline_ns.yaml` + `emit_pipeline_ns` test. Synthesized `if`
-  wrappers (`emit_synth`) intentionally do NOT re-stamp it (scope:
-  literals-only, single user template; transitive cascade through synth
-  dags is an untested Argo edge, not claimed).
+  (3.6/3.7 picked a direct child — consistent Argo behavior, fragile
+  test). TODO harden `.items[0]` ordering.
 - **`#[workflow]` return values (WORK e2e — proven on real Argo).** Every
   template's serialized fn return value is captured as an output
   **parameter named `return`** (`outputs.parameters.return`): container =

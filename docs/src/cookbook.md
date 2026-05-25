@@ -253,6 +253,44 @@ Operands are an argument or a named struct field of one, and must be
 `String`/`&str`/number. See
 [`#[container]` → Parameter injection](container.md).
 
+## Workflow-level node pinning
+
+A `#[workflow]` exposes two nodeSelector knobs at two different tiers
+of Argo's pod-creation fallback (`tmpl → boundary → wfSpec` — Argo
+never walks the ancestor chain):
+
+```rust,ignore
+#[workflow(
+    boundary_node_selector = {                       // literal-only
+        "kubernetes.io/arch" = "amd64",
+    },
+    node_selector_if_root = {                        // injection allowed
+        "tier" = "platform",
+        "env"  = "prod-" + env,                      // arg injected
+    },
+)]
+fn pipeline(env: String) { /* ... */ }
+```
+
+* `boundary_node_selector` lands on the dag/steps template
+  (`Template.NodeSelector`). It only reaches pods whose **immediate**
+  enclosing dag/steps is this template — does **not** cascade through
+  nested sub-workflows. Keep it static; per-arg injection here would
+  silently resolve against the submitted root's args, not this
+  template's inputs.
+* `node_selector_if_root` lands on this WT's
+  `WorkflowSpec.NodeSelector` — the default for every pod in the run
+  that doesn't have a tmpl- or boundary-level override. **Root-only**:
+  inert when this WT is `templateRef`'d as a sub-workflow. Values
+  accept the same `"lit" + arg` / `"lit" + arg.field` injection as
+  `#[container]` attrs (lowered to
+  `{{=fromJSON(workflow.parameters['arg'])}}`), so each `arg` is the
+  workflow's own input as passed via `argo submit -p arg=...` or
+  `cargo athena submit`.
+
+See [`#[workflow]` → Node selector](workflow.md#node-selector) for the
+full 3-tier table and why injection is asymmetric.
+
 ## Pull a K8s Secret as an env var
 
 `secret!("secret-name", "key")` declares a Kubernetes Secret env on
