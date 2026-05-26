@@ -28,6 +28,7 @@ const BIN_ARTIFACT_WF: &str = env!("CARGO_BIN_EXE_smoke-artifact-wf");
 const BIN_ARTIFACT_CLONE: &str = env!("CARGO_BIN_EXE_smoke-artifact-clone");
 const BIN_TOLERATIONS: &str = env!("CARGO_BIN_EXE_smoke-tolerations");
 const BIN_AFFINITY: &str = env!("CARGO_BIN_EXE_smoke-affinity");
+const BIN_POD_SPEC_PATCH: &str = env!("CARGO_BIN_EXE_smoke-pod-spec-patch");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -348,6 +349,19 @@ fn emit_pipeline_tolerations() {
 #[test]
 fn emit_pipeline_affinity() {
     assert_golden("pipeline_affinity.yaml", &run_bin(BIN_AFFINITY, &[]));
+}
+
+/// `pod_spec_patch` (template-level, `Template.PodSpecPatch` with
+/// `inputs.parameters['cpu_limit']` injection) + `pod_spec_patch
+/// _if_root` (root-only `WorkflowSpec.PodSpecPatch` with
+/// `workflow.parameters['grace']` injection). Argo concats both at
+/// pod-creation and strategic-merges onto every pod in the run.
+#[test]
+fn emit_pipeline_pod_spec_patch() {
+    assert_golden(
+        "pipeline_pod_spec_patch.yaml",
+        &run_bin(BIN_POD_SPEC_PATCH, &[]),
+    );
 }
 
 /// Run mode: with Argo's secretKeyRef env vars planted by the

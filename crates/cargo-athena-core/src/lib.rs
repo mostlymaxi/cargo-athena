@@ -521,6 +521,14 @@ pub trait Template {
     /// Parsed at emit time; user owns the schema (athena does NOT
     /// validate). None ⇒ skip.
     const AFFINITY_IF_ROOT: ::core::option::Option<&'static str> = None;
+    /// Root-only `WorkflowSpec.PodSpecPatch`, from
+    /// `#[workflow(pod_spec_patch_if_root = "...")]`. Already lowered
+    /// to its final string form (literal verbatim, or with
+    /// `{{=fromJSON(workflow.parameters[..])}}` operands spliced in
+    /// for injected pieces). Same per-WT, root-only plumbing as
+    /// `NODE_SELECTOR_IF_ROOT`. None ⇒ skip (existing goldens
+    /// unaffected).
+    const POD_SPEC_PATCH_IF_ROOT: ::core::option::Option<&'static str> = None;
 
     /// Build this template's inner Argo `template` object.
     fn build(ctx: &BuildCtx) -> api::Template;
@@ -1337,6 +1345,12 @@ pub struct Collector {
     /// `#[…(affinity_if_root = "...")]`. Parsed at emit time and
     /// stuffed into `spec.affinity` as a `serde_norway::Value`.
     affinity_if_root: HashMap<String, String>,
+    /// `<argo name> -> pod-spec strategic-merge patch (string)` for
+    /// every template with `#[workflow(pod_spec_patch_if_root = "...")]`.
+    /// Already lowered to its final form (literal, or with
+    /// `{{=fromJSON(workflow.parameters[..])}}` injection operands).
+    /// Stamped onto that WT's `spec.podSpecPatch`.
+    pod_spec_patch_if_root: HashMap<String, String>,
     /// `<argo name> -> stringified input types` (parallel to the
     /// template's INPUTS), for `container emulate` arg type-checking.
     types: HashMap<String, &'static [&'static str]>,
@@ -1365,6 +1379,7 @@ impl Collector {
             mutexes_if_root: HashMap::new(),
             tolerations_if_root: HashMap::new(),
             affinity_if_root: HashMap::new(),
+            pod_spec_patch_if_root: HashMap::new(),
             types: HashMap::new(),
             synthetic: HashSet::new(),
         }
@@ -1436,6 +1451,10 @@ impl Collector {
         if let Some(a) = T::AFFINITY_IF_ROOT {
             self.affinity_if_root
                 .insert(T::ARGO_NAME.to_string(), a.to_string());
+        }
+        if let Some(p) = T::POD_SPEC_PATCH_IF_ROOT {
+            self.pod_spec_patch_if_root
+                .insert(T::ARGO_NAME.to_string(), p.to_string());
         }
         if !T::INPUT_TYPES.is_empty() {
             self.types.insert(T::ARGO_NAME.to_string(), T::INPUT_TYPES);
@@ -1553,6 +1572,9 @@ impl Collector {
                 serde_norway::from_str(s)
                     .unwrap_or_else(|e| panic!("affinity_if_root: invalid YAML/JSON: {e}")),
             );
+        }
+        if let Some(p) = self.pod_spec_patch_if_root.get(name) {
+            spec.pod_spec_patch = Some(p.clone());
         }
     }
 

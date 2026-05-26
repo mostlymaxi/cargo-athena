@@ -443,6 +443,56 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(s) => quote! { ::core::option::Option::Some(#s) },
         None => quote! { ::core::option::Option::None },
     };
+    // `pod_spec_patch = "..."` — `Template.PodSpecPatch` on this
+    // container's WT. Strategic-merge escape hatch; injectable via
+    // `inputs.parameters` (safe at template scope per the same
+    // pod-creation substitution pass that resolves the patch — proven
+    // v4.0.5 2026-05-26, no nodeSelector-style boundary-copy footgun).
+    let pod_spec_patch_s = match cfg
+        .pod_spec_patch
+        .as_ref()
+        .map(|e| {
+            inject_lower(
+                e,
+                &argset,
+                &mut inject_ops,
+                "inputs.parameters",
+                "container",
+            )
+        })
+        .transpose()
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let pod_spec_patch_tok = match pod_spec_patch_s {
+        Some(s) => quote! { ::core::option::Option::Some(#s.to_string()) },
+        None => quote! { ::core::option::Option::None },
+    };
+    // `pod_spec_patch_if_root = "..."` — root-only
+    // `WorkflowSpec.PodSpecPatch`. Lowered against `workflow.parameters`
+    // (the only scope Argo resolves at WorkflowSpec).
+    let pod_spec_patch_if_root_s = match cfg
+        .pod_spec_patch_if_root
+        .as_ref()
+        .map(|e| {
+            inject_lower(
+                e,
+                &argset,
+                &mut inject_ops,
+                "workflow.parameters",
+                "container",
+            )
+        })
+        .transpose()
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let pod_spec_patch_if_root_const_tok = match pod_spec_patch_if_root_s {
+        Some(s) => quote! { ::core::option::Option::Some(#s) },
+        None => quote! { ::core::option::Option::None },
+    };
     // `host_mount = [{ host_path, mount_path, read_only }, …]`:
     // literal-only triples, threaded into `container_volumes` so the
     // dedup-against-`host!` lives in core.
@@ -585,6 +635,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #tolerations_if_root_tok;
             const AFFINITY_IF_ROOT: ::core::option::Option<&'static str> =
                 #affinity_if_root_const_tok;
+            const POD_SPEC_PATCH_IF_ROOT: ::core::option::Option<&'static str> =
+                #pod_spec_patch_if_root_const_tok;
 
             fn run(__argv: &[::std::string::String]) -> ::std::string::String
             {
@@ -794,6 +846,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                     synchronization: #synchronization_tok,
                     tolerations: #tolerations_tok,
                     affinity: #affinity_tok,
+                    pod_spec_patch: #pod_spec_patch_tok,
                     ..::core::default::Default::default()
                 }
             }

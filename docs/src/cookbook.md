@@ -436,6 +436,40 @@ Embed `{{workflow.parameters.X}}` substitutions verbatim if you need
 dynamic values at root scope. Same goes for the container-level
 `affinity = "..."`.
 
+## Reach a podSpec field athena doesn't have an attr for
+
+`pod_spec_patch = "<json|yaml>"` is the universal escape hatch — Argo
+strategic-merges the patch onto the rendered pod just before
+submission. Use it for any K8s field cargo-athena doesn't lift to a
+first-class attr (CPU/memory limits, init containers, sidecars,
+`fsGroup`, `runtimeClassName`, …).
+
+```rust,ignore
+// Per-container patch (pins this template's pod resources).
+#[container(pod_spec_patch = r#"{
+  "containers":[{"name":"main","resources":{
+    "limits":{"cpu":"500m","memory":"512Mi"},
+    "requests":{"cpu":"100m","memory":"128Mi"}
+  }}]
+}"#)]
+fn heavy(input: String) { /* ... */ }
+
+// Whole-workflow patch (every pod in the run).
+#[workflow(pod_spec_patch_if_root = r#"{
+  "terminationGracePeriodSeconds":120
+}"#)]
+fn pipeline() { heavy("x".to_string()); }
+```
+
+The string accepts the usual `"lit" + arg` injection grammar, e.g.
+`pod_spec_patch = r#"{"containers":[{"name":"main","resources":{"limits":{"cpu":""# + cpu + r#""}}}]}"#`.
+Operands lower to `{{=fromJSON(inputs.parameters[..])}}` at
+template scope, `{{=fromJSON(workflow.parameters[..])}}` at root.
+
+Athena does NOT validate the patch shape — that's the trade-off for
+"any field." Argo and the K8s API reject malformed input at submit /
+admission time.
+
 ## Pull a Kubernetes Secret as an env var
 
 `secret!("secret-name", "key")` declares a Secret env on the
