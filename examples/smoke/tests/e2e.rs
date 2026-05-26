@@ -30,6 +30,7 @@ const BIN_TOLERATIONS: &str = env!("CARGO_BIN_EXE_smoke-tolerations");
 const BIN_AFFINITY: &str = env!("CARGO_BIN_EXE_smoke-affinity");
 const BIN_POD_SPEC_PATCH: &str = env!("CARGO_BIN_EXE_smoke-pod-spec-patch");
 const BIN_IMAGE_PULL_SECRETS: &str = env!("CARGO_BIN_EXE_smoke-image-pull-secrets");
+const BIN_INJECT_ATTR: &str = env!("CARGO_BIN_EXE_smoke-inject-attr");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -374,6 +375,19 @@ fn emit_pipeline_image_pull_secrets() {
         "pipeline_image_pull_secrets.yaml",
         &run_bin(BIN_IMAGE_PULL_SECRETS, &[]),
     );
+}
+
+/// `#[inject("<argo expr>")]` per-arg attribute. Pins:
+/// 1. `smart_retry`'s `inputs.parameters` declares only `payload`
+///    (the two inject args are NOT inputs.parameters entries).
+/// 2. `container.args[]` carries three positional slots in fn
+///    declaration order: `{{inputs.parameters.payload}}`,
+///    `{{retries}}`, `"{{pod.name}}"`.
+/// 3. The workflow body's `smart_retry("hello".to_string())` call
+///    passes only the `payload` arg.
+#[test]
+fn emit_pipeline_inject_attr() {
+    assert_golden("pipeline_inject_attr.yaml", &run_bin(BIN_INJECT_ATTR, &[]));
 }
 
 /// Run mode: with Argo's secretKeyRef env vars planted by the

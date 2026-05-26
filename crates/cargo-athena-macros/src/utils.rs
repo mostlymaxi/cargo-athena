@@ -55,6 +55,66 @@ pub(crate) fn fn_args(func: &ItemFn) -> Vec<(syn::Ident, Box<Type>)> {
         .collect()
 }
 
+/// Parallel to [`fn_args`]: for each non-receiver arg, the literal
+/// `#[inject("<expr>")]` Argo expression if the arg carries the attr,
+/// else `None`. Used by `#[container]` to splice an extra positional
+/// argv slot whose value is filled by Argo (rather than declared as an
+/// `inputs.parameters` entry). Per-arg attrs the macro doesn't
+/// recognize are left intact for rustc to validate or reject.
+pub(crate) fn fn_arg_injects(func: &ItemFn) -> Vec<Option<String>> {
+    func.sig
+        .inputs
+        .iter()
+        .filter_map(|a| match a {
+            syn::FnArg::Typed(pt) => Some(inject_attr_value(&pt.attrs)),
+            syn::FnArg::Receiver(_) => None,
+        })
+        .collect()
+}
+
+/// Pull the literal string out of an `#[inject("...")]` attribute. The
+/// attribute is `#[inject(<string-literal>)]`; if the body parses as a
+/// single `LitStr`, return its value. Anything else is silently
+/// ignored here (the macro will surface a clearer error downstream if
+/// the user wrote a malformed inject attr).
+fn inject_attr_value(attrs: &[syn::Attribute]) -> Option<String> {
+    attrs.iter().find_map(|attr| {
+        if !attr.path().is_ident("inject") {
+            return None;
+        }
+        attr.parse_args::<syn::LitStr>().ok().map(|s| s.value())
+    })
+}
+
+/// Strip `#[inject(...)]` attrs from each fn arg so the re-emitted
+/// fn (`#func` in the macro output) compiles cleanly under rustc.
+pub(crate) fn strip_inject_attrs(func: &mut ItemFn) {
+    for a in func.sig.inputs.iter_mut() {
+        if let syn::FnArg::Typed(pt) = a {
+            pt.attrs.retain(|attr| !attr.path().is_ident("inject"));
+        }
+    }
+}
+
+/// Clone `func` with every `#[inject(...)]`-attributed arg removed
+/// entirely (not just the attr stripped). The result is the
+/// **caller-visible** signature for `sig_shim` and `ghost_fn` — workflow
+/// bodies call this fn without passing inject args, which are filled
+/// from Argo at run time.
+pub(crate) fn func_without_inject_args(func: &ItemFn) -> ItemFn {
+    let mut out = func.clone();
+    out.sig.inputs = out
+        .sig
+        .inputs
+        .into_iter()
+        .filter(|a| match a {
+            syn::FnArg::Typed(pt) => inject_attr_value(&pt.attrs).is_none(),
+            syn::FnArg::Receiver(_) => true,
+        })
+        .collect();
+    out
+}
+
 /// The declaration macros the attribute macros statically collect + gate.
 /// `(public ident, private ident, which `BodyScan` bucket)`.
 pub(crate) const DECL_MACROS: &[(&str, &str, DeclKind)] = &[

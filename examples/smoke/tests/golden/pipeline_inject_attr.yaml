@@ -1,0 +1,79 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-pipeline-inject-attr
+spec:
+  entrypoint: cargo-athena-example-smoke-pipeline-inject-attr
+  templates:
+  - name: cargo-athena-example-smoke-pipeline-inject-attr
+    dag:
+      tasks:
+      - name: smart-retry
+        arguments:
+          parameters:
+          - name: payload
+            value: '"hello"'
+        templateRef:
+          name: cargo-athena-example-smoke-smart-retry
+          template: cargo-athena-example-smoke-smart-retry
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-smart-retry
+spec:
+  entrypoint: cargo-athena-example-smoke-smart-retry
+  templates:
+  - name: cargo-athena-example-smoke-smart-retry
+    inputs:
+      parameters:
+      - name: payload
+      artifacts:
+      - name: athena-dist
+        path: /athena/bin
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: cargo-athena-example-smoke/0.0.0/smoke-inject-attr.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          path: /athena/result
+    container:
+      image: busybox:1.36-musl
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.payload}}'
+      - '{{retries}}'
+      - '"{{pod.name}}"'
+      env:
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-smart-retry
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default

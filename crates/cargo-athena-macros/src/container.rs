@@ -19,8 +19,9 @@ use crate::attrs::{
     timeout_tokens, tolerations_if_root_const_tokens, ttl_const_tokens,
 };
 use crate::utils::{
-    check_yaml_safe_names, fn_args, is_artifact_ty, make_argo_name, scan_body, secret_slice_tokens,
-    sig_shim, str_slice, with_host_rewritten,
+    check_yaml_safe_names, fn_arg_injects, fn_args, func_without_inject_args, is_artifact_ty,
+    make_argo_name, scan_body, secret_slice_tokens, sig_shim, str_slice, strip_inject_attrs,
+    with_host_rewritten,
 };
 
 pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -40,9 +41,17 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // The real body becomes a hidden fn; the public identity is a type.
     let mut impl_fn = with_host_rewritten(&func);
+    // Strip the `#[inject(...)]` per-arg attrs so the re-emitted fn
+    // compiles cleanly under rustc (the attr is athena-private).
+    strip_inject_attrs(&mut impl_fn);
     let impl_ident = format_ident!("__cargo_athena_impl_{}", ident);
     impl_fn.sig.ident = impl_ident.clone();
     impl_fn.vis = syn::Visibility::Inherited;
+    // Caller-visible signature (used by sig_shim + ghost): drop the
+    // `#[inject(...)]`-attributed args entirely. Workflow bodies call
+    // this template without those args; Argo fills them in-pod from
+    // the user's raw expression in `container.args[]`.
+    let caller_func = func_without_inject_args(&func);
 
     // `async fn` bodies: wrap the call in our `block_on`. The hidden
     // impl-fn keeps its `async` (returns a Future); `run` is sync, so
@@ -55,6 +64,10 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = fn_args(&func);
     let arg_idents: Vec<_> = args.iter().map(|(i, _)| i.clone()).collect();
     let arg_types: Vec<_> = args.iter().map(|(_, t)| t.clone()).collect();
+    // Parallel to `args`: `Some("<argo expr>")` for `#[inject(...)]`-
+    // attributed args (filled by Argo at run time, NOT declared as
+    // inputs.parameters), `None` for normal parameter args.
+    let arg_injects: Vec<Option<String>> = fn_arg_injects(&func);
     // The `run`-body call expression. Sync = bare call; async = wrap
     // the returned Future in `block_on` (drives the body on a fresh
     // current-thread runtime — see `cargo_athena::__async`).
@@ -104,17 +117,43 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         })
         .collect();
-    // Parameter-only args: the names that survive into `inputs
-    // .parameters[]` and into `container.args` positional substitution.
-    // Artifact args are out-of-band, so they don't get a positional
-    // slot.
-    let param_only_names: Vec<&String> = arg_names
+    // Parameter-only args declared as `inputs.parameters[]`: non-
+    // artifact AND non-inject. Artifact args travel via files;
+    // `#[inject(...)]` args are filled by Argo from a raw expression
+    // and never declared as inputs.parameters.
+    let param_only_names_strs: Vec<String> = arg_names
         .iter()
         .zip(arg_is_artifact.iter())
-        .filter_map(|(n, a)| if *a { None } else { Some(n) })
+        .zip(arg_injects.iter())
+        .filter_map(|((n, art), inj)| {
+            if *art || inj.is_some() {
+                None
+            } else {
+                Some(n.clone())
+            }
+        })
         .collect();
-    let param_only_names_strs: Vec<String> =
-        param_only_names.iter().map(|s| (*s).clone()).collect();
+    // Pre-formed positional argv elements (passed to
+    // `container_delivery`). One element per non-artifact arg, in fn
+    // declaration order. Param args contribute
+    // `{{inputs.parameters.<n>}}`; inject args contribute the user's
+    // raw Argo expression verbatim (athena does NOT munge it — the
+    // user signs for any quoting/JSON wrapping needed for the target
+    // arg type).
+    let argv_elements: Vec<String> = arg_names
+        .iter()
+        .zip(arg_is_artifact.iter())
+        .zip(arg_injects.iter())
+        .filter_map(|((n, art), inj)| {
+            if *art {
+                return None;
+            }
+            Some(match inj {
+                Some(expr) => expr.clone(),
+                None => format!("{{{{inputs.parameters.{n}}}}}"),
+            })
+        })
+        .collect();
 
     // Per-arg `run()` body deserialization statement. Parameter args
     // read from `__argv` (positional, in PARAMETER-only order);
@@ -570,7 +609,9 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     let inject_check = if inject_ops.is_empty() {
         quote! {}
     } else {
-        let orig_inputs = &func.sig.inputs;
+        // Use the inject-stripped caller signature so the `#[inject(...)]`
+        // per-arg attribute (athena-private) doesn't leak into rustc.
+        let orig_inputs = &caller_func.sig.inputs;
         let chk = format_ident!("__athena_inject_check_{}", ident);
         quote! {
             #[doc(hidden)]
@@ -588,7 +629,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
     let vis = &func.vis;
-    let sig_block = sig_shim(&ident, &func);
+    let sig_block = sig_shim(&ident, &caller_func);
 
     // `#[container(on_exit_if_root = t)]`: Template::ON_EXIT (fires when
     // this template is the submitted workflow) + force-link the handler.
@@ -705,7 +746,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 // parameter/artifact write site picks the right file.
                 let __d = ::cargo_athena::container_delivery(
                     __ctx,
-                    &[ #( #param_only_names_strs ),* ],
+                    &[ #( #argv_elements.to_string() ),* ],
                     #image_opt,
                     <Self as ::cargo_athena::Template>::OUTPUT_KIND,
                 );
