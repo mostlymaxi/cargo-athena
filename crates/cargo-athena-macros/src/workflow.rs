@@ -333,6 +333,31 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(s) => quote! { ::core::option::Option::Some(#s) },
         None => quote! { ::core::option::Option::None },
     };
+    // `pod_spec_patch_if_root = "..."` — root-only
+    // `WorkflowSpec.PodSpecPatch`. Lowered against `workflow.parameters`;
+    // the workflow-tier scope for injection (the only form Argo
+    // resolves at WorkflowSpec).
+    let pod_spec_patch_if_root_s = match cfg
+        .pod_spec_patch_if_root
+        .as_ref()
+        .map(|e| {
+            inject_lower(
+                e,
+                &argset,
+                &mut wf_inject_ops,
+                "workflow.parameters",
+                "workflow",
+            )
+        })
+        .transpose()
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let pod_spec_patch_if_root_const_tok = match pod_spec_patch_if_root_s {
+        Some(s) => quote! { ::core::option::Option::Some(#s) },
+        None => quote! { ::core::option::Option::None },
+    };
     // Type-guard for every injected workflow operand — same shape as the
     // container guard (a hidden never-run fn asserting `Injectable`).
     let wf_inject_check = if wf_inject_ops.is_empty() {
@@ -511,6 +536,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #tolerations_if_root_tok;
             const AFFINITY_IF_ROOT: ::core::option::Option<&'static str> =
                 #affinity_if_root_const_tok;
+            const POD_SPEC_PATCH_IF_ROOT: ::core::option::Option<&'static str> =
+                #pod_spec_patch_if_root_const_tok;
 
             fn build(_ctx: &::cargo_athena::BuildCtx)
                 -> ::cargo_athena::api::Template

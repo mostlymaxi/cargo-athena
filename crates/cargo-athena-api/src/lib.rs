@@ -177,6 +177,16 @@ argo! {
         /// from `#[…(affinity_if_root = "...")]`; athena does NOT model
         /// the deeply-nested `apiv1.Affinity` schema by design.
         pub affinity: Option<serde_norway::Value>,
+        /// Root-scoped strategic-merge patch applied to every pod in
+        /// the run after Argo renders the podSpec. From
+        /// `#[workflow(pod_spec_patch_if_root = "...")]`. Substituted at
+        /// pod-creation time (`workflow/controller/workflowpod.go:89`
+        /// `processPodSpecPatch` → `ProcessArgs`) so
+        /// `{{workflow.parameters.X}}` resolves; per-template
+        /// `Template.pod_spec_patch` is concat'd onto this one. The
+        /// universal escape hatch for any podSpec field athena hasn't
+        /// lifted to a first-class attr.
+        pub pod_spec_patch: Option<String>,
     }
 
     /// K8s `Toleration`: tolerate a node taint. Operator ∈
@@ -268,6 +278,16 @@ argo! {
         /// (athena does NOT model `apiv1.Affinity` by design — use
         /// `pod_spec_patch` as the all-purpose alternative).
         pub affinity: Option<serde_norway::Value>,
+        /// Template-level strategic-merge patch applied to this
+        /// template's pod after Argo renders it. From
+        /// `#[container(pod_spec_patch = "...")]`. Substituted at
+        /// pod-creation time, so `{{inputs.parameters.X}}` resolves
+        /// (proven v4.0.5 2026-05-26 - the patch goes through the
+        /// same `processPodSpecPatch` → `ProcessArgs` pass that
+        /// renders the substituted template, so the leaf-pod inherits
+        /// the resolved value without the nodeSelector-style
+        /// boundary-copy footgun).
+        pub pod_spec_patch: Option<String>,
     }
 
     /// Argo `Synchronization`: workflow- or template-scoped mutex /

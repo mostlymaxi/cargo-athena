@@ -360,6 +360,26 @@ pub(crate) struct ContainerArgs {
     /// .Affinity`. Same `_if_root` family. Users can hand-write
     /// `{{workflow.parameters.X}}` substitutions inside the string.
     pub(crate) affinity_if_root: Option<syn::Expr>,
+    /// `pod_spec_patch = "<json|yaml>"` — `Template.PodSpecPatch` on
+    /// this container's WT. A strategic-merge patch applied to the
+    /// rendered pod just before submission; the universal escape
+    /// hatch for any podSpec field athena hasn't lifted to a
+    /// first-class attr (resources, sidecars, init containers,
+    /// fsGroup, etc.). String accepts the `"lit" + arg + arg.field`
+    /// injection grammar; operands lower to
+    /// `{{=fromJSON(inputs.parameters[..])}}` and resolve at pod-
+    /// creation (`processPodSpecPatch` → `ProcessArgs`, no
+    /// nodeSelector-style boundary-copy footgun — proven v4.0.5
+    /// 2026-05-26).
+    pub(crate) pod_spec_patch: Option<syn::Expr>,
+    /// `pod_spec_patch_if_root = "<json|yaml>"` — root-only
+    /// `WorkflowSpec.PodSpecPatch`, fires only when this container is
+    /// the submitted root (same `_if_root` family as `mutexes_if_root`).
+    /// Argo concats this with the per-template `pod_spec_patch` and
+    /// applies the merge to every pod in the run. Injection scope
+    /// `workflow.parameters` — the only form Argo resolves at
+    /// WorkflowSpec.
+    pub(crate) pod_spec_patch_if_root: Option<syn::Expr>,
 }
 
 /// `#[workflow(name = "...", steps,
@@ -461,6 +481,14 @@ pub(crate) struct WorkflowArgs {
     /// .Affinity` as an opaque YAML/JSON string. See
     /// `ContainerArgs::affinity_if_root`.
     pub(crate) affinity_if_root: Option<syn::Expr>,
+    /// `pod_spec_patch_if_root = "<json|yaml>"` — root-only
+    /// `WorkflowSpec.PodSpecPatch`. Applied to every pod in the run
+    /// (Argo concats this with each template's own `pod_spec_patch`
+    /// before strategic-merging onto the rendered pod). String
+    /// accepts the `"lit" + arg + arg.field` injection grammar;
+    /// operands lower to `{{=fromJSON(workflow.parameters[..])}}`,
+    /// the only scope Argo resolves at WorkflowSpec.
+    pub(crate) pod_spec_patch_if_root: Option<syn::Expr>,
 }
 
 /// Parse attribute args into `T`, or return a `compile_error!`.

@@ -668,3 +668,32 @@ pub fn pipeline_affinity(role: String) {
     // touch role so the macro doesn't error on an unused arg.
     record(role);
 }
+
+// --- pod_spec_patch / pod_spec_patch_if_root -------------------------------
+
+/// Template-level `Template.PodSpecPatch` — the universal strategic-
+/// merge escape hatch for any podSpec field athena hasn't lifted to
+/// a first-class attr (here: resources). The patch string accepts the
+/// `"lit" + arg` injection grammar; operands lower to
+/// `{{=fromJSON(inputs.parameters[..])}}` and resolve at pod-creation
+/// via `workflow/controller/workflowpod.go:89 processPodSpecPatch`
+/// (no nodeSelector-style boundary-copy footgun — substitution
+/// happens in the same pass that renders the patch onto the leaf pod;
+/// proven v4.0.5 2026-05-26).
+#[container(pod_spec_patch = r#"{"containers":[{"name":"main","resources":{"limits":{"cpu":""# + cpu_limit + r#"","memory":"64Mi"}}}]}"#)]
+pub fn limited(cpu_limit: String) {
+    println!("limited cpu={cpu_limit}");
+}
+
+/// Root-only `WorkflowSpec.PodSpecPatch` — Argo concats with each
+/// template's own `pod_spec_patch` and applies the merge to every
+/// pod in the run. Injection lowers to
+/// `{{=fromJSON(workflow.parameters[..])}}` (the only scope Argo
+/// resolves at WorkflowSpec). Inert when this WT is `templateRef`'d
+/// — same `_if_root` family as `node_selector_if_root`.
+#[workflow(
+    pod_spec_patch_if_root = r#"{"terminationGracePeriodSeconds":"# + grace + r#"}"#,
+)]
+pub fn pipeline_pod_spec_patch(grace: String) {
+    limited(grace);
+}

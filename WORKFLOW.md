@@ -47,6 +47,7 @@ All are optional.
 | `mutexes_if_root = [{ name, namespace }, …]` | Serialize the whole submitted run against other runs holding the same mutex. **Root-only.** |
 | `tolerations_if_root = [{ key, operator, value, effect, ... }, …]` | K8s `Toleration` list applied to every pod in the run. 3rd tier of Argo's `tmpl → boundary → wfSpec` pod-scheduling lookup. Strings accept `"lit" + arg` injection. **Root-only.** |
 | `affinity_if_root = "<json\|yaml>"` | Opaque YAML/JSON string for pod affinity, applied to every pod in the run. Athena does NOT model `apiv1.Affinity`'s deeply-nested schema by design — use `pod_spec_patch_if_root` for patch-style. Hand-write `{{workflow.parameters.X}}` substitutions inside the YAML body as needed. **Root-only.** |
+| `pod_spec_patch_if_root = "<json\|yaml>"` | Strategic-merge patch Argo applies to **every** pod in the submitted run. Universal escape hatch for any podSpec field athena doesn't have a first-class attr for. String accepts `"lit" + arg` injection. **Root-only.** Athena does NOT validate the patch shape; Argo / k8s reject malformed input at submit / admission time. |
 
 A parameter *name* (i.e. a function argument) or a `name = "…"`
 value that a YAML 1.1 parser reads as a boolean/null (`y` / `yes` /

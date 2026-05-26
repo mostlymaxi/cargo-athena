@@ -100,6 +100,8 @@ All optional.
 | `tolerations_if_root = [{ key, operator, value, effect, ... }, …]` | Same, but applied to every pod in the run (3rd tier of Argo's `tmpl → boundary → wfSpec` lookup). **Root-only.** |
 | `affinity = "<json\|yaml>"` | Opaque YAML/JSON string for K8s pod affinity. Athena does NOT model the deeply-nested `apiv1.Affinity` schema by design — use `pod_spec_patch` if you'd rather express it patch-style. |
 | `affinity_if_root = "<json\|yaml>"` | Same, but applied to every pod in the run. **Root-only.** Hand-write `{{workflow.parameters.X}}` substitutions inside the YAML body if you need dynamic values. |
+| `pod_spec_patch = "<json\|yaml>"` | Strategic-merge patch applied to this template's pod just before submission. Universal escape hatch for any podSpec field athena doesn't have a first-class attr for (resources, sidecars, init containers, fsGroup, …). String accepts `"lit" + arg` injection. **Dangerous-by-design**: athena does NOT validate the patch shape; Argo / k8s reject malformed input at submit / admission time. |
+| `pod_spec_patch_if_root = "<json\|yaml>"` | Same, but applied to **every** pod in the run. Argo concats with each template's own `pod_spec_patch`. **Root-only.** |
 
 As with `#[workflow]`, an argument *name* or a `name = "…"` value
 that a YAML 1.1 parser reads as a boolean/null is a compile error.
