@@ -380,6 +380,12 @@ pub(crate) struct ContainerArgs {
     /// `workflow.parameters` — the only form Argo resolves at
     /// WorkflowSpec.
     pub(crate) pod_spec_patch_if_root: Option<syn::Expr>,
+    /// `image_pull_secrets_if_root = ["regcred", "harborcred"]` — root-
+    /// only `WorkflowSpec.ImagePullSecrets`, the Secret names the
+    /// kubelet uses to pull every pod's image from a private registry.
+    /// K8s / Argo expose this only at workflow scope; per-container
+    /// needs go through `pod_spec_patch`. Literal names only.
+    pub(crate) image_pull_secrets_if_root: Vec<String>,
 }
 
 /// `#[workflow(name = "...", steps,
@@ -489,6 +495,11 @@ pub(crate) struct WorkflowArgs {
     /// operands lower to `{{=fromJSON(workflow.parameters[..])}}`,
     /// the only scope Argo resolves at WorkflowSpec.
     pub(crate) pod_spec_patch_if_root: Option<syn::Expr>,
+    /// `image_pull_secrets_if_root = ["regcred", ...]` — root-only
+    /// `WorkflowSpec.ImagePullSecrets`. See `ContainerArgs::image_pull
+    /// _secrets_if_root`; same shape (literal Secret names, no
+    /// injection).
+    pub(crate) image_pull_secrets_if_root: Vec<String>,
 }
 
 /// Parse attribute args into `T`, or return a `compile_error!`.

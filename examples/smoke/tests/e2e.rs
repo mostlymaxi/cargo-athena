@@ -29,6 +29,7 @@ const BIN_ARTIFACT_CLONE: &str = env!("CARGO_BIN_EXE_smoke-artifact-clone");
 const BIN_TOLERATIONS: &str = env!("CARGO_BIN_EXE_smoke-tolerations");
 const BIN_AFFINITY: &str = env!("CARGO_BIN_EXE_smoke-affinity");
 const BIN_POD_SPEC_PATCH: &str = env!("CARGO_BIN_EXE_smoke-pod-spec-patch");
+const BIN_IMAGE_PULL_SECRETS: &str = env!("CARGO_BIN_EXE_smoke-image-pull-secrets");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -361,6 +362,17 @@ fn emit_pipeline_pod_spec_patch() {
     assert_golden(
         "pipeline_pod_spec_patch.yaml",
         &run_bin(BIN_POD_SPEC_PATCH, &[]),
+    );
+}
+
+/// Root-only `WorkflowSpec.ImagePullSecrets`. Pins that the two
+/// literal Secret names from `image_pull_secrets_if_root` land on
+/// the root WorkflowTemplate's `spec.imagePullSecrets`.
+#[test]
+fn emit_pipeline_image_pull_secrets() {
+    assert_golden(
+        "pipeline_image_pull_secrets.yaml",
+        &run_bin(BIN_IMAGE_PULL_SECRETS, &[]),
     );
 }
 

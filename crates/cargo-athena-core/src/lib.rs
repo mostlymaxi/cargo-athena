@@ -529,6 +529,12 @@ pub trait Template {
     /// `NODE_SELECTOR_IF_ROOT`. None ⇒ skip (existing goldens
     /// unaffected).
     const POD_SPEC_PATCH_IF_ROOT: ::core::option::Option<&'static str> = None;
+    /// Root-only `WorkflowSpec.ImagePullSecrets` (Secret names) from
+    /// `#[…(image_pull_secrets_if_root = ["regcred", ...])]`. K8s/
+    /// Argo expose this only at workflow scope (no per-template
+    /// knob); per-container needs go through `pod_spec_patch`. Same
+    /// per-WT, root-only plumbing as `MUTEXES_IF_ROOT`.
+    const IMAGE_PULL_SECRETS_IF_ROOT: &'static [&'static str] = &[];
 
     /// Build this template's inner Argo `template` object.
     fn build(ctx: &BuildCtx) -> api::Template;
@@ -1351,6 +1357,10 @@ pub struct Collector {
     /// `{{=fromJSON(workflow.parameters[..])}}` injection operands).
     /// Stamped onto that WT's `spec.podSpecPatch`.
     pod_spec_patch_if_root: HashMap<String, String>,
+    /// `<argo name> -> Secret names` for every template declaring
+    /// `#[…(image_pull_secrets_if_root = [...])]`. Stamped onto that
+    /// WT's `spec.imagePullSecrets` as `[{name}]` k8s references.
+    image_pull_secrets_if_root: HashMap<String, Vec<String>>,
     /// `<argo name> -> stringified input types` (parallel to the
     /// template's INPUTS), for `container emulate` arg type-checking.
     types: HashMap<String, &'static [&'static str]>,
@@ -1380,6 +1390,7 @@ impl Collector {
             tolerations_if_root: HashMap::new(),
             affinity_if_root: HashMap::new(),
             pod_spec_patch_if_root: HashMap::new(),
+            image_pull_secrets_if_root: HashMap::new(),
             types: HashMap::new(),
             synthetic: HashSet::new(),
         }
@@ -1455,6 +1466,15 @@ impl Collector {
         if let Some(p) = T::POD_SPEC_PATCH_IF_ROOT {
             self.pod_spec_patch_if_root
                 .insert(T::ARGO_NAME.to_string(), p.to_string());
+        }
+        if !T::IMAGE_PULL_SECRETS_IF_ROOT.is_empty() {
+            self.image_pull_secrets_if_root.insert(
+                T::ARGO_NAME.to_string(),
+                T::IMAGE_PULL_SECRETS_IF_ROOT
+                    .iter()
+                    .map(|n| (*n).to_string())
+                    .collect(),
+            );
         }
         if !T::INPUT_TYPES.is_empty() {
             self.types.insert(T::ARGO_NAME.to_string(), T::INPUT_TYPES);
@@ -1575,6 +1595,12 @@ impl Collector {
         }
         if let Some(p) = self.pod_spec_patch_if_root.get(name) {
             spec.pod_spec_patch = Some(p.clone());
+        }
+        if let Some(ipss) = self.image_pull_secrets_if_root.get(name) {
+            for n in ipss {
+                spec.image_pull_secrets
+                    .push(api::LocalObjectReference { name: n.clone() });
+            }
         }
     }
 

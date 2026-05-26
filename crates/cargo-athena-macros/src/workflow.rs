@@ -358,6 +358,12 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(s) => quote! { ::core::option::Option::Some(#s) },
         None => quote! { ::core::option::Option::None },
     };
+    // `image_pull_secrets_if_root` — literal Secret names, flat list
+    // into the `IMAGE_PULL_SECRETS_IF_ROOT` const (workflow-spec scope).
+    let image_pull_secrets_if_root_tok = {
+        let names = &cfg.image_pull_secrets_if_root;
+        quote! { &[ #( #names ),* ] }
+    };
     // Type-guard for every injected workflow operand — same shape as the
     // container guard (a hidden never-run fn asserting `Injectable`).
     let wf_inject_check = if wf_inject_ops.is_empty() {
@@ -538,6 +544,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #affinity_if_root_const_tok;
             const POD_SPEC_PATCH_IF_ROOT: ::core::option::Option<&'static str> =
                 #pod_spec_patch_if_root_const_tok;
+            const IMAGE_PULL_SECRETS_IF_ROOT: &'static [&'static str] =
+                #image_pull_secrets_if_root_tok;
 
             fn build(_ctx: &::cargo_athena::BuildCtx)
                 -> ::cargo_athena::api::Template

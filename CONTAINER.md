@@ -102,6 +102,7 @@ All optional.
 | `affinity_if_root = "<json\|yaml>"` | Same, but applied to every pod in the run. **Root-only.** Hand-write `{{workflow.parameters.X}}` substitutions inside the YAML body if you need dynamic values. |
 | `pod_spec_patch = "<json\|yaml>"` | Strategic-merge patch applied to this template's pod just before submission. Universal escape hatch for any podSpec field athena doesn't have a first-class attr for (resources, sidecars, init containers, fsGroup, …). String accepts `"lit" + arg` injection. **Dangerous-by-design**: athena does NOT validate the patch shape; Argo / k8s reject malformed input at submit / admission time. |
 | `pod_spec_patch_if_root = "<json\|yaml>"` | Same, but applied to **every** pod in the run. Argo concats with each template's own `pod_spec_patch`. **Root-only.** |
+| `image_pull_secrets_if_root = ["regcred", …]` | Root-only `WorkflowSpec.ImagePullSecrets`. Secret names the kubelet uses to pull every pod's image from a private registry. K8s / Argo expose this only at workflow scope; per-container needs go through `pod_spec_patch`. |
 
 As with `#[workflow]`, an argument *name* or a `name = "…"` value
 that a YAML 1.1 parser reads as a boolean/null is a compile error.

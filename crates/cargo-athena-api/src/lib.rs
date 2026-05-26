@@ -187,6 +187,15 @@ argo! {
         /// universal escape hatch for any podSpec field athena hasn't
         /// lifted to a first-class attr.
         pub pod_spec_patch: Option<String>,
+        /// Root-only `WorkflowSpec.ImagePullSecrets` — Secret references
+        /// the kubelet uses to authenticate against private image
+        /// registries when pulling each pod's image. From
+        /// `#[…(image_pull_secrets_if_root = ["regcred", ...])]`.
+        /// K8s/Argo expose this only at workflow scope (no
+        /// per-template knob); per-container needs go through
+        /// `pod_spec_patch`. skip-empty ⇒ existing goldens stay
+        /// byte-identical.
+        pub image_pull_secrets: Vec<LocalObjectReference>,
     }
 
     /// K8s `Toleration`: tolerate a node taint. Operator ∈
@@ -199,6 +208,13 @@ argo! {
         pub value: String,
         pub effect: String,
         pub toleration_seconds: Option<i64>,
+    }
+
+    /// K8s `LocalObjectReference` — just a Secret name in the
+    /// workflow's own namespace. Argo's `ImagePullSecrets` is
+    /// `[]LocalObjectReference`.
+    pub struct LocalObjectReference {
+        pub name: String,
     }
 
     /// Argo `ttlStrategy`: delete the finished Workflow after the given

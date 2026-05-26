@@ -697,3 +697,14 @@ pub fn limited(cpu_limit: String) {
 pub fn pipeline_pod_spec_patch(grace: String) {
     limited(grace);
 }
+
+// --- image_pull_secrets_if_root --------------------------------------------
+
+/// Root-only `WorkflowSpec.ImagePullSecrets`. K8s/Argo expose this only
+/// at workflow scope (no per-template knob); the kubelet uses these
+/// Secret names to pull every pod's image from a private registry.
+/// Literal names (no injection).
+#[workflow(image_pull_secrets_if_root = ["regcred", "harborcred"])]
+pub fn pipeline_image_pull_secrets() {
+    fetch("https://example.com/data".to_string());
+}

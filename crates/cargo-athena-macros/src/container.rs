@@ -493,6 +493,13 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(s) => quote! { ::core::option::Option::Some(#s) },
         None => quote! { ::core::option::Option::None },
     };
+    // `image_pull_secrets_if_root = ["regcred", ...]` — literal Secret
+    // names; flat list emitted into the `IMAGE_PULL_SECRETS_IF_ROOT`
+    // const, stamped onto `spec.imagePullSecrets` by `Collector`.
+    let image_pull_secrets_if_root_tok = {
+        let names = &cfg.image_pull_secrets_if_root;
+        quote! { &[ #( #names ),* ] }
+    };
     // `host_mount = [{ host_path, mount_path, read_only }, …]`:
     // literal-only triples, threaded into `container_volumes` so the
     // dedup-against-`host!` lives in core.
@@ -637,6 +644,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #affinity_if_root_const_tok;
             const POD_SPEC_PATCH_IF_ROOT: ::core::option::Option<&'static str> =
                 #pod_spec_patch_if_root_const_tok;
+            const IMAGE_PULL_SECRETS_IF_ROOT: &'static [&'static str] =
+                #image_pull_secrets_if_root_tok;
 
             fn run(__argv: &[::std::string::String]) -> ::std::string::String
             {

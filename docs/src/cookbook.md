@@ -470,6 +470,19 @@ Athena does NOT validate the patch shape — that's the trade-off for
 "any field." Argo and the K8s API reject malformed input at submit /
 admission time.
 
+## Pull images from a private registry
+
+Bind one or more `imagePullSecrets` (Secret names in the workflow's
+namespace) to every pod in the run:
+
+```rust,ignore
+#[workflow(image_pull_secrets_if_root = ["regcred", "harborcred"])]
+fn pipeline() { build(); deploy(); }
+```
+
+K8s / Argo expose this only at workflow scope; if you need a
+per-container override (rare), reach for `pod_spec_patch`.
+
 ## Pull a Kubernetes Secret as an env var
 
 `secret!("secret-name", "key")` declares a Secret env on the
