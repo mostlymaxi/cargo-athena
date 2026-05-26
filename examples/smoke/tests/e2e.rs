@@ -26,6 +26,8 @@ const BIN_MUTEX: &str = env!("CARGO_BIN_EXE_smoke-mutex");
 const BIN_ARTIFACT: &str = env!("CARGO_BIN_EXE_smoke-artifact");
 const BIN_ARTIFACT_WF: &str = env!("CARGO_BIN_EXE_smoke-artifact-wf");
 const BIN_ARTIFACT_CLONE: &str = env!("CARGO_BIN_EXE_smoke-artifact-clone");
+const BIN_TOLERATIONS: &str = env!("CARGO_BIN_EXE_smoke-tolerations");
+const BIN_AFFINITY: &str = env!("CARGO_BIN_EXE_smoke-affinity");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -327,6 +329,25 @@ fn emit_pipeline_artifact_clone() {
         "pipeline_artifact_clone.yaml",
         &run_bin(BIN_ARTIFACT_CLONE, &[]),
     );
+}
+
+/// `tolerations` (template-level, `Template.Tolerations` with
+/// `inputs.parameters['kind']` injection) + `tolerations_if_root`
+/// (root-only `WorkflowSpec.Tolerations` with `workflow.parameters
+/// ['role']` injection). Pins the 5-tuple of (key, op, value, effect,
+/// secs) on both tiers.
+#[test]
+fn emit_pipeline_tolerations() {
+    assert_golden("pipeline_tolerations.yaml", &run_bin(BIN_TOLERATIONS, &[]));
+}
+
+/// `affinity` (template-level, opaque YAML `Template.Affinity`
+/// preference) + `affinity_if_root` (root-only `WorkflowSpec.Affinity`
+/// requirement with embedded `{{workflow.parameters.role}}`). Pins
+/// the parsed YAML serializes back cleanly through serde_norway.
+#[test]
+fn emit_pipeline_affinity() {
+    assert_golden("pipeline_affinity.yaml", &run_bin(BIN_AFFINITY, &[]));
 }
 
 /// Run mode: with Argo's secretKeyRef env vars planted by the

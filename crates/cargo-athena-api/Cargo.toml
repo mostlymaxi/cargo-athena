@@ -8,3 +8,8 @@ description = "Argo Workflows API types — a hand-owned, curated serde subset"
 
 [dependencies]
 serde = { workspace = true }
+# Backing store for opaque YAML/JSON values (affinity attr). The macro
+# parses the user's YAML at emit time into a serde_norway::Value and
+# stuffs it here; serde_norway's serializer roundtrips it cleanly when
+# emit later serializes the wrapping Template.
+serde_norway = { workspace = true }

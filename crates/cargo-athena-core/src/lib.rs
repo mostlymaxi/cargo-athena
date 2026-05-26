@@ -502,6 +502,25 @@ pub trait Template {
     /// SEPARATE Workflow runs contend on the same name (empirically
     /// verified on v4.0.5 2026-05-25, holder key `<ns>/<wf>`).
     const MUTEXES_IF_ROOT: &'static [(&'static str, &'static str)] = &[];
+    /// Root-only `WorkflowSpec.Tolerations` from
+    /// `#[…(tolerations_if_root = [...])]`. Each entry is `(key,
+    /// operator, value, effect, toleration_seconds)`. Strings are
+    /// already lowered (literal verbatim, or
+    /// `{{=fromJSON(workflow.parameters[..])}}` for injected operands).
+    /// `toleration_seconds == 0` ⇒ Argo skip-serializes (treated as
+    /// "unset" by k8s, applies forever).
+    const TOLERATIONS_IF_ROOT: &'static [(
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        i64,
+    )] = &[];
+    /// Root-only `WorkflowSpec.Affinity` from
+    /// `#[…(affinity_if_root = "...")]` as an opaque YAML/JSON string.
+    /// Parsed at emit time; user owns the schema (athena does NOT
+    /// validate). None ⇒ skip.
+    const AFFINITY_IF_ROOT: ::core::option::Option<&'static str> = None;
 
     /// Build this template's inner Argo `template` object.
     fn build(ctx: &BuildCtx) -> api::Template;
@@ -1252,6 +1271,12 @@ pub fn artifact_inputs(ctx: &BuildCtx, keys: &[String]) -> Vec<api::Artifact> {
         .collect()
 }
 
+/// `(key, operator, value, effect, toleration_seconds)` — the lowered
+/// shape the macro produces for each toleration entry, threaded through
+/// `Template::TOLERATIONS_IF_ROOT` and into `WorkflowSpec.Tolerations`
+/// by `Collector::stamp_spec`.
+pub type TolerationTuple = (String, String, String, String, i64);
+
 /// `save_artifact!("key")` output ports: Argo pushes the written file to
 /// the exact S3 object `key` in the configured repo (raw, `archive: none`).
 pub fn artifact_outputs(ctx: &BuildCtx, keys: &[String]) -> Vec<api::Artifact> {
@@ -1304,6 +1329,14 @@ pub struct Collector {
     /// `namespace == ""` means "skip the field" (defaults to the wf's
     /// own ns). Stamped onto that WT's `spec.synchronization.mutexes`.
     mutexes_if_root: HashMap<String, Vec<(String, String)>>,
+    /// `<argo name> -> tolerations` for every template declaring
+    /// `#[…(tolerations_if_root = [...])]`. Strings already lowered.
+    /// Stamped onto that WT's `spec.tolerations`.
+    tolerations_if_root: HashMap<String, Vec<TolerationTuple>>,
+    /// `<argo name> -> affinity YAML string` for every template with
+    /// `#[…(affinity_if_root = "...")]`. Parsed at emit time and
+    /// stuffed into `spec.affinity` as a `serde_norway::Value`.
+    affinity_if_root: HashMap<String, String>,
     /// `<argo name> -> stringified input types` (parallel to the
     /// template's INPUTS), for `container emulate` arg type-checking.
     types: HashMap<String, &'static [&'static str]>,
@@ -1330,6 +1363,8 @@ impl Collector {
             active_deadline: HashMap::new(),
             node_selector_if_root: HashMap::new(),
             mutexes_if_root: HashMap::new(),
+            tolerations_if_root: HashMap::new(),
+            affinity_if_root: HashMap::new(),
             types: HashMap::new(),
             synthetic: HashSet::new(),
         }
@@ -1380,6 +1415,27 @@ impl Collector {
                     .map(|(n, ns)| ((*n).to_string(), (*ns).to_string()))
                     .collect(),
             );
+        }
+        if !T::TOLERATIONS_IF_ROOT.is_empty() {
+            self.tolerations_if_root.insert(
+                T::ARGO_NAME.to_string(),
+                T::TOLERATIONS_IF_ROOT
+                    .iter()
+                    .map(|(k, op, v, eff, secs)| {
+                        (
+                            (*k).to_string(),
+                            (*op).to_string(),
+                            (*v).to_string(),
+                            (*eff).to_string(),
+                            *secs,
+                        )
+                    })
+                    .collect(),
+            );
+        }
+        if let Some(a) = T::AFFINITY_IF_ROOT {
+            self.affinity_if_root
+                .insert(T::ARGO_NAME.to_string(), a.to_string());
         }
         if !T::INPUT_TYPES.is_empty() {
             self.types.insert(T::ARGO_NAME.to_string(), T::INPUT_TYPES);
@@ -1480,6 +1536,23 @@ impl Collector {
                     namespace: mns.clone(),
                 });
             }
+        }
+        if let Some(tols) = self.tolerations_if_root.get(name) {
+            for (k, op, v, eff, secs) in tols {
+                spec.tolerations.push(api::Toleration {
+                    key: k.clone(),
+                    operator: op.clone(),
+                    value: v.clone(),
+                    effect: eff.clone(),
+                    toleration_seconds: if *secs == 0 { None } else { Some(*secs) },
+                });
+            }
+        }
+        if let Some(s) = self.affinity_if_root.get(name) {
+            spec.affinity = Some(
+                serde_norway::from_str(s)
+                    .unwrap_or_else(|e| panic!("affinity_if_root: invalid YAML/JSON: {e}")),
+            );
         }
     }
 

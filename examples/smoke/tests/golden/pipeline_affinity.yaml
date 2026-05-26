@@ -1,0 +1,160 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-arch-pinned
+spec:
+  entrypoint: cargo-athena-example-smoke-arch-pinned
+  templates:
+  - name: cargo-athena-example-smoke-arch-pinned
+    inputs:
+      artifacts:
+      - name: athena-dist
+        path: /athena/bin
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: cargo-athena-example-smoke/0.0.0/smoke-affinity.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          path: /athena/result
+    container:
+      image: busybox:1.36-musl
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t "$@"
+      - --
+      env:
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-arch-pinned
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 1
+          preference:
+            matchExpressions:
+            - key: kubernetes.io/arch
+              operator: In
+              values:
+              - amd64
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-pipeline-affinity
+spec:
+  entrypoint: cargo-athena-example-smoke-pipeline-affinity
+  templates:
+  - name: cargo-athena-example-smoke-pipeline-affinity
+    inputs:
+      parameters:
+      - name: role
+    dag:
+      tasks:
+      - name: arch-pinned
+        arguments: {}
+        templateRef:
+          name: cargo-athena-example-smoke-arch-pinned
+          template: cargo-athena-example-smoke-arch-pinned
+      - name: record
+        arguments:
+          parameters:
+          - name: tag
+            value: '{{inputs.parameters.role}}'
+        templateRef:
+          name: cargo-athena-example-smoke-record
+          template: cargo-athena-example-smoke-record
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: athena.dev/role
+            operator: In
+            values:
+            - '{{workflow.parameters.role}}'
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-record
+spec:
+  entrypoint: cargo-athena-example-smoke-record
+  templates:
+  - name: cargo-athena-example-smoke-record
+    inputs:
+      parameters:
+      - name: tag
+      artifacts:
+      - name: athena-dist
+        path: /athena/bin
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: cargo-athena-example-smoke/0.0.0/smoke-affinity.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          path: /athena/result
+    container:
+      image: busybox:1.36-musl
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.tag}}'
+      env:
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-record
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default

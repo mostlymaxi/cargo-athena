@@ -245,6 +245,24 @@ pub(crate) struct MutexArg {
     pub(crate) namespace: Option<syn::Expr>,
 }
 
+/// `tolerations = [{ key, operator, value, effect, toleration_seconds }, …]`
+/// — K8s `Toleration` entry. `key`, `value`, `effect` accept the same
+/// `"lit" + arg` injection grammar as `image`/`env` (scope per attr:
+/// `inputs.parameters` for container-level, `workflow.parameters` for
+/// `_if_root`). `operator` is a literal string (small closed set:
+/// `"Equal"` | `"Exists"`); `toleration_seconds` is a literal i64
+/// (0 ⇒ skip-serialize, k8s default "applies forever").
+#[derive(deluxe::ParseMetaItem)]
+pub(crate) struct TolerationArg {
+    pub(crate) key: syn::Expr,
+    pub(crate) operator: String,
+    #[deluxe(default)]
+    pub(crate) value: Option<syn::Expr>,
+    pub(crate) effect: syn::Expr,
+    #[deluxe(default)]
+    pub(crate) toleration_seconds: i64,
+}
+
 #[derive(deluxe::ParseMetaItem, Default)]
 #[deluxe(default)]
 pub(crate) struct ContainerArgs {
@@ -318,6 +336,30 @@ pub(crate) struct ContainerArgs {
     /// scope `workflow.parameters` (the only form Argo resolves at
     /// `WorkflowSpec` scope).
     pub(crate) mutexes_if_root: Vec<MutexArg>,
+    /// `tolerations = [{ key, operator, value, effect, ... }, …]` →
+    /// `Template.Tolerations` on this container's WT. Strings accept
+    /// the `"lit" + arg` injection grammar lowered against
+    /// `inputs.parameters` — safe at template scope (the leaf pod
+    /// renders from this template's own substituted form, no
+    /// nodeSelector-style boundary-copy footgun; empirically verified
+    /// v4.0.5 2026-05-26).
+    pub(crate) tolerations: Vec<TolerationArg>,
+    /// `tolerations_if_root = [...]` → root-only `WorkflowSpec
+    /// .Tolerations` (3rd tier of Argo's `tmpl → boundary → wfSpec`
+    /// pod-scheduling lookup). Injection scope `workflow.parameters`.
+    /// Same `_if_root` family as `mutexes_if_root`.
+    pub(crate) tolerations_if_root: Vec<TolerationArg>,
+    /// `affinity = "<json|yaml>"` → `Template.Affinity` on this
+    /// container's WT, as an opaque YAML/JSON string. Athena does NOT
+    /// model `apiv1.Affinity`'s deeply-nested schema by design (use
+    /// `pod_spec_patch` if a typed approach matters). Substitution at
+    /// this scope is safe for the leaf pod (same path as `pod_spec
+    /// _patch`).
+    pub(crate) affinity: Option<syn::Expr>,
+    /// `affinity_if_root = "<json|yaml>"` → root-only `WorkflowSpec
+    /// .Affinity`. Same `_if_root` family. Users can hand-write
+    /// `{{workflow.parameters.X}}` substitutions inside the string.
+    pub(crate) affinity_if_root: Option<syn::Expr>,
 }
 
 /// `#[workflow(name = "...", steps,
@@ -411,6 +453,14 @@ pub(crate) struct WorkflowArgs {
     /// `ContainerArgs::mutexes_if_root`; same shape, same injection
     /// scope (`workflow.parameters`).
     pub(crate) mutexes_if_root: Vec<MutexArg>,
+    /// `tolerations_if_root = [...]` → root-only `WorkflowSpec
+    /// .Tolerations`. See `ContainerArgs::tolerations_if_root`; same
+    /// shape, same injection scope.
+    pub(crate) tolerations_if_root: Vec<TolerationArg>,
+    /// `affinity_if_root = "<json|yaml>"` → root-only `WorkflowSpec
+    /// .Affinity` as an opaque YAML/JSON string. See
+    /// `ContainerArgs::affinity_if_root`.
+    pub(crate) affinity_if_root: Option<syn::Expr>,
 }
 
 /// Parse attribute args into `T`, or return a `compile_error!`.
@@ -805,6 +855,72 @@ pub(crate) fn lower_mutex_pairs(
             Ok((name, ns))
         })
         .collect()
+}
+
+/// Lower a `Vec<TolerationArg>` to `(key, operator, value, effect,
+/// toleration_seconds)` 5-tuples. `key`/`value`/`effect` go through
+/// `inject_lower` against the right scope (so `"lit" + arg` becomes
+/// `{{=fromJSON(scope['arg'])}}`); `operator` is a literal string;
+/// `toleration_seconds` is a literal i64.
+/// 5-tuple matching `cargo_athena_core::TolerationTuple` — the lowered
+/// shape the macro produces for each toleration entry.
+pub(crate) type TolerationTuple = (String, String, String, String, i64);
+
+pub(crate) fn lower_toleration_args(
+    list: &[TolerationArg],
+    args: &std::collections::HashSet<String>,
+    ops: &mut Vec<syn::Expr>,
+    scope: &str,
+    kind: &str,
+) -> syn::Result<Vec<TolerationTuple>> {
+    list.iter()
+        .map(|t| {
+            let key = inject_lower(&t.key, args, ops, scope, kind)?;
+            let value = match &t.value {
+                Some(e) => inject_lower(e, args, ops, scope, kind)?,
+                None => String::new(),
+            };
+            let effect = inject_lower(&t.effect, args, ops, scope, kind)?;
+            Ok((key, t.operator.clone(), value, effect, t.toleration_seconds))
+        })
+        .collect()
+}
+
+/// Const-tokens producer for `TOLERATIONS_IF_ROOT`. Each entry lowers
+/// to a 5-tuple literal `(key, op, value, effect, secs)`.
+pub(crate) fn tolerations_if_root_const_tokens(
+    pairs: &[TolerationTuple],
+) -> proc_macro2::TokenStream {
+    let entries = pairs.iter().map(|(k, op, v, eff, secs)| {
+        quote! { (#k, #op, #v, #eff, #secs) }
+    });
+    quote! { &[ #( #entries ),* ] }
+}
+
+/// Build a Template-level tolerations literal for a container or dag/steps
+/// template. Returns tokens for a `Vec<api::Toleration>` expression
+/// (constructed at runtime; empty vec skip-serializes).
+pub(crate) fn template_tolerations_tokens(pairs: &[TolerationTuple]) -> proc_macro2::TokenStream {
+    if pairs.is_empty() {
+        return quote! { ::std::vec::Vec::new() };
+    }
+    let entries = pairs.iter().map(|(k, op, v, eff, secs)| {
+        let secs_tok = if *secs == 0 {
+            quote! { ::core::option::Option::None }
+        } else {
+            quote! { ::core::option::Option::Some(#secs) }
+        };
+        quote! {
+            ::cargo_athena::api::Toleration {
+                key: #k.to_string(),
+                operator: #op.to_string(),
+                value: #v.to_string(),
+                effect: #eff.to_string(),
+                toleration_seconds: #secs_tok,
+            }
+        }
+    });
+    quote! { ::std::vec![ #( #entries ),* ] }
 }
 
 /// Token producer for template-level mutexes: an

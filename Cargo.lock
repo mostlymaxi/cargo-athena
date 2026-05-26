@@ -163,6 +163,7 @@ name = "cargo-athena-api"
 version = "0.5.2"
 dependencies = [
  "serde",
+ "serde_norway",
 ]
 
 [[package]]
