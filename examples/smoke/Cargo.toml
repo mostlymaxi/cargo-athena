@@ -110,6 +110,10 @@ path = "src/bin/pod_spec_patch_main.rs"
 name = "smoke-image-pull-secrets"
 path = "src/bin/image_pull_secrets_main.rs"
 
+[[bin]]
+name = "smoke-inject-attr"
+path = "src/bin/inject_attr_main.rs"
+
 [dependencies]
 # `tokio` enables `async fn` `#[container]` bodies (re-exports tokio).
 cargo-athena = { workspace = true, features = ["tokio"] }

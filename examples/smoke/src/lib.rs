@@ -708,3 +708,36 @@ pub fn pipeline_pod_spec_patch(grace: String) {
 pub fn pipeline_image_pull_secrets() {
     fetch("https://example.com/data".to_string());
 }
+
+// --- #[inject("{{...}}")] per-arg attribute --------------------------------
+
+/// The dangerous-by-design escape hatch for grabbing Argo built-in
+/// variables as `#[container]` arguments. `#[inject("<expr>")]` marks
+/// an arg as filled by Argo's substitution rather than a normal
+/// `inputs.parameters` entry. The expression is passed verbatim;
+/// athena does NOT validate it (the user owns Argo's variable scope
+/// rules + JSON wrapping). The container's `container.args[]`
+/// positional slot for this arg is the raw expression; Argo substitutes
+/// at pod-creation, and athena's run-side `serde_json::from_str`
+/// decodes the result like any other Regime-B value.
+///
+/// `payload` is normal (declared as `inputs.parameters.payload`,
+/// substituted with the caller's value). `attempt` and `pod` are
+/// filled by Argo from `{{retries}}` (numeric, bare) and
+/// `{{pod.name}}` (string — the user wraps in `"..."` themselves so
+/// the substituted result is valid JSON for the `String` decode).
+#[container]
+pub fn smart_retry(
+    payload: String,
+    #[inject("{{retries}}")] attempt: i64,
+    #[inject("\"{{pod.name}}\"")] pod: String,
+) {
+    println!("smart_retry payload={payload} attempt={attempt} pod={pod}");
+}
+
+#[workflow]
+pub fn pipeline_inject_attr() {
+    // The workflow body calls smart_retry with ONLY the param args -
+    // the inject args are invisible to the caller (filled by Argo).
+    smart_retry("hello".to_string());
+}

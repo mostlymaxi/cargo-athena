@@ -1005,17 +1005,19 @@ pub struct ContainerDelivery {
 /// main process. Works whether the tarball has one entry or many.
 ///
 /// The bootstrap forwards `"$@"` to the binary; the macro-generated
-/// `Template::build` appends `--` then one `{{inputs.parameters.<n>}}`
-/// per parameter as positional argv. The binary's runner reads them
-/// positionally in `INPUTS` order. (We used to deliver each parameter
-/// via an `ATHENA_PARAM_<n>` env var, but env vars are NOT eligible
-/// for Argo's automatic large-args offload to a ConfigMap, so any
-/// large parameter value would balloon the pod spec and could exceed
-/// the `E2BIG` exec limit. Argo offloads `container.args` once the
-/// total exceeds 128 KB.)
+/// `Template::build` appends `--` then one positional argv slot per
+/// fn parameter. Parameter args contribute `{{inputs.parameters.<n>}}`;
+/// `#[inject("<expr>")]` args contribute the user's raw Argo expression
+/// verbatim. The binary's runner reads all slots positionally in
+/// declaration order. (We used to deliver each parameter via an
+/// `ATHENA_PARAM_<n>` env var, but env vars are NOT eligible for
+/// Argo's automatic large-args offload to a ConfigMap, so any large
+/// parameter value would balloon the pod spec and could exceed the
+/// `E2BIG` exec limit. Argo offloads `container.args` once the total
+/// exceeds 128 KB.)
 pub fn container_delivery(
     ctx: &BuildCtx,
-    param_names: &[&str],
+    argv_elements: &[String],
     image_override: Option<&str>,
     output_kind: IoKind,
 ) -> ContainerDelivery {
@@ -1061,10 +1063,13 @@ pub fn container_delivery(
 
     // `sh -c "<script>" -- arg1 arg2 ...` puts "--" in $0 (placeholder)
     // and arg1/arg2 in "$@", which the bootstrap forwards to the binary.
+    // Each element of `argv_elements` is a pre-formed positional argv
+    // slot: parameter args contribute `{{inputs.parameters.<name>}}`,
+    // `#[inject(...)]` args contribute the user's raw Argo expression.
+    // Order matches the fn's declaration order so the run-side decode
+    // (positional `__argv[i]`) lines up.
     let mut args = vec![script, "--".to_string()];
-    for name in param_names {
-        args.push(format!("{{{{inputs.parameters.{name}}}}}"));
-    }
+    args.extend(argv_elements.iter().cloned());
 
     // `archive: None` (NOT `archive: none`) lets Argo auto-detect the
     // input as a tarball and untar it into `path` (`ATHENA_BIN_DIR`).

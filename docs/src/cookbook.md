@@ -483,6 +483,44 @@ fn pipeline() { build(); deploy(); }
 K8s / Argo expose this only at workflow scope; if you need a
 per-container override (rare), reach for `pod_spec_patch`.
 
+## Inject an Argo built-in variable as a parameter
+
+`#[inject("<argo expression>")]` on a function arg fills it from Argo's
+substitution at pod-creation, bypassing `inputs.parameters` entirely.
+
+```rust,ignore
+#[container]
+fn smart_retry(
+    payload: String,                                  // normal caller arg
+    #[inject("{{retries}}")] attempt: i64,            // bare numeric
+    #[inject("\"{{pod.name}}\"")] pod_name: String,   // quoted string
+) {
+    println!("attempt {attempt} on pod {pod_name} with payload={payload}");
+}
+
+#[workflow]
+fn pipeline() {
+    // The workflow body passes only the caller-visible param. The two
+    // inject args are filled by Argo in the pod.
+    smart_retry("hello".to_string());
+}
+```
+
+The macro does NOT validate the expression — it's piped to Argo
+verbatim. You own:
+
+- The variable's scope. `{{retries}}` only resolves inside a
+  `retry(...)` strategy; `{{tasks.X.outputs.Y}}` only resolves inside
+  a DAG context.
+- JSON wrapping. The run-side decodes via `serde_json::from_str`, so
+  numeric / `bool` types want bare expressions (`{{retries}}` → `3`),
+  `String` types want explicit quotes
+  (`"\"{{workflow.name}}\""` → `"wf-abc"`).
+
+Wrong wrapping or out-of-scope refs panic the run-side decode with a
+clear "deserialize container input" message — useful as a debugging
+signal that the value didn't substitute.
+
 ## Pull a Kubernetes Secret as an env var
 
 `secret!("secret-name", "key")` declares a Secret env on the

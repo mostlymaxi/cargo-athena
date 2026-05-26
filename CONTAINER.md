@@ -104,6 +104,42 @@ All optional.
 | `pod_spec_patch_if_root = "<json\|yaml>"` | Same, but applied to **every** pod in the run. Argo concats with each template's own `pod_spec_patch`. **Root-only.** |
 | `image_pull_secrets_if_root = ["regcred", …]` | Root-only `WorkflowSpec.ImagePullSecrets`. Secret names the kubelet uses to pull every pod's image from a private registry. K8s / Argo expose this only at workflow scope; per-container needs go through `pod_spec_patch`. |
 
+### Per-argument `#[inject("...")]`
+
+Mark a function parameter as filled by Argo's substitution rather than
+a normal `inputs.parameters` entry. The expression is passed verbatim
+to Argo — athena does NOT validate it (the user owns Argo's variable
+scope rules + any JSON wrapping needed for the arg type).
+
+```rust,ignore
+#[container]
+fn smart_retry(
+    payload: String,                                  // normal input
+    #[inject("{{retries}}")] attempt: i64,            // bare numeric
+    #[inject("\"{{pod.name}}\"")] pod: String,        // quoted string
+) { /* ... */ }
+```
+
+The container's `container.args[]` carries one positional slot per fn
+parameter in declaration order; param args contribute
+`{{inputs.parameters.<name>}}`, inject args contribute the user's raw
+expression verbatim. The run-side decodes every slot the same way
+(positional argv → `serde_json::from_str`), so:
+
+- numeric / bool Rust types: bare expression (`{{retries}}` → `3` →
+  `3_i64`)
+- `String` (and friends): wrap in `"..."` yourself
+  (`"\"{{pod.name}}\""` → `"podname"` → `String "podname"`)
+
+Workflow bodies call the template without passing inject args — they're
+invisible to the caller. Allowed anywhere in the signature.
+
+This is **dangerous by design**: athena trusts the expression. Argo's
+admission rejects unknown variables at submit; out-of-scope refs
+(`{{tasks.X.outputs.parameters.Y}}` from a container submitted directly,
+or `{{retries}}` outside a retry context) silently leave the placeholder
+in place and panic the run-side decode. Power-user escape hatch.
+
 As with `#[workflow]`, an argument *name* or a `name = "…"` value
 that a YAML 1.1 parser reads as a boolean/null is a compile error.
 
