@@ -56,6 +56,11 @@ pub mod ser {
             self.is_empty()
         }
     }
+    impl Skip for serde_norway::Value {
+        fn skip(&self) -> bool {
+            matches!(self, serde_norway::Value::Null)
+        }
+    }
 
     /// The function named in every field's `skip_serializing_if`.
     pub fn skip<T: Skip>(value: &T) -> bool {
@@ -162,6 +167,28 @@ argo! {
         /// would land here too (spec-scoped, hence the `_if_root`
         /// convention).
         pub priority: Option<i32>,
+        /// Root-scoped tolerations (3rd tier of Argo's `tmpl → boundary
+        /// → wfSpec` pod-scheduling lookup). From
+        /// `#[…(tolerations_if_root = [...])]`. Applies to every pod
+        /// in the run that doesn't have its own template- or
+        /// boundary-level override (same cascade as `node_selector`).
+        pub tolerations: Vec<Toleration>,
+        /// Root-scoped pod affinity (3rd tier). Opaque YAML/JSON value
+        /// from `#[…(affinity_if_root = "...")]`; athena does NOT model
+        /// the deeply-nested `apiv1.Affinity` schema by design.
+        pub affinity: Option<serde_norway::Value>,
+    }
+
+    /// K8s `Toleration`: tolerate a node taint. Operator ∈
+    /// `"Equal" | "Exists"`; effect ∈ `"NoSchedule" | "PreferNoSchedule"
+    /// | "NoExecute"`. `value` is required only when operator is
+    /// `Equal`; `toleration_seconds` only meaningful for `NoExecute`.
+    pub struct Toleration {
+        pub key: String,
+        pub operator: String,
+        pub value: String,
+        pub effect: String,
+        pub toleration_seconds: Option<i64>,
     }
 
     /// Argo `ttlStrategy`: delete the finished Workflow after the given
@@ -230,6 +257,17 @@ argo! {
         /// substitution resolve at this scope (no nodeSelector-style
         /// boundary-copy footgun — proven v4.0.5 2026-05-25).
         pub synchronization: Option<Synchronization>,
+        /// Template-level tolerations on a container WT, from
+        /// `#[container(tolerations = [...])]`. Substitution at this
+        /// scope is safe for the template's own pod (the pod renders
+        /// from the substituted template); empirically verified on
+        /// v4.0.5 2026-05-26.
+        pub tolerations: Vec<Toleration>,
+        /// Template-level pod affinity on a container WT, from
+        /// `#[container(affinity = "...")]`. Opaque YAML/JSON value
+        /// (athena does NOT model `apiv1.Affinity` by design — use
+        /// `pod_spec_patch` as the all-purpose alternative).
+        pub affinity: Option<serde_norway::Value>,
     }
 
     /// Argo `Synchronization`: workflow- or template-scoped mutex /

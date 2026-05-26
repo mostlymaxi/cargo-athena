@@ -13,9 +13,10 @@ use quote::{format_ident, quote};
 use syn::{Expr, ItemFn};
 
 use crate::attrs::{
-    ContainerArgs, inject_lower, lower_mutex_pairs, mutexes_if_root_const_tokens, parse_attr,
-    pod_gc_const_tokens, retry_strategy_tokens, secs_i32_tok, secs_i64_tok,
-    template_synchronization_tokens, timeout_tokens, ttl_const_tokens,
+    ContainerArgs, inject_lower, lower_mutex_pairs, lower_toleration_args,
+    mutexes_if_root_const_tokens, parse_attr, pod_gc_const_tokens, retry_strategy_tokens,
+    secs_i32_tok, secs_i64_tok, template_synchronization_tokens, template_tolerations_tokens,
+    timeout_tokens, tolerations_if_root_const_tokens, ttl_const_tokens,
 };
 use crate::utils::{
     check_yaml_safe_names, fn_args, is_artifact_ty, make_argo_name, scan_body, secret_slice_tokens,
@@ -363,6 +364,85 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     let synchronization_tok = template_synchronization_tokens(&mutex_pairs);
     let mutexes_if_root_tok = mutexes_if_root_const_tokens(&mutex_ifroot_pairs);
+    // `tolerations = [...]` (template-level on this container's WT,
+    // safe at template scope) + `tolerations_if_root = [...]` (root-
+    // only, WfSpec scope). Keys/values/effect strings are injectable;
+    // operator + toleration_seconds are literal.
+    let tol_pairs = match lower_toleration_args(
+        &cfg.tolerations,
+        &argset,
+        &mut inject_ops,
+        "inputs.parameters",
+        "container",
+    ) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let tol_ifroot_pairs = match lower_toleration_args(
+        &cfg.tolerations_if_root,
+        &argset,
+        &mut inject_ops,
+        "workflow.parameters",
+        "container",
+    ) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let tolerations_tok = template_tolerations_tokens(&tol_pairs);
+    let tolerations_if_root_tok = tolerations_if_root_const_tokens(&tol_ifroot_pairs);
+    // `affinity = "<json|yaml>"` / `affinity_if_root = "..."` — opaque
+    // YAML/JSON strings. No automatic injection (the user writes raw
+    // `{{...}}` substitutions inside the YAML body if needed). Athena
+    // does NOT model `apiv1.Affinity`'s deeply-nested schema.
+    let affinity_s = match cfg
+        .affinity
+        .as_ref()
+        .map(|e| {
+            inject_lower(
+                e,
+                &argset,
+                &mut inject_ops,
+                "inputs.parameters",
+                "container",
+            )
+        })
+        .transpose()
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let affinity_tok = match affinity_s {
+        Some(s) => quote! {
+            ::core::option::Option::Some(
+                ::cargo_athena::serde_norway::from_str(#s)
+                    .unwrap_or_else(|e| ::core::panic!(
+                        "affinity: invalid YAML/JSON: {e}"
+                    ))
+            )
+        },
+        None => quote! { ::core::option::Option::None },
+    };
+    let affinity_if_root_s = match cfg
+        .affinity_if_root
+        .as_ref()
+        .map(|e| {
+            inject_lower(
+                e,
+                &argset,
+                &mut inject_ops,
+                "workflow.parameters",
+                "container",
+            )
+        })
+        .transpose()
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let affinity_if_root_const_tok = match affinity_if_root_s {
+        Some(s) => quote! { ::core::option::Option::Some(#s) },
+        None => quote! { ::core::option::Option::None },
+    };
     // `host_mount = [{ host_path, mount_path, read_only }, …]`:
     // literal-only triples, threaded into `container_volumes` so the
     // dedup-against-`host!` lives in core.
@@ -500,6 +580,11 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #active_deadline_if_root_tok;
             const MUTEXES_IF_ROOT: &'static [(&'static str, &'static str)] =
                 #mutexes_if_root_tok;
+            const TOLERATIONS_IF_ROOT:
+                &'static [(&'static str, &'static str, &'static str, &'static str, i64)] =
+                #tolerations_if_root_tok;
+            const AFFINITY_IF_ROOT: ::core::option::Option<&'static str> =
+                #affinity_if_root_const_tok;
 
             fn run(__argv: &[::std::string::String]) -> ::std::string::String
             {
@@ -707,6 +792,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                     timeout: #timeout_tok,
                     active_deadline_seconds: #pod_running_timeout_tok,
                     synchronization: #synchronization_tok,
+                    tolerations: #tolerations_tok,
+                    affinity: #affinity_tok,
                     ..::core::default::Default::default()
                 }
             }

@@ -14,8 +14,9 @@ use syn::{Expr, ItemFn, Path};
 
 use crate::analyze::analyze_workflow;
 use crate::attrs::{
-    WorkflowArgs, inject_lower, lower_mutex_pairs, mutexes_if_root_const_tokens, parse_attr,
-    pod_gc_const_tokens, retry_strategy_tokens, secs_i64_tok, template_synchronization_tokens,
+    WorkflowArgs, inject_lower, lower_mutex_pairs, lower_toleration_args,
+    mutexes_if_root_const_tokens, parse_attr, pod_gc_const_tokens, retry_strategy_tokens,
+    secs_i64_tok, template_synchronization_tokens, tolerations_if_root_const_tokens,
     ttl_const_tokens,
 };
 use crate::conditional::emit_synth;
@@ -294,6 +295,44 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     let synchronization_tok = template_synchronization_tokens(&mutex_pairs);
     let mutexes_if_root_tok = mutexes_if_root_const_tokens(&mutex_ifroot_pairs);
+    // `tolerations_if_root` — root-only WorkflowSpec scope (the only
+    // form Argo resolves at WfSpec). Workflows have no template-level
+    // tolerations attr in v1 (boundary-tier deferred).
+    let tol_ifroot_pairs = match lower_toleration_args(
+        &cfg.tolerations_if_root,
+        &argset,
+        &mut wf_inject_ops,
+        "workflow.parameters",
+        "workflow",
+    ) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let tolerations_if_root_tok = tolerations_if_root_const_tokens(&tol_ifroot_pairs);
+    // `affinity_if_root` — opaque YAML/JSON string. Lowered against
+    // `workflow.parameters` so a `"lit" + arg` chain inside the YAML
+    // resolves at WfSpec scope.
+    let affinity_if_root_s = match cfg
+        .affinity_if_root
+        .as_ref()
+        .map(|e| {
+            inject_lower(
+                e,
+                &argset,
+                &mut wf_inject_ops,
+                "workflow.parameters",
+                "workflow",
+            )
+        })
+        .transpose()
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let affinity_if_root_const_tok = match affinity_if_root_s {
+        Some(s) => quote! { ::core::option::Option::Some(#s) },
+        None => quote! { ::core::option::Option::None },
+    };
     // Type-guard for every injected workflow operand — same shape as the
     // container guard (a hidden never-run fn asserting `Injectable`).
     let wf_inject_check = if wf_inject_ops.is_empty() {
@@ -467,6 +506,11 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #node_selector_if_root_tok;
             const MUTEXES_IF_ROOT: &'static [(&'static str, &'static str)] =
                 #mutexes_if_root_tok;
+            const TOLERATIONS_IF_ROOT:
+                &'static [(&'static str, &'static str, &'static str, &'static str, i64)] =
+                #tolerations_if_root_tok;
+            const AFFINITY_IF_ROOT: ::core::option::Option<&'static str> =
+                #affinity_if_root_const_tok;
 
             fn build(_ctx: &::cargo_athena::BuildCtx)
                 -> ::cargo_athena::api::Template

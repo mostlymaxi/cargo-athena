@@ -603,3 +603,68 @@ pub fn pipeline_artifact_clone() {
     use_meta_artifact(m.clone());
     use_meta_artifact(m);
 }
+
+// --- tolerations + tolerations_if_root -------------------------------------
+
+/// Template-level tolerations: `Template.Tolerations` on this
+/// container's WT. `key` injects from the container's `kind` arg via
+/// `{{=fromJSON(inputs.parameters['kind'])}}` (safe at template scope -
+/// the leaf pod renders from this template's own substituted form, no
+/// nodeSelector-style boundary-copy footgun). `operator` is literal
+/// (small closed set); `effect` is also injectable.
+#[container(tolerations = [
+    { key = "athena.dev/" + kind, operator = "Exists", effect = "NoSchedule" },
+])]
+pub fn run_on_tainted_node(kind: String) {
+    println!("ran on tainted node ({kind})");
+}
+
+/// Root-only `WorkflowSpec.Tolerations`: 3rd tier of Argo's
+/// `tmpl → boundary → wfSpec` lookup, applies to every pod that
+/// doesn't have a tighter override. Strings injectable via
+/// `workflow.parameters` (the only scope Argo resolves at WfSpec).
+#[workflow(tolerations_if_root = [
+    { key = "athena.dev/" + role, operator = "Exists", effect = "NoSchedule" },
+])]
+pub fn pipeline_tolerations(role: String) {
+    run_on_tainted_node(role);
+}
+
+// --- affinity + affinity_if_root -------------------------------------------
+
+/// Template-level `Template.Affinity`: opaque YAML/JSON value. Athena
+/// does NOT model `apiv1.Affinity`'s deeply-nested schema -- the user
+/// owns the structure and athena parses + stuffs it verbatim at emit
+/// time. Substitution at this scope is safe for the leaf pod.
+/// `pod_spec_patch` is the alternative if you want patch-style.
+#[container(affinity = r#"
+nodeAffinity:
+  preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 1
+      preference:
+        matchExpressions:
+          - key: kubernetes.io/arch
+            operator: In
+            values: [amd64]
+"#)]
+pub fn arch_pinned() {
+    println!("preferred amd64");
+}
+
+/// Root-only `WorkflowSpec.Affinity`: opaque YAML/JSON, applies to
+/// every pod in the run. The body can embed `{{workflow.parameters.X}}`
+/// substitutions verbatim (Argo resolves at WfSpec scope).
+#[workflow(affinity_if_root = r#"
+nodeAffinity:
+  requiredDuringSchedulingIgnoredDuringExecution:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: athena.dev/role
+            operator: In
+            values: ["{{workflow.parameters.role}}"]
+"#)]
+pub fn pipeline_affinity(role: String) {
+    arch_pinned();
+    // touch role so the macro doesn't error on an unused arg.
+    record(role);
+}

@@ -45,6 +45,8 @@ All are optional.
 | `active_deadline_if_root = <dur>` | Whole-workflow runtime cap. The only timeout that works on a `#[workflow]`. **Root-only.** See [Timeouts](#timeouts). |
 | `mutexes = [{ name, namespace }, …]` | Serialize this template against other holders of the same mutex name (within one run AND across separate Workflow runs). Both fields accept `"lit" + arg + arg.field` injection. See [Mutexes](#mutexes). |
 | `mutexes_if_root = [{ name, namespace }, …]` | Serialize the whole submitted run against other runs holding the same mutex. **Root-only.** |
+| `tolerations_if_root = [{ key, operator, value, effect, ... }, …]` | K8s `Toleration` list applied to every pod in the run. 3rd tier of Argo's `tmpl → boundary → wfSpec` pod-scheduling lookup. Strings accept `"lit" + arg` injection. **Root-only.** |
+| `affinity_if_root = "<json\|yaml>"` | Opaque YAML/JSON string for pod affinity, applied to every pod in the run. Athena does NOT model `apiv1.Affinity`'s deeply-nested schema by design — use `pod_spec_patch_if_root` for patch-style. Hand-write `{{workflow.parameters.X}}` substitutions inside the YAML body as needed. **Root-only.** |
 
 A parameter *name* (i.e. a function argument) or a `name = "…"`
 value that a YAML 1.1 parser reads as a boolean/null (`y` / `yes` /

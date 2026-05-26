@@ -94,6 +94,14 @@ path = "src/bin/artifact_wf_main.rs"
 name = "smoke-artifact-clone"
 path = "src/bin/artifact_clone_main.rs"
 
+[[bin]]
+name = "smoke-tolerations"
+path = "src/bin/tolerations_main.rs"
+
+[[bin]]
+name = "smoke-affinity"
+path = "src/bin/affinity_main.rs"
+
 [dependencies]
 # `tokio` enables `async fn` `#[container]` bodies (re-exports tokio).
 cargo-athena = { workspace = true, features = ["tokio"] }

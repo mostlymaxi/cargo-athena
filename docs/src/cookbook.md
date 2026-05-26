@@ -394,6 +394,48 @@ fn pipeline(env: String) { /* ... */ }
   **Root-only**: inert when this WT is embedded as a sub. Values
   accept `"lit" + arg` / `"lit" + arg.field` injection.
 
+## Tolerate node taints + steer with affinity
+
+Most clusters taint GPU / spot / dedicated nodes; pods need tolerations
+to schedule there:
+
+```rust,ignore
+#[container(tolerations = [
+    { key = "nvidia.com/gpu", operator = "Exists", effect = "NoSchedule" },
+    { key = "spot", operator = "Equal", value = "true", effect = "NoSchedule" },
+])]
+fn train(input: String) { /* ... */ }
+```
+
+For "every pod gets these tolerations," use the root-level version:
+
+```rust,ignore
+#[workflow(tolerations_if_root = [
+    { key = "dedicated", operator = "Equal", value = "ml-team", effect = "NoSchedule" },
+])]
+fn pipeline() { /* ... */ }
+```
+
+Affinity is a deeply-nested K8s shape; athena keeps it as an opaque
+YAML/JSON string so you write what K8s already documents:
+
+```rust,ignore
+#[workflow(affinity_if_root = r#"
+nodeAffinity:
+  requiredDuringSchedulingIgnoredDuringExecution:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: node-pool
+            operator: In
+            values: [gpu-a100]
+"#)]
+fn pipeline() { /* ... */ }
+```
+
+Embed `{{workflow.parameters.X}}` substitutions verbatim if you need
+dynamic values at root scope. Same goes for the container-level
+`affinity = "..."`.
+
 ## Pull a Kubernetes Secret as an env var
 
 `secret!("secret-name", "key")` declares a Secret env on the
