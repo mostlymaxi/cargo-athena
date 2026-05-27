@@ -263,6 +263,22 @@ pub(crate) struct TolerationArg {
     pub(crate) toleration_seconds: i64,
 }
 
+/// Literal-only `TolerationArg`: same shape, but every field is a
+/// plain `String` / `i64` (no `syn::Expr`). Used for
+/// `boundary_tolerations` (Argo's boundary tier reads tolerations
+/// before per-template substitution gets a chance, so injection is
+/// unsafe by construction — same rationale as `boundary_node_selector`).
+#[derive(deluxe::ParseMetaItem)]
+pub(crate) struct BoundaryTolerationArg {
+    pub(crate) key: String,
+    pub(crate) operator: String,
+    #[deluxe(default)]
+    pub(crate) value: String,
+    pub(crate) effect: String,
+    #[deluxe(default)]
+    pub(crate) toleration_seconds: i64,
+}
+
 #[derive(deluxe::ParseMetaItem, Default)]
 #[deluxe(default)]
 pub(crate) struct ContainerArgs {
@@ -435,6 +451,24 @@ pub(crate) struct WorkflowArgs {
     /// `node_selector_if_root` (below). Renamed 2026-05-24 from
     /// the misleading `node_selector` after a real e2e bug.
     pub(crate) boundary_node_selector: std::collections::BTreeMap<String, String>,
+    /// `boundary_tolerations = [{ key, operator, value, effect, ... }, …]`
+    /// — `Template.Tolerations` on this dag/steps template, inherited
+    /// by child pods that don't set their own (Argo's 3-tier `tmpl →
+    /// boundary → wfSpec` lookup at `workflow/controller/workflowpod
+    /// .go:928-958`). Literal-only by construction: per-arg injection
+    /// here would lower to `workflow.parameters` (root-scoped) and
+    /// surprise-resolve against the SUBMITTED ROOT's args if this WT
+    /// is `templateRef`'d as a sub — same rationale as
+    /// `boundary_node_selector`. Use `tolerations_if_root` for
+    /// dynamic values.
+    pub(crate) boundary_tolerations: Vec<BoundaryTolerationArg>,
+    /// `boundary_affinity = "<json|yaml>"` — `Template.Affinity` on
+    /// this dag/steps template, opaque YAML/JSON. Inherited by child
+    /// pods that don't set their own. Literal string only (same
+    /// boundary-tier rationale as `boundary_tolerations`); hand-write
+    /// `{{...}}` inside the YAML if you really need substitution and
+    /// understand the boundary-copy semantics.
+    pub(crate) boundary_affinity: Option<String>,
     /// `node_selector_if_root = { "k" = "v", "k2" = "lit" + arg, … }` —
     /// Argo `WorkflowSpec.NodeSelector`. The third tier of Argo's 3-tier
     /// pod nodeSelector lookup: applies to every pod in the run that
