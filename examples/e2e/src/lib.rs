@@ -15,8 +15,12 @@
 //!   wrappers) with a closed-grammar numeric condition,
 //! * a **nested call** `note(echo(..))`,
 //! * **struct-field access** `m.id` (`{{=toJSON(fromJSON(..)['id'])}}`),
-//! * **attribute injection** `image = "busybox:" + tag` (resolves to a
-//!   real pullable tag),
+//! * **attribute injection** on three leaf-template fields:
+//!   `image = "busybox:" + tag` (real pullable tag),
+//!   `service_account = "defa" + suffix` (resolves to `default` SA),
+//!   `node_selector = { "kubernetes.io/arch" = arch }` (matches the
+//!   kind node label). Exercises `Template.Image`/`.ServiceAccountName`/
+//!   `.NodeSelector` substitution from `inputs.parameters` at the leaf,
 //! * **`save_artifact!` + `load_artifact!`** round-trip through MinIO
 //!   (ordered by a threaded data-dep),
 //! * **per-task builders** `.continue_on` + `.on_exit`,
@@ -261,6 +265,23 @@ pub fn tagged(tag: String) {
     println!("tagged image busybox:{tag}");
 }
 
+// --- attribute injection: service_account (concat) + node_selector (arg) ---
+//
+// Both lower to `{{=fromJSON(inputs.parameters[...])}}` on the leaf
+// container template (Template.ServiceAccountName / Template.NodeSelector),
+// where Argo's per-template SubstituteParams resolves them before
+// pod creation. (The boundary-copy footgun applies to
+// `boundary_node_selector`, not the per-container form: proven on
+// v4.0.5, probe 2026-05-27.) `default` is the SA the e2e namespace
+// uses; `amd64` matches the kind node label.
+#[container(
+    service_account = "defa" + suffix,
+    node_selector = { "kubernetes.io/arch" = arch },
+)]
+pub fn scheduled(suffix: String, arch: String) {
+    println!("scheduled sa+ns inj: suffix={suffix} arch={arch}");
+}
+
 // --- artifact ports (save -> load, ordered by a threaded dep) --------------
 
 #[container]
@@ -391,6 +412,7 @@ pub fn pipeline(input_blob: String) {
     use_id(m.id); // struct-field access
 
     tagged("1.36-musl".to_string()); // image = "busybox:" + tag
+    scheduled("ult".to_string(), "amd64".to_string()); // sa+ns injection
 
     let k = seed_note(); // save_artifact!
     read_note(k); // load_artifact!, ordered after seed_note via `k`
