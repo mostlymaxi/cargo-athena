@@ -196,6 +196,12 @@ argo! {
         /// `pod_spec_patch`. skip-empty ⇒ existing goldens stay
         /// byte-identical.
         pub image_pull_secrets: Vec<LocalObjectReference>,
+        /// Root-scoped pod-concurrency cap. From
+        /// `#[workflow(parallelism_if_root = N)]`. Argo's CRD enforces
+        /// `+kubebuilder:validation:Minimum=1` so the macro rejects
+        /// `<= 0` at compile time (would otherwise be rejected by the
+        /// API server at submit anyway).
+        pub parallelism: Option<i64>,
     }
 
     /// K8s `Toleration`: tolerate a node taint. Operator ∈
@@ -304,6 +310,12 @@ argo! {
         /// the resolved value without the nodeSelector-style
         /// boundary-copy footgun).
         pub pod_spec_patch: Option<String>,
+        /// Template-level pod-concurrency cap on this dag/steps. From
+        /// `#[workflow(parallelism = N)]`. Caps concurrent children
+        /// scheduled under THIS template invocation only — pods
+        /// created by nested templates don't count. Argo's CRD
+        /// enforces `+kubebuilder:validation:Minimum=1`.
+        pub parallelism: Option<i64>,
     }
 
     /// Argo `Synchronization`: workflow- or template-scoped mutex /

@@ -1,0 +1,5 @@
+error: `parallelism_if_root` must be > 0 (Argo's CRD enforces Minimum=1; omit the attr to leave the field unset)
+ --> tests/ui/wf_parallelism_if_root_zero.rs:4:4
+  |
+4 | fn pipeline() {}
+  |    ^^^^^^^^

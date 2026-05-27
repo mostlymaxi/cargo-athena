@@ -1,0 +1,5 @@
+error: `parallelism` must be > 0 (Argo's CRD enforces Minimum=1; omit the attr to leave the field unset)
+ --> tests/ui/wf_parallelism_negative.rs:3:4
+  |
+3 | fn pipeline() {}
+  |    ^^^^^^^^

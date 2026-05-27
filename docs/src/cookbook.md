@@ -26,6 +26,7 @@ pages.
 - [Timeouts](#timeouts)
 - [Whole-workflow cleanup](#whole-workflow-cleanup)
 - [Mutual exclusion across runs](#mutual-exclusion-across-runs)
+- [Throttle pods per workflow / per DAG](#throttle-pods-per-workflow--per-dag)
 
 **Pod placement & access**
 
@@ -351,6 +352,31 @@ Two tiers, picked by reach:
 Each entry is `{ name = …, namespace = … }`; `namespace` is optional
 (defaults to the workflow's own). Both fields accept `"lit" + arg`
 injection.
+
+## Throttle pods per workflow / per DAG
+
+Cap how many pods Argo runs at once, either for the whole submitted
+run or just under one dag/steps template:
+
+```rust,ignore
+// Cap the whole run to 4 concurrent pods; cap THIS DAG to 2 of its
+// own direct children at a time (nested templates don't count):
+#[workflow(parallelism = 2, parallelism_if_root = 4)]
+fn pipeline() { /* … */ }
+```
+
+Two tiers, picked by reach:
+
+- **`parallelism_if_root`** caps `WorkflowSpec.parallelism`, applied to
+  every pod in the submitted run. **Root-only**: inert when this WT
+  is embedded as a sub-workflow.
+- **`parallelism`** caps `Template.parallelism`, applied only to
+  children scheduled DIRECTLY by this dag/steps. Pods from nested
+  templates aren't counted. Fires anywhere the template is invoked.
+
+Both are literal `i64` and must be `> 0` (Argo's CRD enforces
+`Minimum=1`; the `*int64` schema rejects substituted strings at
+admission, so neither field supports argument injection).
 
 ## Pin a single pod (image, service account, node)
 

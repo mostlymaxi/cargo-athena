@@ -535,6 +535,13 @@ pub trait Template {
     /// knob); per-container needs go through `pod_spec_patch`. Same
     /// per-WT, root-only plumbing as `MUTEXES_IF_ROOT`.
     const IMAGE_PULL_SECRETS_IF_ROOT: &'static [&'static str] = &[];
+    /// Root-only `WorkflowSpec.parallelism` (cap on total concurrent
+    /// pods in the run), from `#[workflow(parallelism_if_root = N)]`.
+    /// Same per-WT, root-only plumbing as the other `_IF_ROOT` consts.
+    /// Template-level `Template.parallelism` from
+    /// `#[workflow(parallelism = N)]` does NOT use this const — it's
+    /// stamped directly into the `api::Template` literal by `build()`.
+    const PARALLELISM_IF_ROOT: ::core::option::Option<i64> = None;
 
     /// Build this template's inner Argo `template` object.
     fn build(ctx: &BuildCtx) -> api::Template;
@@ -1366,6 +1373,10 @@ pub struct Collector {
     /// `#[…(image_pull_secrets_if_root = [...])]`. Stamped onto that
     /// WT's `spec.imagePullSecrets` as `[{name}]` k8s references.
     image_pull_secrets_if_root: HashMap<String, Vec<String>>,
+    /// `<argo name> -> WorkflowSpec.parallelism` for every template
+    /// declaring `#[workflow(parallelism_if_root = N)]`. Stamped onto
+    /// that WT's `spec.parallelism`.
+    parallelism_if_root: HashMap<String, i64>,
     /// `<argo name> -> stringified input types` (parallel to the
     /// template's INPUTS), for `container emulate` arg type-checking.
     types: HashMap<String, &'static [&'static str]>,
@@ -1396,6 +1407,7 @@ impl Collector {
             affinity_if_root: HashMap::new(),
             pod_spec_patch_if_root: HashMap::new(),
             image_pull_secrets_if_root: HashMap::new(),
+            parallelism_if_root: HashMap::new(),
             types: HashMap::new(),
             synthetic: HashSet::new(),
         }
@@ -1480,6 +1492,9 @@ impl Collector {
                     .map(|n| (*n).to_string())
                     .collect(),
             );
+        }
+        if let Some(p) = T::PARALLELISM_IF_ROOT {
+            self.parallelism_if_root.insert(T::ARGO_NAME.to_string(), p);
         }
         if !T::INPUT_TYPES.is_empty() {
             self.types.insert(T::ARGO_NAME.to_string(), T::INPUT_TYPES);
@@ -1606,6 +1621,9 @@ impl Collector {
                 spec.image_pull_secrets
                     .push(api::LocalObjectReference { name: n.clone() });
             }
+        }
+        if let Some(p) = self.parallelism_if_root.get(name) {
+            spec.parallelism = Some(*p);
         }
     }
 

@@ -32,6 +32,7 @@ const BIN_POD_SPEC_PATCH: &str = env!("CARGO_BIN_EXE_smoke-pod-spec-patch");
 const BIN_IMAGE_PULL_SECRETS: &str = env!("CARGO_BIN_EXE_smoke-image-pull-secrets");
 const BIN_INJECT_ATTR: &str = env!("CARGO_BIN_EXE_smoke-inject-attr");
 const BIN_BOUNDARY_SCHEDULING: &str = env!("CARGO_BIN_EXE_smoke-boundary-scheduling");
+const BIN_PARALLELISM: &str = env!("CARGO_BIN_EXE_smoke-parallelism");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -376,6 +377,14 @@ fn emit_pipeline_image_pull_secrets() {
         "pipeline_image_pull_secrets.yaml",
         &run_bin(BIN_IMAGE_PULL_SECRETS, &[]),
     );
+}
+
+/// `parallelism = 2` lands on the root workflow template's
+/// `Template.parallelism`; `parallelism_if_root = 4` lands on
+/// `WorkflowSpec.parallelism`.
+#[test]
+fn emit_pipeline_parallelism() {
+    assert_golden("pipeline_parallelism.yaml", &run_bin(BIN_PARALLELISM, &[]));
 }
 
 /// `#[inject("<argo expr>")]` per-arg attribute. Pins:
