@@ -231,7 +231,7 @@ compile error.
 
 | Macro | Effect | Runtime value |
 |---|---|---|
-| `host!("/abs/path")` | a `hostPath` volume mounted at a safe path the macro picks. | `String` (the path your code reads/writes) |
+| `host!("/abs/path")` | a `hostPath` volume mounted at a safe path the macro picks. | `&'static Path` (the path your code reads/writes; use `path.join("file")`, `path.display()`, etc.) |
 | `load_artifact!("key")` | S3 **input** at the given object key | `Vec<u8>` |
 | `load_artifact_str!("key")` | same, as text | `String` |
 | `save_artifact!("key", bytes)` | S3 **output** at the given object key | writes `impl AsRef<[u8]>` |

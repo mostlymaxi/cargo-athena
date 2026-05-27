@@ -18,7 +18,7 @@ fn carry() {
 fn leaf(tag: String) -> String {
     let cfg = cargo_athena::host!("/etc/leaf");
     carry();
-    format!("leaf:{tag}:{cfg}")
+    format!("leaf:{tag}:{}", cfg.display())
 }
 
 #[container]

@@ -35,7 +35,7 @@ fn seq_foo() {
 fn run_a_container(a: String) {
     let cfg = cargo_athena::host!("/etc/myapp");
     load_extra(); // cross-item: pulls /var/lib/extra onto this template
-    println!("config dir: {cfg}");
+    println!("config dir: {}", cfg.display());
     println!("this is regular code, got: {a}");
 }
 

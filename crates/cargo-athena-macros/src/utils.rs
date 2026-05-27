@@ -380,17 +380,75 @@ pub(crate) fn check_yaml_safe_names(
     Ok(())
 }
 
-/// Rewrites every decl macro (`host!`, `load_artifact*!`,
-/// `save_artifact*!`) the attribute macro can see into its private real
-/// form. Enforcement half of the gate: the *public* forms are hard
-/// `compile_error!`s, so any invocation we don't rewrite here — a plain
-/// fn, a `#[workflow]`, or nested inside another macro's tokens — fails to
-/// compile instead of silently doing nothing.
+/// FNV-1a 64-bit hash of a `host!` literal, emitted as 16 lowercase
+/// hex chars. Mirror of `cargo_athena_core::munge_host_path`; the
+/// algorithm is pinned by `munge_known_value_pins_algorithm` in core's
+/// tests, so the two sides cannot drift silently. Fixed initial state
+/// (no `DefaultHasher` random seed): the proc macro hashes at user
+/// build time, `cargo athena emit` hashes at emit time in a different
+/// process — they MUST agree.
+fn munge_host_path(path: &str) -> String {
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+    let mut h = FNV_OFFSET;
+    for b in path.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(FNV_PRIME);
+    }
+    format!("{h:016x}")
+}
+
+/// Precomputed in-pod mount path for `host!("/p")`. Identical to
+/// `cargo_athena_core::host_mount_path` by construction; pinned by the
+/// algorithm test.
+fn host_mount_path(p: &str) -> String {
+    format!("/athena/mounts/{}", munge_host_path(p))
+}
+
+/// Rewrites every decl macro the attribute macro can see into its
+/// final form. Enforcement half of the gate: the *public* forms are
+/// hard `compile_error!`s, so any invocation we don't rewrite here — a
+/// plain fn, a `#[workflow]`, or nested inside another macro's tokens
+/// — fails to compile instead of silently doing nothing.
+///
+/// `host!` is special: instead of routing to a private declarative
+/// macro, the rewrite **replaces the whole expression** with a literal
+/// `::std::path::Path::new("/athena/mounts/<precomputed-hash>")`. The
+/// mount path is computed once at expansion time (proc macros run at
+/// user-build time), so `host!` returns `&'static Path` with zero
+/// runtime work — no FNV at startup, no `OnceLock` allocation, no
+/// `format!()` on every call.
+///
+/// The other decl macros (`load_artifact*!`/`save_artifact*!`/
+/// `secret*!`) genuinely need a runtime call (reading files, env vars,
+/// etc.), so they keep the "swap to private form" path.
 pub(crate) struct DeclRewrite;
 
 impl VisitMut for DeclRewrite {
+    fn visit_expr_mut(&mut self, expr: &mut Expr) {
+        // host! at expression level → bake in the precomputed mount
+        // path BEFORE recursing into children (else the macro_mut pass
+        // would still see it as a generic decl macro).
+        if let Expr::Macro(em) = expr
+            && let Some((DeclKind::Host, _)) = decl_kind(&em.mac)
+            && let Some(p) = first_str_lit(&em.mac)
+        {
+            let mount = host_mount_path(&p);
+            *expr = syn::parse_quote! {
+                ::std::path::Path::new(#mount)
+            };
+            // Recurse into the replacement (no nested macros there;
+            // a no-op).
+        }
+        syn::visit_mut::visit_expr_mut(self, expr);
+    }
+
     fn visit_macro_mut(&mut self, mac: &mut syn::Macro) {
-        if let Some((_, private)) = decl_kind(mac) {
+        // host! is replaced at the Expr level above; leave it
+        // untouched here so we don't double-process.
+        if let Some((kind, private)) = decl_kind(mac)
+            && kind != DeclKind::Host
+        {
             let p: syn::Path = syn::parse_str(&format!("::cargo_athena::{private}")).unwrap();
             mac.path = p;
         }
@@ -422,5 +480,20 @@ pub(crate) fn unwrap_expr(e: &Expr) -> &Expr {
         Expr::Group(g) => unwrap_expr(&g.expr),
         Expr::Reference(r) => unwrap_expr(&r.expr),
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn munge_algorithm_matches_core() {
+        // Pinned to the SAME input/output as core's
+        // `munge_known_value_pins_algorithm` so the two FNV
+        // implementations cannot drift silently. If you change one
+        // side, change both - the in-cluster Volume name and the
+        // in-pod mount path are both keyed on this hash, so drift
+        // breaks every existing deployment.
+        assert_eq!(munge_host_path("/var/lib"), "5b8d11771a6f946b");
     }
 }
