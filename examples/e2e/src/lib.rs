@@ -61,7 +61,7 @@ fn extra_mount() {
 pub fn consume(value: String) {
     let h = cargo_athena::host!("/tmp/athena-host");
     extra_mount();
-    println!("consume({value}) host={h}");
+    println!("consume({value}) host={}", h.display());
     cargo_athena::save_artifact_str!("result-note", format!("done:{value}"));
 }
 

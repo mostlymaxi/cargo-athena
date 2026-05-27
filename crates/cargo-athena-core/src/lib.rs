@@ -88,17 +88,14 @@ macro_rules! host {
     };
 }
 
-/// The real expansion. Private: only the attribute macros emit this path.
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __cargo_athena_host {
-    ($path:literal) => {
-        $crate::rt::host_path($path)
-    };
-    ($($t:tt)*) => {
-        ::core::compile_error!("`host!` takes a single string-literal path")
-    };
-}
+// `host!` has no private declarative-macro form. The `#[container]` /
+// `#[fragment]` attribute macros rewrite every `host!("/p")` invocation
+// they can see into a literal `::std::path::Path::new("/athena/mounts/
+// <precomputed-hash>")` expression at expansion time — the hash is
+// known statically from the literal, so the user gets `&'static Path`
+// with zero runtime work. Any `host!` invocation outside an attribute
+// macro hits the public `compile_error!` gate above (which is why this
+// private macro doesn't exist).
 
 // --- artifact declaration macros (native Argo artifacts, no S3) ------------
 //
@@ -244,18 +241,12 @@ macro_rules! __cargo_athena_secret_opt {
 pub mod rt {
     use std::path::PathBuf;
 
-    /// Resolve a `host!("/p")` to its in-pod mount path. We deliberately
-    /// **do not** mount host paths at the same in-container path —
-    /// `host!("/")` would otherwise overlay-mount the host root over
-    /// the container's root, and `host!("/etc")` would shadow the
-    /// image's own `/etc`. Instead the hostPath is mounted under
-    /// `[/athena/mounts/<munged>]` and the macro returns that path, so
-    /// user code stays portable and can't accidentally clobber the
-    /// image's filesystem. Both emit and run sides go through
-    /// [`super::host_mount_path`] so they agree.
-    pub fn host_path(host: &str) -> String {
-        super::host_mount_path(host)
-    }
+    // `host!` previously called `rt::host_path` to resolve its mount
+    // path at runtime. The macros now precompute the mount path at
+    // expansion time and emit a literal `Path::new("/athena/mounts/
+    // <hash>")` expression, so there is no runtime resolver to call.
+    // The emit-side helper `super::host_mount_path` is the single
+    // remaining caller of the algorithm.
 
     /// Where Argo drops/collects declared artifact ports inside the pod.
     pub const IN_DIR: &str = "/athena/artifacts/in";
@@ -1735,10 +1726,11 @@ pub fn kebab(s: &str) -> String {
 /// The hash is **FNV-1a 64-bit, fixed initial state**, emitted as 16
 /// lowercase hex chars. Determinism is load-bearing: emit-time
 /// ([`volume_name`]/[`host_mount_path`] called from `Template::build`)
-/// and run-time ([`rt::host_path`]) hash the same literal in two
-/// different process invocations (`cargo athena emit` and the in-pod
-/// binary); `std::hash::DefaultHasher` uses a per-process random seed
-/// and would silently mismatch.
+/// and the in-pod literal that the proc macros bake into `host!`
+/// expansions both hash the same literal in two different process
+/// invocations (`cargo athena emit` and `rustc` at user-build time);
+/// `std::hash::DefaultHasher` uses a per-process random seed and
+/// would silently mismatch.
 ///
 /// 16 hex chars = 64 bits. `host-` (5) + 16 = 21-char Volume name,
 /// comfortably under DNS-1123's 63-char label limit and collision-
@@ -1760,9 +1752,10 @@ fn volume_name(path: &str) -> String {
 
 /// In-container mount path for a `host!("/p")` declaration. Always
 /// rooted at [`ATHENA_MOUNTS_DIR`] — `host!` cannot land at the host's
-/// own path (see [`ATHENA_MOUNTS_DIR`] for why). Both emit
-/// (`host_path_volumes`) and run (`rt::host_path`) go through this
-/// helper, so they always agree.
+/// own path (see [`ATHENA_MOUNTS_DIR`] for why). The proc macros'
+/// [`host_mount_path` mirror](../../cargo-athena-macros/src/utils.rs)
+/// emits the same string at expansion time, and `munge_known_value
+/// _pins_algorithm` (below) pins both sides to the same FNV-1a output.
 pub fn host_mount_path(host_path: &str) -> String {
     format!("{ATHENA_MOUNTS_DIR}/{}", munge_host_path(host_path))
 }
