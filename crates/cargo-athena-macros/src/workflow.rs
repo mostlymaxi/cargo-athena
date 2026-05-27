@@ -309,6 +309,51 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         Err(e) => return e.to_compile_error().into(),
     };
     let tolerations_if_root_tok = tolerations_if_root_const_tokens(&tol_ifroot_pairs);
+    // `boundary_tolerations` — `Template.Tolerations` on this dag/steps
+    // template, inherited by child pods that don't set their own.
+    // Literal-only (`BoundaryTolerationArg` has plain String/i64
+    // fields): per-arg injection here lowers to `workflow.parameters`
+    // which surprise-resolves against the SUBMITTED ROOT when this WT
+    // is `templateRef`'d. Same boundary-tier rationale as
+    // `boundary_node_selector`.
+    let boundary_tol_tokens = {
+        let entries = cfg.boundary_tolerations.iter().map(|t| {
+            let key = &t.key;
+            let op = &t.operator;
+            let val = &t.value;
+            let eff = &t.effect;
+            let secs = t.toleration_seconds;
+            let secs_tok = if secs == 0 {
+                quote! { ::core::option::Option::None }
+            } else {
+                quote! { ::core::option::Option::Some(#secs) }
+            };
+            quote! {
+                ::cargo_athena::api::Toleration {
+                    key: #key.to_string(),
+                    operator: #op.to_string(),
+                    value: #val.to_string(),
+                    effect: #eff.to_string(),
+                    toleration_seconds: #secs_tok,
+                }
+            }
+        });
+        quote! { ::std::vec![ #( #entries ),* ] }
+    };
+    // `boundary_affinity` — opaque YAML/JSON string for `Template
+    // .Affinity` on this dag/steps template. Literal-only (same
+    // boundary-tier rationale). Parsed at emit time via serde_norway.
+    let boundary_affinity_tok = match &cfg.boundary_affinity {
+        Some(s) => quote! {
+            ::core::option::Option::Some(
+                ::cargo_athena::serde_norway::from_str(#s)
+                    .unwrap_or_else(|e| ::core::panic!(
+                        "boundary_affinity: invalid YAML/JSON: {e}"
+                    ))
+            )
+        },
+        None => quote! { ::core::option::Option::None },
+    };
     // `affinity_if_root` — opaque YAML/JSON string. Lowered against
     // `workflow.parameters` so a `"lit" + arg` chain inside the YAML
     // resolves at WfSpec scope.
@@ -462,6 +507,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #retry_tokens
                 #outputs_tokens
                 synchronization: #synchronization_tok,
+                tolerations: #boundary_tol_tokens,
+                affinity: #boundary_affinity_tok,
                 ..::core::default::Default::default()
             }
         }
@@ -480,6 +527,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #retry_tokens
                 #outputs_tokens
                 synchronization: #synchronization_tok,
+                tolerations: #boundary_tol_tokens,
+                affinity: #boundary_affinity_tok,
                 ..::core::default::Default::default()
             }
         }

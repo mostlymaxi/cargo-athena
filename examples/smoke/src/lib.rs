@@ -630,6 +630,31 @@ pub fn pipeline_tolerations(role: String) {
     run_on_tainted_node(role);
 }
 
+/// Boundary-tier `Template.Tolerations` + `Template.Affinity` on this
+/// dag/steps template. Inherited by child pods that don't set their
+/// own. Literal-only (per-arg injection here is unsafe by Argo's
+/// boundary-copy semantics — the raw string lands on a child pod
+/// before per-template substitution can resolve it). Use `_if_root`
+/// variants for dynamic values.
+#[workflow(
+    boundary_tolerations = [
+        { key = "athena.dev/role", operator = "Equal", value = "platform", effect = "NoSchedule" },
+    ],
+    boundary_affinity = r#"
+nodeAffinity:
+  preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 1
+      preference:
+        matchExpressions:
+          - key: kubernetes.io/arch
+            operator: In
+            values: [amd64]
+"#,
+)]
+pub fn pipeline_boundary_scheduling() {
+    fetch("https://example.com/data".to_string());
+}
+
 // --- affinity + affinity_if_root -------------------------------------------
 
 /// Template-level `Template.Affinity`: opaque YAML/JSON value. Athena

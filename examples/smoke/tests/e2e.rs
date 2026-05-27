@@ -31,6 +31,7 @@ const BIN_AFFINITY: &str = env!("CARGO_BIN_EXE_smoke-affinity");
 const BIN_POD_SPEC_PATCH: &str = env!("CARGO_BIN_EXE_smoke-pod-spec-patch");
 const BIN_IMAGE_PULL_SECRETS: &str = env!("CARGO_BIN_EXE_smoke-image-pull-secrets");
 const BIN_INJECT_ATTR: &str = env!("CARGO_BIN_EXE_smoke-inject-attr");
+const BIN_BOUNDARY_SCHEDULING: &str = env!("CARGO_BIN_EXE_smoke-boundary-scheduling");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -388,6 +389,19 @@ fn emit_pipeline_image_pull_secrets() {
 #[test]
 fn emit_pipeline_inject_attr() {
     assert_golden("pipeline_inject_attr.yaml", &run_bin(BIN_INJECT_ATTR, &[]));
+}
+
+/// `boundary_tolerations` + `boundary_affinity` on `#[workflow]` —
+/// land on the dag/steps template's own `Template.Tolerations` +
+/// `Template.Affinity`. Literal-only (Argo's boundary-copy makes
+/// per-arg injection unsafe at this tier). Pins the dag template's
+/// scheduling block.
+#[test]
+fn emit_pipeline_boundary_scheduling() {
+    assert_golden(
+        "pipeline_boundary_scheduling.yaml",
+        &run_bin(BIN_BOUNDARY_SCHEDULING, &[]),
+    );
 }
 
 /// Run mode: with Argo's secretKeyRef env vars planted by the

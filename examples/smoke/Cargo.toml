@@ -114,6 +114,10 @@ path = "src/bin/image_pull_secrets_main.rs"
 name = "smoke-inject-attr"
 path = "src/bin/inject_attr_main.rs"
 
+[[bin]]
+name = "smoke-boundary-scheduling"
+path = "src/bin/boundary_scheduling_main.rs"
+
 [dependencies]
 # `tokio` enables `async fn` `#[container]` bodies (re-exports tokio).
 cargo-athena = { workspace = true, features = ["tokio"] }
