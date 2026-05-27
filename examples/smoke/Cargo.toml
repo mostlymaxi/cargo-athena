@@ -10,113 +10,14 @@ publish = false
 # if+match / transitive #[fragment] closure / native artifact ports /
 # #[workflow] return values. Goldens in tests/golden/ are pinned to its
 # emitted output — regenerate intentionally with `UPDATE_EXPECT=1`.
+#
+# Bins are auto-discovered from `src/bin/*.rs` — the file name (minus
+# `.rs`) becomes the bin name. New feature = drop one `smoke-<feat>.rs`
+# under `src/bin/`, no Cargo.toml edit needed (eliminates an append-
+# point that used to conflict on every parallel feature PR).
 [lib]
 name = "cargo_athena_example_smoke"
 path = "src/lib.rs"
-
-[[bin]]
-name = "smoke"
-path = "src/main.rs"
-
-[[bin]]
-name = "smoke-returns"
-path = "src/bin/returns_main.rs"
-
-[[bin]]
-name = "smoke-hooks"
-path = "src/bin/hooks_main.rs"
-
-[[bin]]
-name = "smoke-onexit"
-path = "src/bin/onexit_main.rs"
-
-[[bin]]
-name = "smoke-fields"
-path = "src/bin/fields_main.rs"
-
-[[bin]]
-name = "smoke-fanout"
-path = "src/bin/fanout_main.rs"
-
-[[bin]]
-name = "smoke-if"
-path = "src/bin/if_main.rs"
-
-[[bin]]
-name = "smoke-nested"
-path = "src/bin/nested_main.rs"
-
-[[bin]]
-name = "smoke-inject"
-path = "src/bin/inject_main.rs"
-
-[[bin]]
-name = "smoke-ns"
-path = "src/bin/ns_main.rs"
-
-[[bin]]
-name = "smoke-retry"
-path = "src/bin/retry_main.rs"
-
-[[bin]]
-name = "smoke-ttl"
-path = "src/bin/ttl_main.rs"
-
-[[bin]]
-name = "smoke-deadline"
-path = "src/bin/deadline_main.rs"
-
-[[bin]]
-name = "smoke-async"
-path = "src/bin/async_main.rs"
-
-[[bin]]
-name = "smoke-secrets"
-path = "src/bin/secrets_main.rs"
-
-[[bin]]
-name = "smoke-pod-attrs"
-path = "src/bin/pod_attrs_main.rs"
-
-[[bin]]
-name = "smoke-mutex"
-path = "src/bin/mutex_main.rs"
-
-[[bin]]
-name = "smoke-artifact"
-path = "src/bin/artifact_main.rs"
-
-[[bin]]
-name = "smoke-artifact-wf"
-path = "src/bin/artifact_wf_main.rs"
-
-[[bin]]
-name = "smoke-artifact-clone"
-path = "src/bin/artifact_clone_main.rs"
-
-[[bin]]
-name = "smoke-tolerations"
-path = "src/bin/tolerations_main.rs"
-
-[[bin]]
-name = "smoke-affinity"
-path = "src/bin/affinity_main.rs"
-
-[[bin]]
-name = "smoke-pod-spec-patch"
-path = "src/bin/pod_spec_patch_main.rs"
-
-[[bin]]
-name = "smoke-image-pull-secrets"
-path = "src/bin/image_pull_secrets_main.rs"
-
-[[bin]]
-name = "smoke-inject-attr"
-path = "src/bin/inject_attr_main.rs"
-
-[[bin]]
-name = "smoke-boundary-scheduling"
-path = "src/bin/boundary_scheduling_main.rs"
 
 [dependencies]
 # `tokio` enables `async fn` `#[container]` bodies (re-exports tokio).
