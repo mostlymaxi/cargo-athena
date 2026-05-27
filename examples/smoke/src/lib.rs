@@ -723,6 +723,21 @@ pub fn pipeline_pod_spec_patch(grace: String) {
     limited(grace);
 }
 
+// --- parallelism + parallelism_if_root -------------------------------------
+
+/// `parallelism = N` → `Template.parallelism` on this dag/steps
+/// (caps concurrent children scheduled under THIS template — pods
+/// from nested templates don't count). `parallelism_if_root = N` →
+/// `WorkflowSpec.parallelism` (caps total concurrent pods across
+/// the run; inert when this WT is `templateRef`'d). Both literal
+/// `i64` and `> 0` (Argo CRD enforces `Minimum=1`; injection isn't
+/// possible — the `*int64` schema rejects substituted strings).
+#[workflow(parallelism = 2, parallelism_if_root = 4)]
+pub fn pipeline_parallelism() {
+    let raw = fetch("https://example.com/data".to_string());
+    transform(raw, 1);
+}
+
 // --- image_pull_secrets_if_root --------------------------------------------
 
 /// Root-only `WorkflowSpec.ImagePullSecrets`. K8s/Argo expose this only

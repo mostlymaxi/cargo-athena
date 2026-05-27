@@ -15,9 +15,9 @@ use syn::{Expr, ItemFn, Path};
 use crate::analyze::analyze_workflow;
 use crate::attrs::{
     WorkflowArgs, inject_lower, lower_mutex_pairs, lower_toleration_args,
-    mutexes_if_root_const_tokens, parse_attr, pod_gc_const_tokens, retry_strategy_tokens,
-    secs_i64_tok, template_synchronization_tokens, tolerations_if_root_const_tokens,
-    ttl_const_tokens,
+    mutexes_if_root_const_tokens, parallelism_tok, parse_attr, pod_gc_const_tokens,
+    retry_strategy_tokens, secs_i64_tok, template_synchronization_tokens,
+    tolerations_if_root_const_tokens, ttl_const_tokens,
 };
 use crate::conditional::emit_synth;
 use crate::ghost::ghost_fn;
@@ -470,6 +470,21 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };
+    // `parallelism = N` → stamped directly into the `api::Template`
+    // literal below (template-level, fires under templateRef).
+    // `parallelism_if_root = N` → `PARALLELISM_IF_ROOT` const, stamped
+    // by `Collector::stamp_spec` onto `WorkflowSpec.parallelism`
+    // (root-only). Both literal `i64` and `> 0`; injection isn't
+    // possible (Argo's `*int64` schema rejects substituted strings).
+    let parallelism_tok_tmpl = match parallelism_tok(cfg.parallelism, ident.span(), "parallelism") {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let parallelism_if_root_tok =
+        match parallelism_tok(cfg.parallelism_if_root, ident.span(), "parallelism_if_root") {
+            Ok(v) => v,
+            Err(e) => return e.to_compile_error().into(),
+        };
     // A `#[workflow]` lowers to a dag/steps template, where Argo applies
     // neither `Template.timeout` nor `Template.activeDeadlineSeconds`
     // (both documented no-ops on dag/steps) — so a workflow template
@@ -509,6 +524,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 synchronization: #synchronization_tok,
                 tolerations: #boundary_tol_tokens,
                 affinity: #boundary_affinity_tok,
+                parallelism: #parallelism_tok_tmpl,
                 ..::core::default::Default::default()
             }
         }
@@ -529,6 +545,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 synchronization: #synchronization_tok,
                 tolerations: #boundary_tol_tokens,
                 affinity: #boundary_affinity_tok,
+                parallelism: #parallelism_tok_tmpl,
                 ..::core::default::Default::default()
             }
         }
@@ -595,6 +612,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #pod_spec_patch_if_root_const_tok;
             const IMAGE_PULL_SECRETS_IF_ROOT: &'static [&'static str] =
                 #image_pull_secrets_if_root_tok;
+            const PARALLELISM_IF_ROOT: ::core::option::Option<i64> =
+                #parallelism_if_root_tok;
 
             fn build(_ctx: &::cargo_athena::BuildCtx)
                 -> ::cargo_athena::api::Template

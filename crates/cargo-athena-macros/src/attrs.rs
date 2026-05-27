@@ -534,6 +534,18 @@ pub(crate) struct WorkflowArgs {
     /// _secrets_if_root`; same shape (literal Secret names, no
     /// injection).
     pub(crate) image_pull_secrets_if_root: Vec<String>,
+    /// `parallelism = N` — `Template.parallelism` on this dag/steps
+    /// template. Caps concurrent children scheduled under THIS
+    /// template invocation (pods from nested templates don't count).
+    /// Literal `i64` only (Argo's `*int64` schema rejects substituted
+    /// strings at admission). Argo CRD enforces `Minimum=1`; the
+    /// macro rejects `<= 0` with a spanned compile_error.
+    pub(crate) parallelism: Option<i64>,
+    /// `parallelism_if_root = N` — root-only `WorkflowSpec.parallelism`.
+    /// Caps total concurrent pods across the run; inert when this WT
+    /// is `templateRef`'d. Same literal-only / `> 0` constraints as
+    /// `parallelism`.
+    pub(crate) parallelism_if_root: Option<i64>,
 }
 
 /// Parse attribute args into `T`, or return a `compile_error!`.
@@ -720,6 +732,29 @@ pub(crate) fn secs_i64_tok(
         Some(_) => Err(syn::Error::new(
             span,
             format!("`{attr}`: duration is too large"),
+        )),
+    }
+}
+
+/// Lower a literal `parallelism` / `parallelism_if_root = N` attr to
+/// an `Option<i64>` token. Argo's CRD enforces `Minimum=1` on both
+/// `Template.parallelism` and `WorkflowSpec.parallelism`, and the
+/// `*int64` field rejects substituted strings at admission — so the
+/// attr is literal-only and `<= 0` is a spanned compile error.
+pub(crate) fn parallelism_tok(
+    v: Option<i64>,
+    span: proc_macro2::Span,
+    attr: &str,
+) -> Result<proc_macro2::TokenStream, syn::Error> {
+    match v {
+        None => Ok(quote! { ::core::option::Option::None }),
+        Some(n) if n > 0 => Ok(quote! { ::core::option::Option::Some(#n) }),
+        Some(_) => Err(syn::Error::new(
+            span,
+            format!(
+                "`{attr}` must be > 0 (Argo's CRD enforces Minimum=1; \
+                 omit the attr to leave the field unset)"
+            ),
         )),
     }
 }
