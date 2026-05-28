@@ -2,6 +2,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-arch-pinned
+  labels:
+    cargo.athena/bin: smoke-affinity
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-arch-pinned
   templates:
@@ -78,6 +82,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-affinity
+  labels:
+    cargo.athena/bin: smoke-affinity
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-affinity
   templates:
@@ -124,6 +132,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-record
+  labels:
+    cargo.athena/bin: smoke-affinity
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-record
   templates:

@@ -2,6 +2,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-branchy
+  labels:
+    cargo.athena/bin: smoke
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-branchy
   templates:
@@ -101,6 +105,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-combine
+  labels:
+    cargo.athena/bin: smoke
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-combine
   templates:
@@ -175,6 +183,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-fetch
+  labels:
+    cargo.athena/bin: smoke
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-fetch
   templates:
@@ -249,6 +261,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-ingest
+  labels:
+    cargo.athena/bin: smoke
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-ingest
   templates:
@@ -308,6 +324,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline
+  labels:
+    cargo.athena/bin: smoke
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline
   templates:
@@ -368,6 +388,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-publish
+  labels:
+    cargo.athena/bin: smoke
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-publish
   templates:
@@ -468,6 +492,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-transform
+  labels:
+    cargo.athena/bin: smoke
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-transform
   templates:

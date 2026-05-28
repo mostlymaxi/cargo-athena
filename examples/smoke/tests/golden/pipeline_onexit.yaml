@@ -2,6 +2,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-fetch
+  labels:
+    cargo.athena/bin: smoke-onexit
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-fetch
   templates:
@@ -76,6 +80,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-onexit
+  labels:
+    cargo.athena/bin: smoke-onexit
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-onexit
   templates:
@@ -131,6 +139,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-record
+  labels:
+    cargo.athena/bin: smoke-onexit
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-record
   templates:
@@ -200,6 +212,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-teardown
+  labels:
+    cargo.athena/bin: smoke-onexit
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-teardown
   templates:
@@ -266,6 +282,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-transform
+  labels:
+    cargo.athena/bin: smoke-onexit
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-transform
   templates:

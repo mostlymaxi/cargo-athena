@@ -1182,6 +1182,12 @@ pub struct BuildCtx {
     /// `cargo metadata`, so the upload and the emitted YAML always
     /// agree by construction.
     artifact_key: String,
+    /// User crate name (`CARGO_PKG_NAME`). Stamped onto every emitted
+    /// `WorkflowTemplate`'s `metadata.labels` as `cargo.athena/pkg` so
+    /// cluster admins can `kubectl get wt -l cargo.athena/pkg=<crate>`.
+    krate: String,
+    /// User binary name (`CARGO_BIN_NAME`). Stamped as `cargo.athena/bin`.
+    bin: String,
 }
 
 impl BuildCtx {
@@ -1201,6 +1207,8 @@ impl BuildCtx {
             pvcs,
             config: AthenaConfig::load(),
             artifact_key: format!("{krate}/{version}/{bin}.tar.gz"),
+            krate: krate.to_string(),
+            bin: bin.to_string(),
         }
     }
 
@@ -1212,6 +1220,23 @@ impl BuildCtx {
     /// `{crate}/{version}/{bin}.tar.gz`.
     pub fn artifact_key(&self) -> &str {
         &self.artifact_key
+    }
+
+    /// Baseline `cargo.athena/*` provenance labels stamped onto every
+    /// emitted `WorkflowTemplate` (and the `--with-workflow` runnable
+    /// `Workflow`). Lets cluster admins find athena-managed resources
+    /// via `kubectl get wt -l cargo.athena/pkg=<crate>` etc. Three fields
+    /// — athena's own version, the user crate name, and the binary name —
+    /// all guaranteed-valid k8s label values by cargo's own naming rules.
+    pub fn athena_labels(&self) -> std::collections::BTreeMap<String, String> {
+        let mut m = std::collections::BTreeMap::new();
+        m.insert(
+            "cargo.athena/version".to_string(),
+            env!("CARGO_PKG_VERSION").to_string(),
+        );
+        m.insert("cargo.athena/pkg".to_string(), self.krate.clone());
+        m.insert("cargo.athena/bin".to_string(), self.bin.clone());
+        m
     }
 
     /// Own literal decls ∪ the transitive `#[fragment]` closure for one
@@ -1639,12 +1664,18 @@ impl Collector {
     /// `CARGO_ATHENA_EMIT_JSON` mode `cargo athena submit` consumes for
     /// its register/drift checks.
     pub fn build_templates(&self, ctx: &BuildCtx) -> Vec<api::WorkflowTemplate> {
+        let labels = ctx.athena_labels();
         let mut tpls: Vec<api::WorkflowTemplate> = self
             .builders
             .iter()
             .map(|b| {
                 let inner = b(ctx);
-                wrap_workflow_template(inner.name.clone(), inner)
+                let mut wt = wrap_workflow_template(inner.name.clone(), inner);
+                if let Some(meta) = wt.metadata.as_mut() {
+                    meta.labels
+                        .extend(labels.iter().map(|(k, v)| (k.clone(), v.clone())));
+                }
+                wt
             })
             .collect();
         tpls.sort_by_key(name_of);
@@ -1824,6 +1855,7 @@ impl Collector {
             kind: api::KIND_WORKFLOW.to_string(),
             metadata: Some(api::ObjectMeta {
                 generate_name: format!("{}-", E::ARGO_NAME),
+                labels: ctx.athena_labels(),
                 ..Default::default()
             }),
             spec: Some(spec),

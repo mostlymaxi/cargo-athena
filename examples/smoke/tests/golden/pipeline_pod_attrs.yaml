@@ -2,6 +2,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-pod-attrs
+  labels:
+    cargo.athena/bin: smoke-pod-attrs
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-pod-attrs
   templates:
@@ -37,6 +41,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-run-svc
+  labels:
+    cargo.athena/bin: smoke-pod-attrs
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-run-svc
   templates:
