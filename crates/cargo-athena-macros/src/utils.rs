@@ -168,6 +168,17 @@ pub(crate) fn decl_kind(mac: &syn::Macro) -> Option<(DeclKind, &'static str)> {
         .map(|(_, private, kind)| (*kind, *private))
 }
 
+/// Public macro name (`"host"`, `"load_artifact_str"`, `"secret"`, …)
+/// if `mac` is one of the recognized decl macros — used by
+/// `DeclRewrite` to dispatch the per-macro bake at expansion time.
+pub(crate) fn decl_public_name(mac: &syn::Macro) -> Option<&'static str> {
+    let last = mac.path.segments.last()?;
+    DECL_MACROS
+        .iter()
+        .find(|(public, ..)| last.ident == public)
+        .map(|(public, ..)| *public)
+}
+
 /// First string-literal argument of a decl macro (`host!("p")`,
 /// `save_artifact!("n", expr)` → `"n"`). Literal-only by contract.
 pub(crate) fn first_str_lit(mac: &syn::Macro) -> Option<String> {
@@ -405,55 +416,166 @@ fn host_mount_path(p: &str) -> String {
     format!("/athena/mounts/{}", munge_host_path(p))
 }
 
+/// Precomputed pod env var name for `secret!(name, key)` /
+/// `secret_opt!(name, key)`. Mirror of
+/// `cargo_athena_core::secret_env_name`; the pin test asserts both
+/// sides agree on the same `(name, key)` → env-var transform so the
+/// proc-macro (run-side reader) and emit-side (Argo `secretKeyRef`
+/// declaration) never diverge.
+fn secret_env_name(name: &str, key: &str) -> String {
+    let mut s = String::from("ATHENA_SEC_");
+    push_munged(&mut s, name);
+    s.push_str("__");
+    push_munged(&mut s, key);
+    s
+}
+
+fn push_munged(out: &mut String, input: &str) {
+    for c in input.chars() {
+        out.push(if c.is_ascii_alphanumeric() {
+            c.to_ascii_uppercase()
+        } else {
+            '_'
+        });
+    }
+}
+
+/// Precomputed full path for `load_artifact!`/`load_artifact_str!`
+/// (input port). Mirror of `cargo_athena_core::rt::IN_DIR` joined with
+/// the user-provided name literal.
+fn in_artifact_path(name: &str) -> String {
+    format!("/athena/artifacts/in/{name}")
+}
+
+/// Precomputed full path for `save_artifact!`/`save_artifact_str!`.
+fn out_artifact_path(name: &str) -> String {
+    format!("/athena/artifacts/out/{name}")
+}
+
 /// Rewrites every decl macro the attribute macro can see into its
 /// final form. Enforcement half of the gate: the *public* forms are
 /// hard `compile_error!`s, so any invocation we don't rewrite here — a
 /// plain fn, a `#[workflow]`, or nested inside another macro's tokens
 /// — fails to compile instead of silently doing nothing.
 ///
-/// `host!` is special: instead of routing to a private declarative
-/// macro, the rewrite **replaces the whole expression** with a literal
-/// `::std::path::Path::new("/athena/mounts/<precomputed-hash>")`. The
-/// mount path is computed once at expansion time (proc macros run at
-/// user-build time), so `host!` returns `&'static Path` with zero
-/// runtime work — no FNV at startup, no `OnceLock` allocation, no
-/// `format!()` on every call.
+/// Every decl macro precomputes its derived strings (mount path, env
+/// var name, artifact file path) at proc-macro expansion time and
+/// emits an expression carrying those literals. Runtime helpers
+/// (`rt::load_artifact`, `rt::secret_value`, …) take the pre-baked
+/// strings; they no longer rebuild them on every call.
 ///
-/// The other decl macros (`load_artifact*!`/`save_artifact*!`/
-/// `secret*!`) genuinely need a runtime call (reading files, env vars,
-/// etc.), so they keep the "swap to private form" path.
+/// - `host!("/p")` → `Path::new("/athena/mounts/<hash>")`
+/// - `load_artifact!("k")` → `rt::load_artifact("/athena/artifacts/in/k", "k")`
+/// - `load_artifact_str!("k")` → `rt::load_artifact_str("/athena/artifacts/in/k", "k")`
+/// - `save_artifact!("k", data)` → `rt::save_artifact("/athena/artifacts/out/k", "k", data)`
+/// - `save_artifact_str!("k", data)` → `rt::save_artifact_str("/athena/artifacts/out/k", "k", data)`
+/// - `secret!("s", "k")` → `rt::secret_value("ATHENA_SEC_S__K", "s", "k")`
+/// - `secret_opt!("s", "k")` → `rt::secret_value_opt("ATHENA_SEC_S__K")`
 pub(crate) struct DeclRewrite;
 
 impl VisitMut for DeclRewrite {
     fn visit_expr_mut(&mut self, expr: &mut Expr) {
-        // host! at expression level → bake in the precomputed mount
-        // path BEFORE recursing into children (else the macro_mut pass
-        // would still see it as a generic decl macro).
         if let Expr::Macro(em) = expr
-            && let Some((DeclKind::Host, _)) = decl_kind(&em.mac)
-            && let Some(p) = first_str_lit(&em.mac)
+            && let Some(public) = decl_public_name(&em.mac)
+            && let Some(new_expr) = rewrite_decl_call(public, &em.mac)
         {
-            let mount = host_mount_path(&p);
-            *expr = syn::parse_quote! {
-                ::std::path::Path::new(#mount)
-            };
-            // Recurse into the replacement (no nested macros there;
-            // a no-op).
+            *expr = new_expr;
         }
         syn::visit_mut::visit_expr_mut(self, expr);
     }
 
-    fn visit_macro_mut(&mut self, mac: &mut syn::Macro) {
-        // host! is replaced at the Expr level above; leave it
-        // untouched here so we don't double-process.
-        if let Some((kind, private)) = decl_kind(mac)
-            && kind != DeclKind::Host
+    fn visit_stmt_mut(&mut self, stmt: &mut syn::Stmt) {
+        // `save_artifact!(...);` at statement position parses as
+        // `Stmt::Macro`, which `visit_expr_mut` never sees. Rewrite
+        // those by hand into `Stmt::Expr(new_expr, semi)`.
+        if let syn::Stmt::Macro(sm) = stmt
+            && let Some(public) = decl_public_name(&sm.mac)
+            && let Some(new_expr) = rewrite_decl_call(public, &sm.mac)
         {
-            let p: syn::Path = syn::parse_str(&format!("::cargo_athena::{private}")).unwrap();
-            mac.path = p;
+            *stmt = syn::Stmt::Expr(new_expr, sm.semi_token);
         }
-        syn::visit_mut::visit_macro_mut(self, mac);
+        syn::visit_mut::visit_stmt_mut(self, stmt);
     }
+}
+
+/// Bake-time replacement for a recognized decl-macro invocation.
+/// Returns `None` if the arg shape doesn't match (literal-only by
+/// contract); the original macro is left intact so the public form's
+/// `compile_error!` gate fires with the correct diagnostic.
+fn rewrite_decl_call(public: &str, mac: &syn::Macro) -> Option<Expr> {
+    match public {
+        "host" => {
+            let lit = first_str_lit(mac)?;
+            let mount = host_mount_path(&lit);
+            Some(syn::parse_quote! {
+                ::std::path::Path::new(#mount)
+            })
+        }
+        "load_artifact" => {
+            let name = first_str_lit(mac)?;
+            let path = in_artifact_path(&name);
+            Some(syn::parse_quote! {
+                ::cargo_athena::rt::load_artifact(#path, #name)
+            })
+        }
+        "load_artifact_str" => {
+            let name = first_str_lit(mac)?;
+            let path = in_artifact_path(&name);
+            Some(syn::parse_quote! {
+                ::cargo_athena::rt::load_artifact_str(#path, #name)
+            })
+        }
+        "save_artifact" => {
+            let (name, data) = save_args(mac)?;
+            let path = out_artifact_path(&name);
+            Some(syn::parse_quote! {
+                ::cargo_athena::rt::save_artifact(#path, #name, #data)
+            })
+        }
+        "save_artifact_str" => {
+            let (name, data) = save_args(mac)?;
+            let path = out_artifact_path(&name);
+            Some(syn::parse_quote! {
+                ::cargo_athena::rt::save_artifact_str(#path, #name, #data)
+            })
+        }
+        "secret" => {
+            let (name, key) = two_str_lits(mac)?;
+            let env = secret_env_name(&name, &key);
+            Some(syn::parse_quote! {
+                ::cargo_athena::rt::secret_value(#env, #name, #key)
+            })
+        }
+        "secret_opt" => {
+            let (name, key) = two_str_lits(mac)?;
+            let env = secret_env_name(&name, &key);
+            Some(syn::parse_quote! {
+                ::cargo_athena::rt::secret_value_opt(#env)
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Parse `save_artifact!("name", data_expr)` into the two pieces.
+fn save_args(mac: &syn::Macro) -> Option<(String, Expr)> {
+    let args = mac
+        .parse_body_with(syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated)
+        .ok()?;
+    let mut it = args.into_iter();
+    let name_expr = it.next()?;
+    let data = it.next()?;
+    if it.next().is_some() {
+        return None;
+    }
+    let name = match name_expr {
+        Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(s),
+            ..
+        }) => s.value(),
+        _ => return None,
+    };
+    Some((name, data))
 }
 
 /// Clone `func`, swap its visible decl macros for the private forms; the
@@ -495,5 +617,23 @@ mod tests {
         // in-pod mount path are both keyed on this hash, so drift
         // breaks every existing deployment.
         assert_eq!(munge_host_path("/var/lib"), "5b8d11771a6f946b");
+    }
+
+    #[test]
+    fn secret_env_name_matches_core() {
+        // Mirror of core's `secret_env_name`. Emit-side declares the
+        // matching Argo `secretKeyRef` with this exact env var; if
+        // the two formulas diverge, the run-side reads a missing var
+        // and every secret! call panics. Pin to detect drift at
+        // build time, not in a user's cluster.
+        assert_eq!(
+            secret_env_name("github-creds", "token"),
+            "ATHENA_SEC_GITHUB_CREDS__TOKEN"
+        );
+        // Non-alphanumeric chars flatten to `_` (uppercase too).
+        assert_eq!(
+            secret_env_name("my.secret-name", "api.key"),
+            "ATHENA_SEC_MY_SECRET_NAME__API_KEY"
+        );
     }
 }

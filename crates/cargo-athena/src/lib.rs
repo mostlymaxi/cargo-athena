@@ -28,19 +28,14 @@
 // `api` / `inventory` / `serde_json` / `serde_norway`.
 pub use cargo_athena_core::*;
 
-// `#[macro_export]` macros live at the dependency's crate root; re-export
-// explicitly so `cargo_athena::host!` resolves for users. `host!` itself
-// has no private declarative form: the proc macros precompute its mount
-// path at expansion time and inline `Path::new("/athena/mounts/<hash>")`
-// directly. The other decl macros still route to a private form for
-// their runtime call.
-#[doc(hidden)]
+// `#[macro_export]` macros live at the dependency's crate root;
+// re-export explicitly so `cargo_athena::host!` etc. resolve for
+// users. None of these have a private declarative form — the proc
+// macros precompute all derived strings (mount path, artifact file
+// path, env var name) at expansion time and emit a direct `rt::*`
+// call with the pre-baked literals.
 pub use cargo_athena_core::{
-    __cargo_athena_load_artifact, __cargo_athena_load_artifact_str, __cargo_athena_save_artifact,
-    __cargo_athena_save_artifact_str,
-};
-pub use cargo_athena_core::{
-    host, load_artifact, load_artifact_str, save_artifact, save_artifact_str,
+    host, load_artifact, load_artifact_str, save_artifact, save_artifact_str, secret, secret_opt,
 };
 
 // Attribute macros.
