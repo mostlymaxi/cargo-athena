@@ -17,9 +17,7 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{Expr, ItemFn, Type, visit::Visit, visit_mut::VisitMut};
 
-pub(crate) fn kebab(s: &str) -> String {
-    s.replace('_', "-").to_ascii_lowercase()
-}
+pub(crate) use cargo_athena_api::munge::kebab;
 
 /// A never-run signature shim with the fn's *real* arg + return types,
 /// as an inherent fn on the identity struct. Lets the `#[workflow]` ghost
@@ -413,74 +411,15 @@ pub(crate) fn check_yaml_safe_names(
     Ok(())
 }
 
-/// FNV-1a 64-bit hash of a `host!` literal, emitted as 16 lowercase
-/// hex chars. Mirror of `cargo_athena_core::munge_host_path`; the
-/// algorithm is pinned by `munge_known_value_pins_algorithm` in core's
-/// tests, so the two sides cannot drift silently. Fixed initial state
-/// (no `DefaultHasher` random seed): the proc macro hashes at user
-/// build time, `cargo athena emit` hashes at emit time in a different
-/// process — they MUST agree.
-fn munge_host_path(path: &str) -> String {
-    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-    let mut h = FNV_OFFSET;
-    for b in path.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(FNV_PRIME);
-    }
-    format!("{h:016x}")
-}
-
-/// Precomputed in-pod mount path for `host!("/p")`. Identical to
-/// `cargo_athena_core::host_mount_path` by construction; pinned by the
-/// algorithm test.
-fn host_mount_path(p: &str) -> String {
-    format!("/athena/mounts/{}", munge_host_path(p))
-}
-
-/// Precomputed pod env var name for `secret!(name, key)` /
-/// `secret_opt!(name, key)`. Mirror of
-/// `cargo_athena_core::secret_env_name`; the pin test asserts both
-/// sides agree on the same `(name, key)` → env-var transform so the
-/// proc-macro (run-side reader) and emit-side (Argo `secretKeyRef`
-/// declaration) never diverge.
-fn secret_env_name(name: &str, key: &str) -> String {
-    let mut s = String::from("ATHENA_SEC_");
-    push_munged(&mut s, name);
-    s.push_str("__");
-    push_munged(&mut s, key);
-    s
-}
-
-fn push_munged(out: &mut String, input: &str) {
-    for c in input.chars() {
-        out.push(if c.is_ascii_alphanumeric() {
-            c.to_ascii_uppercase()
-        } else {
-            '_'
-        });
-    }
-}
-
-/// Precomputed full path for `load_artifact!`/`load_artifact_str!`
-/// (input port). Mirror of `cargo_athena_core::rt::IN_DIR` joined with
-/// the user-provided name literal.
-fn in_artifact_path(name: &str) -> String {
-    format!("/athena/artifacts/in/{name}")
-}
-
-/// Precomputed full path for `save_artifact!`/`save_artifact_str!`.
-fn out_artifact_path(name: &str) -> String {
-    format!("/athena/artifacts/out/{name}")
-}
-
-/// Precomputed in-pod mount path for a PVC's argo name. Same FNV-1a
-/// algorithm as `host!`; emit-side mirror in
-/// `cargo_athena_core::pvc_mount_path`. Pinned by
-/// `munge_algorithm_matches_core` (shared algorithm).
-pub(crate) fn pvc_mount_path(argo_name: &str) -> String {
-    format!("/athena/pvcs/{}", munge_host_path(argo_name))
-}
+// Name/path/env-var derivers live in `cargo_athena_api::munge` —
+// proc-macro side (here) AND emit side (cargo-athena-core) both call
+// into that single source so they cannot drift silently. Prior
+// versions of athena mirrored the FNV-1a hash + the env-var munge
+// formula in each crate and pinned them with algorithm tests; that
+// drift risk is gone now.
+pub(crate) use cargo_athena_api::munge::{
+    host_mount_path, in_artifact_path, out_artifact_path, pvc_mount_path, secret_env_name,
+};
 
 /// Rewrites every decl macro the attribute macro can see into its
 /// final form. Enforcement half of the gate: the *public* forms are
@@ -646,35 +585,7 @@ pub(crate) fn unwrap_expr(e: &Expr) -> &Expr {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn munge_algorithm_matches_core() {
-        // Pinned to the SAME input/output as core's
-        // `munge_known_value_pins_algorithm` so the two FNV
-        // implementations cannot drift silently. If you change one
-        // side, change both - the in-cluster Volume name and the
-        // in-pod mount path are both keyed on this hash, so drift
-        // breaks every existing deployment.
-        assert_eq!(munge_host_path("/var/lib"), "5b8d11771a6f946b");
-    }
-
-    #[test]
-    fn secret_env_name_matches_core() {
-        // Mirror of core's `secret_env_name`. Emit-side declares the
-        // matching Argo `secretKeyRef` with this exact env var; if
-        // the two formulas diverge, the run-side reads a missing var
-        // and every secret! call panics. Pin to detect drift at
-        // build time, not in a user's cluster.
-        assert_eq!(
-            secret_env_name("github-creds", "token"),
-            "ATHENA_SEC_GITHUB_CREDS__TOKEN"
-        );
-        // Non-alphanumeric chars flatten to `_` (uppercase too).
-        assert_eq!(
-            secret_env_name("my.secret-name", "api.key"),
-            "ATHENA_SEC_MY_SECRET_NAME__API_KEY"
-        );
-    }
-}
+// Algorithm tests for the munge helpers live in
+// `cargo_athena_api::munge` (their single source of truth). No
+// proc-macro-side pin tests needed: drift is impossible by
+// construction now that both sides import the same fns.

@@ -10,6 +10,16 @@
 //! every struct is `rename_all = "camelCase"`, every field is
 //! `skip_serializing_if = "ser::skip"` (omit empties) + `default` (for
 //! round-trip deserialization).
+//!
+//! Also re-exports the [`munge`] module of pure name/path/env-var
+//! derivers shared between `cargo-athena-core` (emit side) and
+//! `cargo-athena-macros` (proc-macro / user-build side). Living here
+//! lets the proc-macro crate depend on `api` for these helpers
+//! without pulling in any runtime-only crates (kube, reqwest, etc.),
+//! so both sides compute the same string for the same input by
+//! construction rather than via mirrored copies + pin tests.
+
+pub mod munge;
 
 /// `skip_serializing_if` support: one generic "is this empty?" predicate
 /// so every field can share `#[serde(skip_serializing_if = "ser::skip")]`.

@@ -229,6 +229,7 @@ dependencies = [
 name = "cargo-athena-macros"
 version = "0.5.2"
 dependencies = [
+ "cargo-athena-api",
  "deluxe",
  "humantime",
  "proc-macro2",
