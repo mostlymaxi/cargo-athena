@@ -249,11 +249,13 @@ pub mod rt {
     // truth for the formulas (called once at emit time per template);
     // their proc-macro mirrors are pinned by the algorithm tests.
 
-    /// Where Argo drops/collects declared artifact ports inside the pod.
-    /// Kept `pub const` because emit-side code formats Argo template
-    /// artifact paths from it.
-    pub const IN_DIR: &str = "/athena/artifacts/in";
-    pub const OUT_DIR: &str = "/athena/artifacts/out";
+    // Where Argo drops/collects declared artifact ports inside the pod
+    // — emit-side formats Argo template artifact paths from these, and
+    // the proc macros bake them into `load_artifact!` / `save_artifact!`
+    // call sites. Single source of truth in `api::munge`; re-exported
+    // here so every existing `rt::IN_DIR` / `rt::OUT_DIR` caller keeps
+    // resolving.
+    pub use cargo_athena_api::munge::{ATHENA_IN_DIR as IN_DIR, ATHENA_OUT_DIR as OUT_DIR};
 
     pub fn load_artifact(path: &str, name: &str) -> Vec<u8> {
         std::fs::read(path)
@@ -295,29 +297,9 @@ pub mod rt {
     }
 }
 
-/// The pod env var name a `secret!`/`secret_opt!` decl gets, derived
-/// deterministically from the K8s `(secret_name, key)` pair so the
-/// emit-side and the run-side agree. Uppercased, non-alphanumerics
-/// flattened to `_`, separated by `__` so the two halves stay
-/// distinguishable. Both sides go through this function — never
-/// hard-code an env name elsewhere.
-pub fn secret_env_name(name: &str, key: &str) -> String {
-    let mut s = String::from("ATHENA_SEC_");
-    push_munged(&mut s, name);
-    s.push_str("__");
-    push_munged(&mut s, key);
-    s
-}
-
-fn push_munged(out: &mut String, input: &str) {
-    for c in input.chars() {
-        out.push(if c.is_ascii_alphanumeric() {
-            c.to_ascii_uppercase()
-        } else {
-            '_'
-        });
-    }
-}
+// Re-export the shared name/path/env-var derivers from `api::munge`.
+// Single source of truth — the proc-macro side imports them too.
+pub use crate::api::munge::secret_env_name;
 
 /// What kind of Argo template a type produces.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -625,31 +607,10 @@ pub struct PvcReg {
 }
 inventory::collect!(PvcReg);
 
-/// `host!`-style FNV-1a hash of a PVC's argo name → 16 lowercase hex
-/// chars. Used to derive a stable mount path (`/athena/pvcs/<hash>`)
-/// and a DNS-1123-safe Volume name (`pvc-<hash>`).
-///
-/// Determinism is load-bearing for the same reason as
-/// [`munge_host_path`]: emit-side (here) and the proc-macro mirror in
-/// `cargo-athena-macros` (which bakes the mount path into the `Pvc::
-/// MOUNT_PATH` const at expansion time) hash the same argo name in
-/// two different process invocations. Drift = silent volume / mount
-/// mismatch in user pods.
-pub fn pvc_munge_name(argo_name: &str) -> String {
-    munge_host_path(argo_name)
-}
-
-/// In-pod mount path for a `Pvc::MOUNT_PATH` const. Mirrors what the
-/// proc macros bake at attribute-expand time.
-pub fn pvc_mount_path(argo_name: &str) -> String {
-    format!("{ATHENA_PVCS_DIR}/{}", pvc_munge_name(argo_name))
-}
-
-/// K8s Volume name for a PVC mount. `pvc-` (4) + 16 hex = 20 chars,
-/// fits DNS-1123 (63-char limit).
-pub fn pvc_volume_name(argo_name: &str) -> String {
-    format!("pvc-{}", pvc_munge_name(argo_name))
-}
+// PVC name / mount-path / volume-name derivers live in
+// `api::munge` — re-exported so existing callers
+// (`cargo_athena_core::pvc_mount_path` etc.) keep working.
+pub use crate::api::munge::{pvc_mount_path, pvc_volume_name};
 
 // ---- athena.toml ---------------------------------------------------------
 
@@ -802,20 +763,11 @@ pub const ATHENA_DIR: &str = "/athena";
 /// built-in tarball auto-extraction (no `archive: none`, no `tar` in
 /// the main container's image — see `container_delivery`).
 pub const ATHENA_BIN_DIR: &str = "/athena/bin";
-/// Where every `host!`-declared hostPath gets mounted inside the
-/// container. Mounting at the host's own path (e.g. `host!("/")` →
-/// `/`) would overlay-mount the host filesystem on top of the image
-/// — a footgun and a security risk. Routing through this directory
-/// makes `host!` safe-by-construction; the `host_mount` `#[container]`
-/// attr is the explicit escape hatch for same-path / chosen-path
-/// mounts.
-pub const ATHENA_MOUNTS_DIR: &str = "/athena/mounts";
-/// In-pod root for `pvc!(Type)` mounts. Like [`ATHENA_MOUNTS_DIR`],
-/// each mount lands at `<this>/<hash-of-argo-name>` — a safe-by-
-/// construction path the macro picks, NEVER at the user's chosen
-/// location, so a PVC declared in two crates with the same explicit
-/// name can't accidentally overlay each other's directories.
-pub const ATHENA_PVCS_DIR: &str = "/athena/pvcs";
+// In-pod roots for `host!` / `pvc!` mounts live in `api::munge`
+// (proc-macro and emit both reference them). Re-exported here so
+// every existing `cargo_athena_core::ATHENA_*_DIR` caller keeps
+// working.
+pub use crate::api::munge::{ATHENA_MOUNTS_DIR, ATHENA_PVCS_DIR};
 /// Where a *parameter-output* `#[container]` body writes its serialized
 /// return value (read by the template's
 /// `outputs.parameters.return.valueFrom.path`). The bootstrap exports
@@ -1924,64 +1876,13 @@ pub fn wrap_workflow_template(name: String, inner: api::Template) -> api::Workfl
     }
 }
 
-/// kebab-case an Argo identifier (DNS-1123-ish) from a Rust ident.
-/// Lowercases, swaps `_` for `-`, and trims leading/trailing `-` so that
-/// idiomatic Rust names like `fn _unused_helper()` or `fn foo_()` don't
-/// produce DNS-1123-invalid Argo template names (`-foo` / `foo-`, both
-/// rejected by k8s). Internal `__` becomes `--` and is kept (valid).
-pub fn kebab(s: &str) -> String {
-    let s = s.replace('_', "-").to_ascii_lowercase();
-    s.trim_matches('-').to_string()
-}
-
-/// Hash a `host!` path literal verbatim into a DNS-1123-safe label
-/// suffix. Shared between [`volume_name`] and [`host_mount_path`] so
-/// the Volume name and the in-container mount path always agree on
-/// the same suffix for a given input string.
-///
-/// **No canonicalization** — `host!("/var/lib")` and `host!("//var/lib")`
-/// produce two distinct Volumes (even though Linux resolves them to
-/// the same inode). If the user wrote two distinct literals, they get
-/// two distinct mounts; letting k8s / Linux handle path resolution
-/// keeps our logic simple and removes a category of "did athena
-/// silently merge my mounts?" surprises.
-///
-/// The hash is **FNV-1a 64-bit, fixed initial state**, emitted as 16
-/// lowercase hex chars. Determinism is load-bearing: emit-time
-/// ([`volume_name`]/[`host_mount_path`] called from `Template::build`)
-/// and the in-pod literal that the proc macros bake into `host!`
-/// expansions both hash the same literal in two different process
-/// invocations (`cargo athena emit` and `rustc` at user-build time);
-/// `std::hash::DefaultHasher` uses a per-process random seed and
-/// would silently mismatch.
-///
-/// 16 hex chars = 64 bits. `host-` (5) + 16 = 21-char Volume name,
-/// comfortably under DNS-1123's 63-char label limit and collision-
-/// resistant well past any plausible per-binary `host!` count.
-fn munge_host_path(path: &str) -> String {
-    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-    let mut h = FNV_OFFSET;
-    for b in path.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(FNV_PRIME);
-    }
-    format!("{h:016x}")
-}
-
-fn volume_name(path: &str) -> String {
-    format!("host-{}", munge_host_path(path))
-}
-
-/// In-container mount path for a `host!("/p")` declaration. Always
-/// rooted at [`ATHENA_MOUNTS_DIR`] — `host!` cannot land at the host's
-/// own path (see [`ATHENA_MOUNTS_DIR`] for why). The proc macros'
-/// [`host_mount_path` mirror](../../cargo-athena-macros/src/utils.rs)
-/// emits the same string at expansion time, and `munge_known_value
-/// _pins_algorithm` (below) pins both sides to the same FNV-1a output.
-pub fn host_mount_path(host_path: &str) -> String {
-    format!("{ATHENA_MOUNTS_DIR}/{}", munge_host_path(host_path))
-}
+// `kebab` / `host_mount_path` / `host_volume_name` live in
+// `api::munge`. The proc-macro and emit-side both call into the
+// single source. Re-exported here so existing
+// `cargo_athena_core::kebab` / `host_mount_path` call sites keep
+// resolving.
+use crate::api::munge::host_volume_name as volume_name;
+pub use crate::api::munge::{host_mount_path, kebab};
 
 /// `volumes` + `volumeMounts` for a set of hostPaths (from `host!`).
 /// Each mounts at [`host_mount_path`] (`/athena/mounts/<munged>`),
@@ -2217,179 +2118,4 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
     let with_workflow = std::env::var_os("CARGO_ATHENA_WITH_WORKFLOW").is_some_and(|v| v == "1");
     let ctx = BuildCtx::collect(krate, version, bin);
     print!("{}", collector.emit::<E>(&ctx, with_workflow));
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // ---- kebab: Rust ident → DNS-1123-ish Argo name ---------------------
-
-    #[test]
-    fn kebab_lowercases_and_hyphenates() {
-        assert_eq!(kebab("run_a_container"), "run-a-container");
-        assert_eq!(kebab("RunFoo"), "runfoo");
-    }
-
-    #[test]
-    fn kebab_preserves_digits() {
-        // DNS-1123 allows `[a-z0-9]`; digits stay as-is. Rust forbids
-        // a leading digit, so we only need to handle internal/trailing.
-        assert_eq!(kebab("fetch2"), "fetch2");
-        assert_eq!(kebab("step_1_of_3"), "step-1-of-3");
-        assert_eq!(kebab("v1_handler"), "v1-handler");
-    }
-
-    #[test]
-    fn kebab_trims_leading_and_trailing_underscores() {
-        // `fn _unused_helper()` is idiomatic Rust (unused-prefix); the
-        // kebab MUST trim the leading `-` so make_argo_name doesn't
-        // produce `<crate>--unused-helper` (cosmetically ugly, and
-        // crate-name-dependent corner cases could land at a literal
-        // leading `-`). `fn foo_()` would yield `foo-` (k8s rejects
-        // trailing `-`) — trim catches it.
-        assert_eq!(kebab("_unused"), "unused");
-        assert_eq!(kebab("foo_"), "foo");
-        assert_eq!(kebab("_wrapped_"), "wrapped");
-        assert_eq!(kebab("__double_"), "double");
-    }
-
-    #[test]
-    fn kebab_keeps_internal_double_underscore() {
-        // Internal `__` lowers to `--`, which is legal DNS-1123. Don't
-        // collapse — round-trip back to the source ident is preserved
-        // (`foo__bar` ↔ `foo--bar`) so two different Rust idents can't
-        // collide in the Argo namespace.
-        assert_eq!(kebab("foo__bar"), "foo--bar");
-        assert_eq!(kebab("a___b"), "a---b");
-    }
-
-    // ---- volume_name / host_mount_path (host! → k8s volume) -------------
-
-    #[test]
-    fn munge_is_deterministic_16_hex() {
-        // The hash MUST be deterministic across calls (and across
-        // process invocations — emit-side and run-side hash the same
-        // literal in two different `cargo athena` / in-pod runs and
-        // must agree). 16 lowercase hex chars; structurally pinned.
-        let m = munge_host_path("/var/lib");
-        assert_eq!(m.len(), 16);
-        assert!(
-            m.chars()
-                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
-        );
-        assert_eq!(m, munge_host_path("/var/lib"));
-    }
-
-    #[test]
-    fn munge_known_value_pins_algorithm() {
-        // FNV-1a 64-bit with the standard offset/prime, lowercase hex.
-        // Pinning a known input → known output so an accidental swap to
-        // a different hash function fails LOUD here, not silently in
-        // every user's cluster (emit-side and run-side would suddenly
-        // mismatch). Bump this intentionally only.
-        assert_eq!(munge_host_path("/var/lib"), "5b8d11771a6f946b");
-    }
-
-    #[test]
-    fn distinct_literals_produce_distinct_volumes() {
-        // The whole point of the verbatim-hash design: NO
-        // canonicalization. Two strings that Linux resolves identically
-        // MUST hash to different Volumes — the user wrote two distinct
-        // literals, k8s handles the resolution at mount time.
-        assert_ne!(munge_host_path("/var/lib"), munge_host_path("//var/lib"));
-        assert_ne!(munge_host_path("/var/lib"), munge_host_path("/var/lib/"));
-        assert_ne!(munge_host_path("/var/lib"), munge_host_path("/var//lib"));
-    }
-
-    #[test]
-    fn volume_name_fits_dns_1123() {
-        // k8s Volume names are DNS-1123 LABELS: max 63 chars,
-        // `[a-z0-9]([-a-z0-9]*[a-z0-9])?`. `host-` (5) + 16-hex hash =
-        // 21 chars total, so any input fits regardless of path length.
-        for path in [
-            "/",
-            "/etc/myapp",
-            "/very/deeply/nested/path/that/keeps/going/forever/and/ever/and/ever",
-            "/has spaces and weird chars: !@#$%",
-        ] {
-            let n = volume_name(path);
-            assert!(n.len() <= 63, "{n:?} exceeds DNS-1123 label limit");
-            assert_eq!(n.len(), 21); // host- + 16 hex
-            assert!(n.starts_with("host-"));
-            assert!(n.chars().next().unwrap().is_ascii_alphabetic());
-            assert!(
-                n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
-                "{n:?} contains non-DNS-1123 chars"
-            );
-        }
-    }
-
-    #[test]
-    fn host_mount_path_agrees_with_volume_name_suffix() {
-        // The in-pod mount path and the Volume name MUST agree on the
-        // munged suffix (else the VolumeMount wouldn't bind). Both go
-        // through munge_host_path; this test pins the contract.
-        for path in [
-            "/etc/myapp",
-            "/var/lib/extra",
-            "/srv/123/data",
-            "/var/log/app.1",
-            "/",
-            "//double-slash",
-        ] {
-            let v = volume_name(path);
-            let m = host_mount_path(path);
-            let suffix = v.strip_prefix("host-").unwrap();
-            assert_eq!(
-                m,
-                format!("{ATHENA_MOUNTS_DIR}/{suffix}"),
-                "path {path:?} produced mismatched volume + mount"
-            );
-        }
-    }
-
-    // ---- secret_env_name (k8s Secret (name, key) → pod env var) ---------
-
-    #[test]
-    fn secret_env_name_munges_consistently() {
-        // Both halves uppercased; non-alphanumerics → `_`; halves
-        // separated by `__` so the two stay distinguishable. The
-        // emit-side and run-side both go through this fn — this test
-        // pins the contract (drift would silently break `secret!`).
-        assert_eq!(
-            secret_env_name("my-secret", "db.password"),
-            "ATHENA_SEC_MY_SECRET__DB_PASSWORD",
-        );
-        assert_eq!(secret_env_name("simple", "key"), "ATHENA_SEC_SIMPLE__KEY",);
-        // Already-uppercase / digits: pass through.
-        assert_eq!(
-            secret_env_name("API_v2", "TOKEN_1"),
-            "ATHENA_SEC_API_V2__TOKEN_1",
-        );
-    }
-
-    #[test]
-    fn secret_env_name_is_valid_posix_env_var() {
-        // POSIX env var names: `[a-zA-Z_][a-zA-Z_0-9]*`. The output of
-        // secret_env_name must always satisfy this regardless of what
-        // the user passed (any non-alphanumeric → `_`, prefix is
-        // `ATHENA_SEC_`, so the first-char rule is always met).
-        let valid_env = |s: &str| {
-            let mut cs = s.chars();
-            cs.next()
-                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-                && cs.all(|c| c.is_ascii_alphanumeric() || c == '_')
-        };
-        for (name, key) in [
-            ("foo", "bar"),
-            ("my-secret", "db.password"),
-            ("name with spaces", "key/with/slashes"),
-            ("-leading-dash", "trailing.dot."),
-            ("123-numeric-start", "ok"),
-        ] {
-            let env = secret_env_name(name, key);
-            assert!(valid_env(&env), "{env} is not a valid POSIX env var");
-        }
-    }
 }

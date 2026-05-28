@@ -10,6 +10,9 @@ description = "Proc macros for cargo-athena: #[workflow], #[container], #[fragme
 proc-macro = true
 
 [dependencies]
+# Pure name/path/env-var derivers (`munge` module). Proc-macro and
+# emit-side both call into here so the two never drift.
+cargo-athena-api = { workspace = true }
 syn = { workspace = true }
 quote = { workspace = true }
 proc-macro2 = { workspace = true }
