@@ -1,0 +1,5 @@
+error: `#[ephemeral_pvc]` / `#[external_pvc]` requires a unit struct (no fields): write `pub struct MyPvc;`
+ --> tests/ui/pvc_not_unit_struct.rs:3:12
+  |
+3 | pub struct MyPvc {
+  |            ^^^^^

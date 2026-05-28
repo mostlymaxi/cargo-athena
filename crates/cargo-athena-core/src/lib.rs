@@ -190,6 +190,31 @@ macro_rules! secret {
     };
 }
 
+/// Mount a PVC of type `T` (a unit struct that implements
+/// [`Pvc`] via `#[ephemeral_pvc]` or `#[external_pvc]`) on this
+/// container's pod, and evaluate to the (already-mounted) path —
+/// `&'static Path`, picked deterministically from the type's
+/// [`Pvc::MOUNT_PATH`] so emit-side and in-pod always agree.
+///
+/// Same gating as [`host!`]: only valid inside a
+/// `#[cargo_athena::container]` or `#[cargo_athena::fragment]`. The
+/// `macro_rules!` form below emits `compile_error!` AND a
+/// type-correct stub so rust-analyzer can still infer `&'static Path`
+/// at the call site before the attribute macro expands.
+#[macro_export]
+macro_rules! pvc {
+    ($t:path) => {{
+        ::core::compile_error!(
+            "`pvc!` may only be used directly inside a \
+             `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn"
+        );
+        ::std::path::Path::new(<$t as $crate::Pvc>::MOUNT_PATH)
+    }};
+    ($($t:tt)*) => {
+        ::core::compile_error!("`pvc!` takes a single PVC type: pvc!(MyPvc)")
+    };
+}
+
 /// Same as [`secret!`] but returns `Option<String>` and emits
 /// `optional: true` on the Argo `secretKeyRef` — Argo skips the env
 /// entry instead of failing pod-start when the secret/key is missing.
@@ -524,6 +549,108 @@ pub trait Template {
     fn collect(out: &mut Collector);
 }
 
+/// PVC lifecycle, exposed via [`Pvc::LIFECYCLE`].
+///
+/// * `Ephemeral` — athena emits a `WorkflowSpec.volumeClaimTemplates[]`
+///   entry for this PVC on the submitted root; Argo creates a fresh
+///   PVC at workflow start and deletes it at workflow end. The Pod
+///   `claimName` is the [`Pvc::ARGO_NAME`].
+/// * `External` — pre-existing PVC; athena emits nothing at the
+///   workflow-spec level, just per-pod `volumes` + `volumeMounts`. The
+///   Pod `claimName` is [`Pvc::CLAIM_NAME`] (the existing PVC's name
+///   in the workflow's namespace).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PvcLifecycle {
+    Ephemeral,
+    External,
+}
+
+/// The cross-crate identity of a PVC, implemented by the unit struct
+/// `#[ephemeral_pvc]` / `#[external_pvc]` generates.
+///
+/// Same wormhole pattern as [`Template`]: callers reference the type
+/// (`<BuildCache as Pvc>::ARGO_NAME`), so name resolution is done by
+/// the compiler — collision-proof across crates, and the reference
+/// itself force-links the defining crate (incl. its `inventory::
+/// submit!` of [`PvcReg`], which the emit-side reads to materialize
+/// the full PVC spec by name).
+///
+/// Many of the consts below are lifecycle-conditional: `Ephemeral`
+/// uses `SIZE`/`ACCESS_MODES`/`STORAGE_CLASS_NAME`; `External` uses
+/// `CLAIM_NAME`/`READ_ONLY`. The attribute macros fill in only the
+/// fields meaningful for the chosen lifecycle and leave the rest at
+/// their `""`/empty defaults.
+pub trait Pvc {
+    /// Globally-unique Argo resource name (`<crate>-<type-kebab>` by
+    /// default). Identifies the PVC across the wormhole AND drives
+    /// the in-pod mount path hash ([`MOUNT_PATH`](Self::MOUNT_PATH))
+    /// so emit and run agree.
+    const ARGO_NAME: &'static str;
+    /// `Ephemeral` or `External`.
+    const LIFECYCLE: PvcLifecycle;
+    /// `/athena/pvcs/<fnv-hash-of-ARGO_NAME>`. Stable across emit and
+    /// run by construction (same hash both sides). Hidden from users:
+    /// `pvc!(Type)` returns `&'static Path` pointing here.
+    const MOUNT_PATH: &'static str;
+    /// `Ephemeral`: storage request like `"10Gi"`. `""` for external.
+    const SIZE: &'static str = "";
+    /// `Ephemeral`: K8s `accessModes`, e.g.
+    /// `&["ReadWriteOnce"]` or `&["ReadWriteMany"]`. `&[]` for external.
+    const ACCESS_MODES: &'static [&'static str] = &[];
+    /// `Ephemeral`: K8s `StorageClassName`. `""` = use cluster default.
+    const STORAGE_CLASS_NAME: &'static str = "";
+    /// `External`: the existing PVC's name in the workflow's
+    /// namespace. `""` for ephemeral (Argo creates with `ARGO_NAME`).
+    const CLAIM_NAME: &'static str = "";
+    /// `External`: mount this PVC read-only on every consumer. Bakes
+    /// into the volume source, so it's all-or-nothing per declaration.
+    /// `false` for ephemeral.
+    const READ_ONLY: bool = false;
+}
+
+/// Inventory-registered PVC spec, submitted by every `#[ephemeral_pvc]`
+/// and `#[external_pvc]`. [`BuildCtx::collect`] loads them all into a
+/// `argo_name → PvcReg` map so emit-side code can materialize the full
+/// PVC spec from just a name string (which is what fragment closures
+/// propagate).
+pub struct PvcReg {
+    pub argo_name: &'static str,
+    pub mount_path: &'static str,
+    pub lifecycle: PvcLifecycle,
+    pub size: &'static str,
+    pub access_modes: &'static [&'static str],
+    pub storage_class_name: &'static str,
+    pub claim_name: &'static str,
+    pub read_only: bool,
+}
+inventory::collect!(PvcReg);
+
+/// `host!`-style FNV-1a hash of a PVC's argo name → 16 lowercase hex
+/// chars. Used to derive a stable mount path (`/athena/pvcs/<hash>`)
+/// and a DNS-1123-safe Volume name (`pvc-<hash>`).
+///
+/// Determinism is load-bearing for the same reason as
+/// [`munge_host_path`]: emit-side (here) and the proc-macro mirror in
+/// `cargo-athena-macros` (which bakes the mount path into the `Pvc::
+/// MOUNT_PATH` const at expansion time) hash the same argo name in
+/// two different process invocations. Drift = silent volume / mount
+/// mismatch in user pods.
+pub fn pvc_munge_name(argo_name: &str) -> String {
+    munge_host_path(argo_name)
+}
+
+/// In-pod mount path for a `Pvc::MOUNT_PATH` const. Mirrors what the
+/// proc macros bake at attribute-expand time.
+pub fn pvc_mount_path(argo_name: &str) -> String {
+    format!("{ATHENA_PVCS_DIR}/{}", pvc_munge_name(argo_name))
+}
+
+/// K8s Volume name for a PVC mount. `pvc-` (4) + 16 hex = 20 chars,
+/// fits DNS-1123 (63-char limit).
+pub fn pvc_volume_name(argo_name: &str) -> String {
+    format!("pvc-{}", pvc_munge_name(argo_name))
+}
+
 // ---- athena.toml ---------------------------------------------------------
 
 /// `athena.toml` — required by `cargo athena` at emit time. Mirrors the
@@ -683,6 +810,12 @@ pub const ATHENA_BIN_DIR: &str = "/athena/bin";
 /// attr is the explicit escape hatch for same-path / chosen-path
 /// mounts.
 pub const ATHENA_MOUNTS_DIR: &str = "/athena/mounts";
+/// In-pod root for `pvc!(Type)` mounts. Like [`ATHENA_MOUNTS_DIR`],
+/// each mount lands at `<this>/<hash-of-argo-name>` — a safe-by-
+/// construction path the macro picks, NEVER at the user's chosen
+/// location, so a PVC declared in two crates with the same explicit
+/// name can't accidentally overlay each other's directories.
+pub const ATHENA_PVCS_DIR: &str = "/athena/pvcs";
 /// Where a *parameter-output* `#[container]` body writes its serialized
 /// return value (read by the template's
 /// `outputs.parameters.return.valueFrom.path`). The bootstrap exports
@@ -1068,6 +1201,11 @@ pub struct FragmentReg {
     /// `(secret_name, key, optional)` triples from this fragment's
     /// `secret!`/`secret_opt!` declarations.
     pub secrets: &'static [(&'static str, &'static str, bool)],
+    /// Argo names of `Pvc` types this fragment uses directly via
+    /// `pvc!(Type)`. Container build-side resolves the transitive
+    /// closure via [`BuildCtx::resolved_pvc_names`] (same callee
+    /// walker as `resolved_host_paths`).
+    pub pvc_argo_names: &'static [&'static str],
     pub callees: &'static [&'static str],
 }
 inventory::collect!(FragmentReg);
@@ -1075,6 +1213,13 @@ inventory::collect!(FragmentReg);
 /// Fragment registry snapshot, passed to container `build`s.
 pub struct BuildCtx {
     fragments: HashMap<&'static str, &'static FragmentReg>,
+    /// `argo_name → PvcReg` of every PVC type linked into this
+    /// binary. Populated from `inventory::iter::<PvcReg>` at
+    /// [`BuildCtx::collect`] time. Used by emit-side code to
+    /// materialize a full PVC spec (size, access_modes, claim_name,
+    /// …) from just an argo name — which is what fragment closures
+    /// propagate through.
+    pvcs: HashMap<&'static str, &'static PvcReg>,
     config: AthenaConfig,
     /// Fully-resolved S3 object key for this binary's tarball
     /// (`{crate}/{version}/{bin}.tar.gz`). Built once by
@@ -1095,8 +1240,13 @@ impl BuildCtx {
         for f in inventory::iter::<FragmentReg> {
             fragments.insert(f.rust_name, f);
         }
+        let mut pvcs = HashMap::new();
+        for p in inventory::iter::<PvcReg> {
+            pvcs.insert(p.argo_name, p);
+        }
         Self {
             fragments,
+            pvcs,
             config: AthenaConfig::load(),
             artifact_key: format!("{krate}/{version}/{bin}.tar.gz"),
         }
@@ -1160,6 +1310,59 @@ impl BuildCtx {
     /// Output artifact ports: own `save_artifact*!`s ∪ fragment closure.
     pub fn resolved_out_artifacts(&self, own: &[&str], callees: &[&str]) -> Vec<String> {
         self.resolved(own, callees, |f| f.out_artifacts)
+    }
+
+    /// PVCs referenced directly via `pvc!(Type)` ∪ the transitive
+    /// closure through `#[fragment]` callees. Each entry is a
+    /// [`PvcReg::argo_name`]; look up the full spec in
+    /// [`BuildCtx::pvc`] (or just call [`Self::pvc_volumes`]).
+    pub fn resolved_pvc_names(&self, own: &[&str], callees: &[&str]) -> Vec<String> {
+        self.resolved(own, callees, |f| f.pvc_argo_names)
+    }
+
+    /// Look up a PVC's full spec by argo name (`""` if unknown — the
+    /// macros only ever pass names backed by an actual `Pvc` impl, so
+    /// `None` here means a wormhole link bug).
+    pub fn pvc(&self, argo_name: &str) -> Option<&'static PvcReg> {
+        self.pvcs.get(argo_name).copied()
+    }
+
+    /// `(volumes, volume_mounts)` for a resolved PVC name list (the
+    /// output of [`Self::resolved_pvc_names`]). Each name produces
+    /// one `Volume { persistent_volume_claim: { claim_name } }` plus
+    /// one matching `VolumeMount` at the PVC's stable
+    /// `/athena/pvcs/<hash>` mount path.
+    ///
+    /// For an `Ephemeral` PVC the volume's `claim_name` is the
+    /// PVC's argo name itself — Argo creates the PVC under that name
+    /// via the workflow spec's `volumeClaimTemplates`. For
+    /// `External` PVCs the `claim_name` is the user-provided
+    /// pre-existing PVC name.
+    pub fn pvc_volumes(&self, names: &[String]) -> (Vec<api::Volume>, Vec<api::VolumeMount>) {
+        let mut vols = Vec::new();
+        let mut mounts = Vec::new();
+        for n in names {
+            let Some(reg) = self.pvc(n) else { continue };
+            let vol_name = pvc_volume_name(reg.argo_name);
+            let claim = match reg.lifecycle {
+                PvcLifecycle::Ephemeral => reg.argo_name.to_string(),
+                PvcLifecycle::External => reg.claim_name.to_string(),
+            };
+            vols.push(api::Volume {
+                name: vol_name.clone(),
+                persistent_volume_claim: Some(api::PersistentVolumeClaimVolumeSource {
+                    claim_name: claim,
+                    read_only: reg.read_only,
+                }),
+                ..Default::default()
+            });
+            mounts.push(api::VolumeMount {
+                name: vol_name,
+                mount_path: reg.mount_path.to_string(),
+                read_only: reg.read_only,
+            });
+        }
+        (vols, mounts)
     }
 
     /// Env-var-sourced K8s secrets: own `secret!`/`secret_opt!` decls
@@ -1509,7 +1712,7 @@ impl Collector {
         for t in tpls.iter_mut() {
             let name = name_of(t);
             if let Some(spec) = t.spec.as_mut() {
-                self.stamp_spec(&name, spec);
+                self.stamp_spec(&name, spec, ctx);
             }
         }
         tpls
@@ -1524,7 +1727,15 @@ impl Collector {
     /// attribute means adding one map field, one populate line in
     /// `add::<T>()`, and one `if let Some` block here — both
     /// stamping sites pick it up automatically.
-    fn stamp_spec(&self, name: &str, spec: &mut api::WorkflowSpec) {
+    ///
+    /// Also overlays `spec.volume_claim_templates` from every
+    /// `#[ephemeral_pvc]` reachable through inventory (binary-wide).
+    /// Argo only honors the submitted root's spec, so over-inclusion
+    /// on non-root WTs is inert — the bloat is the cost of a simple
+    /// inventory iteration vs. tracking per-WT reachability. (See
+    /// the followup item in the PVC PR notes for the precision
+    /// improvement.)
+    fn stamp_spec(&self, name: &str, spec: &mut api::WorkflowSpec, ctx: &BuildCtx) {
         if let Some(handler) = self.exits.get(name) {
             spec.hooks
                 .insert("exit".to_string(), exit_hook_ref(handler));
@@ -1585,6 +1796,49 @@ impl Collector {
         if let Some(p) = self.parallelism_if_root.get(name) {
             spec.parallelism = Some(*p);
         }
+        // Every `#[ephemeral_pvc]` linked into this binary becomes a
+        // `spec.volume_claim_templates` entry on every emitted WT.
+        // Argo creates each PVC at workflow start (with
+        // `metadata.name = <argo-name>`, the same `claim_name` each
+        // pod's `volumes[]` references) and deletes it at workflow
+        // end.
+        //
+        // Caveat: this over-includes for multi-workflow binaries.
+        // Submitting workflow A in a binary that also defines an
+        // unrelated workflow B causes Argo to create B's PVCs too,
+        // since both are linked into the same binary and stamped on
+        // every WT. The simplest fix is keeping one workflow per
+        // binary (the recommended layout). Per-WT precision is a
+        // possible follow-up if this hurts in practice.
+        //
+        // Sorted by argo name for deterministic emit.
+        let mut ephemeral: Vec<&PvcReg> = ctx
+            .pvcs
+            .values()
+            .copied()
+            .filter(|r| r.lifecycle == PvcLifecycle::Ephemeral)
+            .collect();
+        ephemeral.sort_by_key(|r| r.argo_name);
+        for reg in ephemeral {
+            let mut requests = std::collections::BTreeMap::new();
+            requests.insert("storage".to_string(), reg.size.to_string());
+            spec.volume_claim_templates
+                .push(api::PersistentVolumeClaim {
+                    metadata: Some(api::ObjectMeta {
+                        name: reg.argo_name.to_string(),
+                        ..Default::default()
+                    }),
+                    spec: Some(api::PersistentVolumeClaimSpec {
+                        access_modes: reg.access_modes.iter().map(|s| s.to_string()).collect(),
+                        resources: Some(api::VolumeResourceRequirements { requests }),
+                        storage_class_name: reg.storage_class_name.to_string(),
+                    }),
+                });
+        }
+        // `name` carries no per-WT information yet (over-inclusion
+        // doc'd above). Keep the param so a future precision pass
+        // can read it without touching the call sites.
+        let _ = name;
     }
 
     pub fn emit<E: Template>(&self, ctx: &BuildCtx, with_workflow: bool) -> String {
@@ -1612,7 +1866,7 @@ impl Collector {
             service_account_name: ctx.config().defaults.service_account.clone(),
             ..Default::default()
         };
-        self.stamp_spec(E::ARGO_NAME, &mut spec);
+        self.stamp_spec(E::ARGO_NAME, &mut spec, ctx);
         let wf = api::Workflow {
             api_version: api::API_VERSION.to_string(),
             kind: api::KIND_WORKFLOW.to_string(),

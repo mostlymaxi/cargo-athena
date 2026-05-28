@@ -202,6 +202,12 @@ argo! {
         /// `<= 0` at compile time (would otherwise be rejected by the
         /// API server at submit anyway).
         pub parallelism: Option<i64>,
+        /// PVCs Argo creates per workflow run and deletes when it
+        /// finishes. One entry per `#[ephemeral_pvc]` type reachable
+        /// from the submitted root. Each pod mounts them via
+        /// `claimName: <metadata.name>`. Root-only by Argo's design
+        /// (only the submitted Workflow's spec is honored).
+        pub volume_claim_templates: Vec<PersistentVolumeClaim>,
     }
 
     /// K8s `Toleration`: tolerate a node taint. Operator ∈
@@ -514,6 +520,11 @@ argo! {
         pub name: String,
         pub host_path: Option<HostPathVolumeSource>,
         pub empty_dir: Option<EmptyDirVolumeSource>,
+        /// Mount a PersistentVolumeClaim. The `claim_name` is either a
+        /// pre-existing PVC's name (`#[external_pvc]`) or the name of a
+        /// transient PVC Argo creates for the run via
+        /// `WorkflowSpec.volumeClaimTemplates[]` (`#[ephemeral_pvc]`).
+        pub persistent_volume_claim: Option<PersistentVolumeClaimVolumeSource>,
     }
 
     pub struct HostPathVolumeSource {
@@ -524,10 +535,42 @@ argo! {
     /// Present (and empty) => a pod-scoped scratch dir (`emptyDir: {}`).
     pub struct EmptyDirVolumeSource {}
 
+    pub struct PersistentVolumeClaimVolumeSource {
+        pub claim_name: String,
+        pub read_only: bool,
+    }
+
     pub struct VolumeMount {
         pub name: String,
         pub mount_path: String,
         pub read_only: bool,
+    }
+
+    /// `WorkflowSpec.volumeClaimTemplates[]` entry: a PVC Argo
+    /// dynamically creates per workflow run (and deletes when it
+    /// finishes). Athena emits one per `#[ephemeral_pvc]` reachable
+    /// from the submitted root.
+    pub struct PersistentVolumeClaim {
+        pub metadata: Option<ObjectMeta>,
+        pub spec: Option<PersistentVolumeClaimSpec>,
+    }
+
+    pub struct PersistentVolumeClaimSpec {
+        /// `["ReadWriteOnce" | "ReadWriteMany" | "ReadOnlyMany" |
+        /// "ReadWriteOncePod"]`. Required by the K8s schema for a
+        /// dynamically provisioned claim.
+        pub access_modes: Vec<String>,
+        pub resources: Option<VolumeResourceRequirements>,
+        /// `""` means "use the cluster's default StorageClass".
+        pub storage_class_name: String,
+    }
+
+    /// `PersistentVolumeClaimSpec.resources` — only `requests.storage`
+    /// matters for a PVC; we don't model `limits` here. The k8s API
+    /// field is `resources: ResourceRequirements`; this is a trimmed
+    /// shape that serializes identically.
+    pub struct VolumeResourceRequirements {
+        pub requests: BTreeMap<String, String>,
     }
 }
 

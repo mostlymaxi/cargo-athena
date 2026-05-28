@@ -1,5 +1,5 @@
 error: `host!`/`load_artifact*!`/`save_artifact*!`/`secret*!`/`pvc!` cannot be used in a #[workflow]: a workflow is a DAG, not a pod. Declare them in the #[container] (or a #[fragment] it calls) that runs in-cluster.
- --> tests/ui/wf_secret.rs:6:4
+ --> tests/ui/pvc_in_workflow.rs:6:4
   |
-6 | fn pipeline() {
-  |    ^^^^^^^^
+6 | fn wf() {
+  |    ^^

@@ -56,6 +56,16 @@ spec:
     - name: athena-work
       emptyDir: {}
     serviceAccountName: default
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -115,6 +125,16 @@ spec:
     - name: athena-work
       emptyDir: {}
     serviceAccountName: default
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -174,6 +194,16 @@ spec:
     - name: athena-work
       emptyDir: {}
     serviceAccountName: default
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -231,6 +261,16 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-pipeline-nested-if0
           template: cargo-athena-example-smoke-pipeline-nested-if0
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -263,6 +303,16 @@ spec:
           name: cargo-athena-example-smoke-pipeline-nested-if0-arm1
           template: cargo-athena-example-smoke-pipeline-nested-if0-arm1
         when: '!(({{inputs.parameters.__athena_cond_0}} > 1))'
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -285,6 +335,16 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-note
           template: cargo-athena-example-smoke-note
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -307,3 +367,13 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-note
           template: cargo-athena-example-smoke-note
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd

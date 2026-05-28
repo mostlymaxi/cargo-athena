@@ -39,6 +39,7 @@ mod container;
 mod fragment;
 mod ghost;
 mod node_tokens;
+mod pvc;
 mod utils;
 mod workflow;
 
@@ -63,4 +64,31 @@ pub fn workflow(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn fragment(attr: TokenStream, item: TokenStream) -> TokenStream {
     fragment::expand(attr, item)
+}
+
+/// Declare a transient (per-workflow-run) PersistentVolumeClaim type.
+/// Apply to a `pub struct Foo;` (unit struct, no fields, no
+/// generics); athena emits an `impl Pvc for Foo` and a
+/// `WorkflowSpec.volume_claim_templates[]` entry on every workflow in
+/// the binary, so Argo creates the PVC at run start and deletes it
+/// at run end. Mount with `pvc!(Foo)` inside a `#[container]` /
+/// `#[fragment]`.
+///
+/// Required args: `size = "<quantity>"`, `access_modes = ["..."]`.
+/// Optional: `storage_class = "..."`, `name = "<dns-1123>"`.
+#[proc_macro_attribute]
+pub fn ephemeral_pvc(attr: TokenStream, item: TokenStream) -> TokenStream {
+    pvc::expand_ephemeral(attr, item)
+}
+
+/// Declare a reference to a pre-existing PersistentVolumeClaim in
+/// the workflow's namespace. Apply to a `pub struct Foo;`. Mount
+/// with `pvc!(Foo)`. The PVC must already exist; athena emits no
+/// `volume_claim_templates` entry.
+///
+/// Required args: `claim_name = "<existing-pvc-name>"`. Optional:
+/// `read_only`, `name`.
+#[proc_macro_attribute]
+pub fn external_pvc(attr: TokenStream, item: TokenStream) -> TokenStream {
+    pvc::expand_external(attr, item)
 }

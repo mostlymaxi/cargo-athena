@@ -57,6 +57,16 @@ spec:
       emptyDir: {}
     serviceAccountName: default
     podSpecPatch: '{"containers":[{"name":"main","resources":{"limits":{"cpu":"{{=fromJSON(inputs.parameters[''cpu_limit''])}}","memory":"64Mi"}}}]}'
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -80,3 +90,13 @@ spec:
           name: cargo-athena-example-smoke-limited
           template: cargo-athena-example-smoke-limited
   podSpecPatch: '{"terminationGracePeriodSeconds":{{=fromJSON(workflow.parameters[''grace''])}}}'
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd

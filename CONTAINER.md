@@ -238,6 +238,7 @@ compile error.
 | `save_artifact_str!("key", text)` | same, as text | writes `impl AsRef<str>` |
 | `secret!("name", "key")` | a K8s Secret env on this container | `String` (panics if unset) |
 | `secret_opt!("name", "key")` | same, optional | `Option<String>` |
+| `pvc!(MyPvc)` | mount a PVC declared via `#[ephemeral_pvc]` / `#[external_pvc]` on this pod. | `&'static Path` (the mount path; use `path.join("file")`, etc.) |
 
 ```rust,ignore
 #[container]
@@ -264,6 +265,65 @@ Key properties:
 
 Used path-qualified (`cargo_athena::host!`) by convention so it
 doesn't require a `use` and the gating compile errors stay obvious.
+
+## PVCs
+
+Declare a PersistentVolumeClaim as a unit struct and mount it with
+`pvc!(Type)` inside any `#[container]` / `#[fragment]`. Two flavors:
+
+```rust,ignore
+// Per-workflow-run PVC. Argo creates it at workflow start and
+// deletes it at workflow end via `WorkflowSpec.volumeClaimTemplates`.
+#[cargo_athena::ephemeral_pvc(
+    size = "10Gi",
+    access_modes = ["ReadWriteMany"],
+    storage_class = "fast-ssd",  // optional; "" = cluster default
+)]
+pub struct BuildCache;
+
+// Pre-existing PVC reference. Athena emits nothing at the workflow
+// spec level - the PVC must already exist in the workflow's
+// namespace. `read_only` defaults to false.
+#[cargo_athena::external_pvc(claim_name = "shared-data-pvc", read_only = true)]
+pub struct SharedData;
+
+#[container]
+fn build() {
+    let cache: &Path = cargo_athena::pvc!(BuildCache);
+    let shared: &Path = cargo_athena::pvc!(SharedData);
+    std::fs::write(cache.join("result.bin"), b"...").unwrap();
+}
+```
+
+The mount path is deterministic but opaque (`/athena/pvcs/<fnv-hash>`).
+Use the returned `&'static Path` value; never hard-code the path.
+
+**Argo CRD requires `access_modes`** to be one of `ReadWriteOnce`,
+`ReadWriteMany`, `ReadOnlyMany`, `ReadWriteOncePod`. Multiple
+containers sharing the same `#[ephemeral_pvc]` concurrently need
+`ReadWriteMany`; `ReadWriteOnce` will fail the second pod's attach.
+
+### Over-inclusion caveat (v1)
+
+Every `#[ephemeral_pvc]` linked into your binary lands in
+`WorkflowSpec.volumeClaimTemplates` on every emitted WorkflowTemplate,
+so Argo creates ALL of them at workflow start - even ones the
+submitted root doesn't reach. Two ways this bites in practice:
+
+1. **Multi-workflow binaries** (multiple `#[workflow]`s in one bin
+   with disjoint PVCs): submitting workflow A creates B's PVCs too.
+2. **Library crates** declaring `#[ephemeral_pvc]`s: any downstream
+   crate that imports the library inherits the PVCs in its emitted
+   YAML, whether it uses them or not.
+
+Functionally harmless (the extra PVCs are created and immediately
+GC'd at workflow end), but it churns cluster resources. The simplest
+mitigation is one workflow per binary and keep `#[ephemeral_pvc]`
+declarations in the same crate as their consumer.
+
+A future PR may add per-WT reachability filtering; until then,
+prefer external PVCs (managed out-of-band) for PVCs whose lifetimes
+extend beyond a single workflow run.
 
 ## Async `#[container]`
 

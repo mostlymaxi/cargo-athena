@@ -35,11 +35,12 @@ pub use cargo_athena_core::*;
 // path, env var name) at expansion time and emit a direct `rt::*`
 // call with the pre-baked literals.
 pub use cargo_athena_core::{
-    host, load_artifact, load_artifact_str, save_artifact, save_artifact_str, secret, secret_opt,
+    host, load_artifact, load_artifact_str, pvc, save_artifact, save_artifact_str, secret,
+    secret_opt,
 };
 
 // Attribute macros.
-pub use cargo_athena_macros::{container, fragment, workflow};
+pub use cargo_athena_macros::{container, ephemeral_pvc, external_pvc, fragment, workflow};
 
 /// User-facing entrypoint. Captures the calling binary's identity
 /// (`CARGO_PKG_NAME`/`CARGO_PKG_VERSION`/`CARGO_BIN_NAME`) at the user

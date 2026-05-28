@@ -723,6 +723,47 @@ pub fn pipeline_pod_spec_patch(grace: String) {
     limited(grace);
 }
 
+// --- PVCs (ephemeral + external) -------------------------------------------
+
+/// Per-workflow-run PVC. `#[ephemeral_pvc]` puts an entry in
+/// `WorkflowSpec.volumeClaimTemplates`; Argo creates the PVC at run
+/// start and deletes it at run end. Each pod that uses it gets a
+/// `volumes[].persistentVolumeClaim.claimName = <argo_name>` entry.
+#[cargo_athena::ephemeral_pvc(size = "10Gi", access_modes = ["ReadWriteMany"], storage_class = "fast-ssd")]
+pub struct BuildCache;
+
+/// Pre-existing PVC reference. `#[external_pvc]` only emits per-pod
+/// `volumes` (claim_name = the existing PVC's name); nothing at
+/// workflow-spec level. `read_only = true` mounts RO on every consumer.
+#[cargo_athena::external_pvc(claim_name = "shared-data-pvc", read_only = true)]
+pub struct SharedData;
+
+#[container]
+pub fn pvc_writer() {
+    let scratch = cargo_athena::pvc!(BuildCache);
+    let shared = cargo_athena::pvc!(SharedData);
+    println!(
+        "writer scratch={} shared={}",
+        scratch.display(),
+        shared.display()
+    );
+}
+
+#[container]
+pub fn pvc_reader() {
+    // Same PVC types, different container - same `claimName` on each
+    // pod's volume mount. The wormhole forces the producer's argo
+    // name to match.
+    let scratch = cargo_athena::pvc!(BuildCache);
+    println!("reader scratch={}", scratch.display());
+}
+
+#[workflow]
+pub fn pipeline_pvc() {
+    pvc_writer();
+    pvc_reader();
+}
+
 // --- parallelism + parallelism_if_root -------------------------------------
 
 /// `parallelism = N` → `Template.parallelism` on this dag/steps

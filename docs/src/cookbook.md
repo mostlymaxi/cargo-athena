@@ -35,6 +35,7 @@ pages.
 - [Pull a Kubernetes Secret as an env var](#pull-a-kubernetes-secret-as-an-env-var)
 - [Reuse setup across containers](#reuse-setup-across-containers)
 - [Async `#[container]` fns](#async-container-fns)
+- [Share a PVC across containers in a workflow](#share-a-pvc-across-containers-in-a-workflow)
 
 [Pitfalls](#pitfalls)
 
@@ -661,6 +662,65 @@ async fn fetch(url: String) -> String {
 
 `#[workflow]` bodies are statically analyzed, so
 `#[workflow] async fn` is a compile error.
+
+## Share a PVC across containers in a workflow
+
+Declare a PVC as a unit struct, then mount it with `pvc!(Type)`
+inside any `#[container]` / `#[fragment]`. Two flavors, picked by
+who owns the PVC's lifetime:
+
+```rust,ignore
+// Per-workflow-run scratch space. Argo creates the PVC at workflow
+// start and deletes it at workflow end (Argo's
+// `WorkflowSpec.volumeClaimTemplates`).
+#[cargo_athena::ephemeral_pvc(
+    size = "10Gi",
+    access_modes = ["ReadWriteMany"],
+)]
+pub struct BuildCache;
+
+// Reference to a pre-existing PVC (managed out of band). athena
+// never creates or deletes it.
+#[cargo_athena::external_pvc(claim_name = "shared-data-pvc", read_only = true)]
+pub struct SharedData;
+
+#[container]
+fn build() {
+    let cache: &Path = cargo_athena::pvc!(BuildCache);
+    std::fs::write(cache.join("output.bin"), b"hello").unwrap();
+}
+
+#[container]
+fn analyze() {
+    // Same type → same PVC. Two pods sharing a `ReadWriteMany`
+    // ephemeral see each other's files.
+    let cache: &Path = cargo_athena::pvc!(BuildCache);
+    let bytes = std::fs::read(cache.join("output.bin")).unwrap();
+    println!("read {} bytes", bytes.len());
+}
+
+#[workflow]
+fn pipeline() {
+    let _ = build();
+    analyze();
+}
+```
+
+Two consumers sharing the same `#[ephemeral_pvc]` concurrently
+need `ReadWriteMany`. `ReadWriteOnce` is fine when only one pod
+ever mounts it at a time, but a parallel fan-out over RWO will
+fail the second pod's volume attach.
+
+The mount path is opaque (`/athena/pvcs/<hash>`) and stable across
+emit and run — always use the returned `&'static Path` value;
+never hard-code the path.
+
+**v1 caveat**: every `#[ephemeral_pvc]` linked into your binary
+lands on every emitted WorkflowTemplate's `volumeClaimTemplates`.
+Argo creates ALL of them per run, even if the submitted workflow
+doesn't reach them. Keep one workflow per binary and define each
+`#[ephemeral_pvc]` near its consumer to avoid cross-workflow
+PVC churn. See `CONTAINER.md` for details.
 
 ## Pitfalls
 
