@@ -3,8 +3,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-limited
   labels:
-    cargo.athena/bin: smoke-pod-spec-patch
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke-pod-spec-patch
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-limited
@@ -77,8 +79,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-pod-spec-patch
   labels:
-    cargo.athena/bin: smoke-pod-spec-patch
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke-pod-spec-patch
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-pod-spec-patch

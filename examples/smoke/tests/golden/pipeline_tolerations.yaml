@@ -3,8 +3,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-tolerations
   labels:
-    cargo.athena/bin: smoke-tolerations
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke-tolerations
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-tolerations
@@ -43,8 +45,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-run-on-tainted-node
   labels:
-    cargo.athena/bin: smoke-tolerations
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke-tolerations
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-run-on-tainted-node

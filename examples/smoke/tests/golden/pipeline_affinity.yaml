@@ -3,8 +3,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-arch-pinned
   labels:
-    cargo.athena/bin: smoke-affinity
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke-affinity
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-arch-pinned
@@ -83,8 +85,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-affinity
   labels:
-    cargo.athena/bin: smoke-affinity
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke-affinity
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-affinity
@@ -133,8 +137,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-record
   labels:
-    cargo.athena/bin: smoke-affinity
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke-affinity
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-record

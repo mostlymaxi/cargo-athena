@@ -1182,11 +1182,14 @@ pub struct BuildCtx {
     /// `cargo metadata`, so the upload and the emitted YAML always
     /// agree by construction.
     artifact_key: String,
-    /// User crate name (`CARGO_PKG_NAME`). Stamped onto every emitted
-    /// `WorkflowTemplate`'s `metadata.labels` as `cargo.athena/pkg` so
-    /// cluster admins can `kubectl get wt -l cargo.athena/pkg=<crate>`.
+    /// User crate name (`CARGO_PKG_NAME`). Stamped as
+    /// `app.kubernetes.io/name`.
     krate: String,
-    /// User binary name (`CARGO_BIN_NAME`). Stamped as `cargo.athena/bin`.
+    /// User crate version (`CARGO_PKG_VERSION`). Stamped as
+    /// `app.kubernetes.io/version`.
+    version: String,
+    /// User binary name (`CARGO_BIN_NAME`). Stamped as
+    /// `app.kubernetes.io/component`.
     bin: String,
 }
 
@@ -1208,6 +1211,7 @@ impl BuildCtx {
             config: AthenaConfig::load(),
             artifact_key: format!("{krate}/{version}/{bin}.tar.gz"),
             krate: krate.to_string(),
+            version: version.to_string(),
             bin: bin.to_string(),
         }
     }
@@ -1222,20 +1226,33 @@ impl BuildCtx {
         &self.artifact_key
     }
 
-    /// Baseline `cargo.athena/*` provenance labels stamped onto every
-    /// emitted `WorkflowTemplate` (and the `--with-workflow` runnable
-    /// `Workflow`). Lets cluster admins find athena-managed resources
-    /// via `kubectl get wt -l cargo.athena/pkg=<crate>` etc. Three fields
-    /// — athena's own version, the user crate name, and the binary name —
-    /// all guaranteed-valid k8s label values by cargo's own naming rules.
+    /// Baseline provenance labels stamped onto every emitted
+    /// `WorkflowTemplate` (and the `--with-workflow` runnable `Workflow`).
+    /// Follows the well-known k8s `app.kubernetes.io/*` convention for
+    /// the user-facing fields (crate name/version, binary, managed-by) so
+    /// `kubectl describe` / Grafana dashboards / generic tooling pick
+    /// them up for free; athena's own toolchain version stays in
+    /// `cargo.athena/version` (its own namespace, distinct from the user
+    /// app's version). Argo confirmed not to clash: its own labels all
+    /// live under `workflows.argoproj.io/*` and it deliberately stayed
+    /// out of the `app.kubernetes.io/*` namespace
+    /// (`workflow/common/common.go:97`).
     pub fn athena_labels(&self) -> std::collections::BTreeMap<String, String> {
         let mut m = std::collections::BTreeMap::new();
+        m.insert("app.kubernetes.io/name".to_string(), self.krate.clone());
+        m.insert(
+            "app.kubernetes.io/version".to_string(),
+            self.version.clone(),
+        );
+        m.insert("app.kubernetes.io/component".to_string(), self.bin.clone());
+        m.insert(
+            "app.kubernetes.io/managed-by".to_string(),
+            "cargo-athena".to_string(),
+        );
         m.insert(
             "cargo.athena/version".to_string(),
             env!("CARGO_PKG_VERSION").to_string(),
         );
-        m.insert("cargo.athena/pkg".to_string(), self.krate.clone());
-        m.insert("cargo.athena/bin".to_string(), self.bin.clone());
         m
     }
 

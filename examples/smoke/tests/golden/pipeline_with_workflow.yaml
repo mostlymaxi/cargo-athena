@@ -3,8 +3,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-branchy
   labels:
-    cargo.athena/bin: smoke
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-branchy
@@ -106,8 +108,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-combine
   labels:
-    cargo.athena/bin: smoke
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-combine
@@ -184,8 +188,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-fetch
   labels:
-    cargo.athena/bin: smoke
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-fetch
@@ -262,8 +268,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-ingest
   labels:
-    cargo.athena/bin: smoke
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-ingest
@@ -325,8 +333,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline
   labels:
-    cargo.athena/bin: smoke
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline
@@ -389,8 +399,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-publish
   labels:
-    cargo.athena/bin: smoke
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-publish
@@ -493,8 +505,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-transform
   labels:
-    cargo.athena/bin: smoke
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   entrypoint: cargo-athena-example-smoke-transform
@@ -568,8 +582,10 @@ kind: Workflow
 metadata:
   generateName: cargo-athena-example-smoke-pipeline-
   labels:
-    cargo.athena/bin: smoke
-    cargo.athena/pkg: cargo-athena-example-smoke
+    app.kubernetes.io/component: smoke
+    app.kubernetes.io/managed-by: cargo-athena
+    app.kubernetes.io/name: cargo-athena-example-smoke
+    app.kubernetes.io/version: 0.0.0
     cargo.athena/version: 0.5.2
 spec:
   workflowTemplateRef:
