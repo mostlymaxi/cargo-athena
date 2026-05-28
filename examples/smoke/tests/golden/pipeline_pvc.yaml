@@ -1,11 +1,42 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-make-meta
+  name: cargo-athena-example-smoke-pipeline-pvc
 spec:
-  entrypoint: cargo-athena-example-smoke-make-meta
+  entrypoint: cargo-athena-example-smoke-pipeline-pvc
   templates:
-  - name: cargo-athena-example-smoke-make-meta
+  - name: cargo-athena-example-smoke-pipeline-pvc
+    dag:
+      tasks:
+      - name: pvc-writer
+        arguments: {}
+        templateRef:
+          name: cargo-athena-example-smoke-pvc-writer
+          template: cargo-athena-example-smoke-pvc-writer
+      - name: pvc-reader
+        arguments: {}
+        templateRef:
+          name: cargo-athena-example-smoke-pvc-reader
+          template: cargo-athena-example-smoke-pvc-reader
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-pvc-reader
+spec:
+  entrypoint: cargo-athena-example-smoke-pvc-reader
+  templates:
+  - name: cargo-athena-example-smoke-pvc-reader
     inputs:
       artifacts:
       - name: athena-dist
@@ -14,7 +45,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-fields.tar.gz
+          key: cargo-athena-example-smoke/0.0.0/smoke-pvc.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -45,13 +76,18 @@ spec:
       - --
       env:
       - name: CARGO_ATHENA_TEMPLATE
-        value: cargo-athena-example-smoke-make-meta
+        value: cargo-athena-example-smoke-pvc-reader
       volumeMounts:
       - name: athena-work
         mountPath: /athena
+      - name: pvc-e052c09e53d539f7
+        mountPath: /athena/pvcs/e052c09e53d539f7
     volumes:
     - name: athena-work
       emptyDir: {}
+    - name: pvc-e052c09e53d539f7
+      persistentVolumeClaim:
+        claimName: cargo-athena-example-smoke-buildcache
     serviceAccountName: default
   volumeClaimTemplates:
   - metadata:
@@ -67,50 +103,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-fields
+  name: cargo-athena-example-smoke-pvc-writer
 spec:
-  entrypoint: cargo-athena-example-smoke-pipeline-fields
+  entrypoint: cargo-athena-example-smoke-pvc-writer
   templates:
-  - name: cargo-athena-example-smoke-pipeline-fields
-    dag:
-      tasks:
-      - name: m
-        arguments: {}
-        templateRef:
-          name: cargo-athena-example-smoke-make-meta
-          template: cargo-athena-example-smoke-make-meta
-      - name: use-id
-        dependencies:
-        - m
-        arguments:
-          parameters:
-          - name: id
-            value: '{{=toJSON(fromJSON(tasks[''m''].outputs.parameters[''return''])[''id''])}}'
-        templateRef:
-          name: cargo-athena-example-smoke-use-id
-          template: cargo-athena-example-smoke-use-id
-  volumeClaimTemplates:
-  - metadata:
-      name: cargo-athena-example-smoke-buildcache
-    spec:
-      accessModes:
-      - ReadWriteMany
-      resources:
-        requests:
-          storage: 10Gi
-      storageClassName: fast-ssd
----
-apiVersion: argoproj.io/v1alpha1
-kind: WorkflowTemplate
-metadata:
-  name: cargo-athena-example-smoke-use-id
-spec:
-  entrypoint: cargo-athena-example-smoke-use-id
-  templates:
-  - name: cargo-athena-example-smoke-use-id
+  - name: cargo-athena-example-smoke-pvc-writer
     inputs:
-      parameters:
-      - name: id
       artifacts:
       - name: athena-dist
         path: /athena/bin
@@ -118,7 +116,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-fields.tar.gz
+          key: cargo-athena-example-smoke/0.0.0/smoke-pvc.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -147,16 +145,27 @@ spec:
         export CARGO_ATHENA_OUTPUT=/athena/result
         exec /athena/bin/app-$__t "$@"
       - --
-      - '{{inputs.parameters.id}}'
       env:
       - name: CARGO_ATHENA_TEMPLATE
-        value: cargo-athena-example-smoke-use-id
+        value: cargo-athena-example-smoke-pvc-writer
       volumeMounts:
       - name: athena-work
         mountPath: /athena
+      - name: pvc-e052c09e53d539f7
+        mountPath: /athena/pvcs/e052c09e53d539f7
+      - name: pvc-712a414836de911c
+        mountPath: /athena/pvcs/712a414836de911c
+        readOnly: true
     volumes:
     - name: athena-work
       emptyDir: {}
+    - name: pvc-e052c09e53d539f7
+      persistentVolumeClaim:
+        claimName: cargo-athena-example-smoke-buildcache
+    - name: pvc-712a414836de911c
+      persistentVolumeClaim:
+        claimName: shared-data-pvc
+        readOnly: true
     serviceAccountName: default
   volumeClaimTemplates:
   - metadata:

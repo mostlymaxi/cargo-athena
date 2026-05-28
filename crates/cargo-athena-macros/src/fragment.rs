@@ -22,6 +22,11 @@ pub(crate) fn expand(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let out_art_slice = str_slice(&scan.out_artifacts);
     let secret_slice = secret_slice_tokens(&scan.secrets);
     let callee_slice = str_slice(&scan.callees);
+    // `pvc!(T)` usages — emit as `&[<T as Pvc>::ARGO_NAME, …]` so the
+    // string IS the type's actual argo name (resolved at user-build
+    // time via the trait const), no proc-macro-side stringification of
+    // type paths. Force-links each `T`'s `Pvc` impl crate too.
+    let pvc_argo_names_tok = pvc_argo_names_tokens(&scan.pvc_types);
 
     let expanded = quote! {
         #func
@@ -33,9 +38,21 @@ pub(crate) fn expand(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 in_artifacts: #in_art_slice,
                 out_artifacts: #out_art_slice,
                 secrets: #secret_slice,
+                pvc_argo_names: #pvc_argo_names_tok,
                 callees: #callee_slice,
             }
         }
     };
     expanded.into()
+}
+
+/// `&[<T0 as ::cargo_athena::Pvc>::ARGO_NAME, <T1 as …>::ARGO_NAME, …]`.
+fn pvc_argo_names_tokens(types: &[syn::Path]) -> proc_macro2::TokenStream {
+    if types.is_empty() {
+        return quote! { &[] };
+    }
+    let entries = types
+        .iter()
+        .map(|p| quote! { <#p as ::cargo_athena::Pvc>::ARGO_NAME });
+    quote! { &[ #( #entries ),* ] }
 }

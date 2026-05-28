@@ -33,6 +33,7 @@ const BIN_IMAGE_PULL_SECRETS: &str = env!("CARGO_BIN_EXE_smoke-image-pull-secret
 const BIN_INJECT_ATTR: &str = env!("CARGO_BIN_EXE_smoke-inject-attr");
 const BIN_BOUNDARY_SCHEDULING: &str = env!("CARGO_BIN_EXE_smoke-boundary-scheduling");
 const BIN_PARALLELISM: &str = env!("CARGO_BIN_EXE_smoke-parallelism");
+const BIN_PVC: &str = env!("CARGO_BIN_EXE_smoke-pvc");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -385,6 +386,15 @@ fn emit_pipeline_image_pull_secrets() {
 #[test]
 fn emit_pipeline_parallelism() {
     assert_golden("pipeline_parallelism.yaml", &run_bin(BIN_PARALLELISM, &[]));
+}
+
+/// `#[ephemeral_pvc]` + `#[external_pvc]` + `pvc!(Type)` end-to-end:
+/// pins the workflow's `volumeClaimTemplates`, each consumer pod's
+/// `volumes[].persistentVolumeClaim` entries, and the matching
+/// `volumeMounts` at `/athena/pvcs/<hash>` paths.
+#[test]
+fn emit_pipeline_pvc() {
+    assert_golden("pipeline_pvc.yaml", &run_bin(BIN_PVC, &[]));
 }
 
 /// `#[inject("<argo expr>")]` per-arg attribute. Pins:

@@ -1,0 +1,7 @@
+error: `pvc!` may only be used directly inside a `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn
+ --> tests/ui/pvc_in_plain_fn.rs:8:13
+  |
+8 |     let _ = cargo_athena::pvc!(MyPvc);
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `cargo_athena::pvc` (in Nightly builds, run with -Z macro-backtrace for more info)

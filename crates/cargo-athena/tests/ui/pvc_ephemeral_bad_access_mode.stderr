@@ -1,0 +1,5 @@
+error: `access_modes` entry "RW" not a K8s access mode (one of: ReadWriteOnce, ReadWriteMany, ReadOnlyMany, ReadWriteOncePod)
+ --> tests/ui/pvc_ephemeral_bad_access_mode.rs:3:12
+  |
+3 | pub struct MyPvc;
+  |            ^^^^^

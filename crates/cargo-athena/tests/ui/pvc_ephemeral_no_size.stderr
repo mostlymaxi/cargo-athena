@@ -1,0 +1,5 @@
+error: `#[ephemeral_pvc(...)]` requires `size = "<quantity>"` (e.g. `size = "10Gi"`)
+ --> tests/ui/pvc_ephemeral_no_size.rs:3:12
+  |
+3 | pub struct MyPvc;
+  |            ^^^^^

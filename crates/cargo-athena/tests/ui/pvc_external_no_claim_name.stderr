@@ -1,0 +1,5 @@
+error: `#[external_pvc(...)]` requires `claim_name = "<existing-pvc-name>"`
+ --> tests/ui/pvc_external_no_claim_name.rs:3:12
+  |
+3 | pub struct MyPvc;
+  |            ^^^^^

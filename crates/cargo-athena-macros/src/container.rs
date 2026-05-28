@@ -270,6 +270,19 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     let out_art_slice = str_slice(&scan.out_artifacts);
     let secret_slice = secret_slice_tokens(&scan.secrets);
     let callee_slice = str_slice(&scan.callees);
+    // `pvc!(T)` usages — emit as `&[<T as Pvc>::ARGO_NAME, …]` so the
+    // string IS the type's actual argo name (resolved at user-build
+    // time via the trait const), no proc-macro-side stringification of
+    // type paths. Force-links each `T`'s `Pvc` impl crate.
+    let pvc_argo_names_tok = if scan.pvc_types.is_empty() {
+        quote! { &[] }
+    } else {
+        let entries = scan
+            .pvc_types
+            .iter()
+            .map(|p| quote! { <#p as ::cargo_athena::Pvc>::ARGO_NAME });
+        quote! { &[ #( #entries ),* ] }
+    };
     // Lower the injectable attribute values (image / service_account /
     // node_selector values) — a string literal stays verbatim; a
     // `+`-concat injects args as `{{=fromJSON(inputs.parameters[..])}}`.
@@ -728,7 +741,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                     #host_slice, #callee_slice);
                 // emptyDir scratch at /athena (+ host! volumes) so every
                 // athena path is writable on any image.
-                let (__vols, __mounts) =
+                let (mut __vols, mut __mounts) =
                     ::cargo_athena::container_volumes(
                         &__paths,
                         &[ #( (
@@ -737,6 +750,18 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                             #host_mount_ro,
                         ) ),* ],
                     );
+                // PVC mounts: this template's own `pvc!()` usages ∪ the
+                // `#[fragment]` closure, deduped + materialized as
+                // `volumes[].persistent_volume_claim` + a matching
+                // `volume_mounts` entry. Volume names are
+                // `pvc-<fnv-hash>` and mount paths `/athena/pvcs/<hash>`
+                // (the proc-macro mirror of `pvc_mount_path`).
+                let __pvc_names = __ctx.resolved_pvc_names(
+                    #pvc_argo_names_tok, #callee_slice);
+                let (__pvc_vols, __pvc_mounts) =
+                    __ctx.pvc_volumes(&__pvc_names);
+                __vols.extend(__pvc_vols);
+                __mounts.extend(__pvc_mounts);
                 // Arbitrary user image + the arch-resolving bootstrap that
                 // pulls & exec's the athena binary delivered as an artifact.
                 // Only parameter args become positional argv; artifact

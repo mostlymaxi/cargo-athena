@@ -56,6 +56,16 @@ spec:
     - name: athena-work
       emptyDir: {}
     serviceAccountName: default
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -75,3 +85,13 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-delay
           template: cargo-athena-example-smoke-delay
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd

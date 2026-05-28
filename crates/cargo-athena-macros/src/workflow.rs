@@ -62,10 +62,11 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         || !scan.in_artifacts.is_empty()
         || !scan.out_artifacts.is_empty()
         || !scan.secrets.is_empty()
+        || !scan.pvc_types.is_empty()
     {
         return syn::Error::new_spanned(
             &func.sig.ident,
-            "`host!`/`load_artifact*!`/`save_artifact*!`/`secret*!` cannot be used \
+            "`host!`/`load_artifact*!`/`save_artifact*!`/`secret*!`/`pvc!` cannot be used \
              in a #[workflow]: a workflow is a DAG, not a pod. Declare them in the \
              #[container] (or a #[fragment] it calls) that runs in-cluster.",
         )
