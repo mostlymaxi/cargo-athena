@@ -71,54 +71,54 @@ __athena_injectable!(
 ///
 /// Only valid inside a `#[cargo_athena::container]` or
 /// `#[cargo_athena::fragment]` fn: those attribute macros rewrite the
-/// invocations they can see into the private real macro below. This
-/// public definition is therefore a *hard error* — it only ever expands
-/// when `host!` is used somewhere the collector cannot see it (a plain
-/// fn, a `#[workflow]`, or nested inside another macro's tokens), where a
-/// silently-unmounted path would otherwise be a footgun.
+/// invocations they can see into a literal `Path::new(...)` carrying
+/// the precomputed mount path. This `macro_rules!` form is what
+/// rust-analyzer / rustc see *before* the attribute macro expands — it
+/// fires `compile_error!` as the misuse gate AND keeps a type-correct
+/// stub expression so LSP hover / inlay hints / autocompletion on the
+/// return value all work at the call site even when the attribute
+/// macro hasn't expanded yet. The stub is never reached at runtime:
+/// inside `#[container]`/`#[fragment]` the attribute macro replaces
+/// this whole expression first; outside those, the `compile_error!`
+/// blocks the build before any code runs.
 #[macro_export]
 macro_rules! host {
-    ($($t:tt)*) => {
+    ($path:literal) => {{
         ::core::compile_error!(
             "`host!` may only be used directly inside a \
              `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn \
              (not in a plain fn, a `#[workflow]`, or nested inside another \
              macro invocation)"
-        )
+        );
+        ::std::path::Path::new($path)
+    }};
+    ($($t:tt)*) => {
+        ::core::compile_error!("`host!` takes a single string-literal path")
     };
 }
 
-// `host!` has no private declarative-macro form. The `#[container]` /
-// `#[fragment]` attribute macros rewrite every `host!("/p")` invocation
-// they can see into a literal `::std::path::Path::new("/athena/mounts/
-// <precomputed-hash>")` expression at expansion time — the hash is
-// known statically from the literal, so the user gets `&'static Path`
-// with zero runtime work. Any `host!` invocation outside an attribute
-// macro hits the public `compile_error!` gate above (which is why this
-// private macro doesn't exist).
+// None of the decl macros (`host!`, `load_artifact*!`, `save_artifact*!`,
+// `secret*!`) have a private declarative form. The `#[container]` /
+// `#[fragment]` attribute macros' `DeclRewrite` pass replaces every
+// recognized invocation at the expression level with a direct call to
+// the relevant `rt::*` helper, passing pre-baked strings (mount path,
+// artifact file path, env var name) computed once at proc-macro
+// expansion time. Invocations the attribute macro can't see — plain
+// fns, `#[workflow]` bodies, nested inside other macro invocations —
+// hit the public `compile_error!` gates below.
 
-// --- artifact declaration macros (native Argo artifacts, no S3) ------------
-//
-// Each is a public (gated `compile_error!`) + private (real) pair, exactly
-// like `host!`: only valid inside `#[container]`/`#[fragment]`, where the
-// attribute macro rewrites the public form to the private one.
-
-/// Declare an Argo *input* artifact port and read it (bytes) at runtime.
+/// Declare an Argo *input* artifact port and read it (bytes) at
+/// runtime. See the [`host!`] doc for the gate / LSP-stub pattern
+/// shared by every decl macro.
 #[macro_export]
 macro_rules! load_artifact {
-    ($($t:tt)*) => {
+    ($name:literal) => {{
         ::core::compile_error!(
             "`load_artifact!` may only be used directly inside a \
              `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn"
-        )
-    };
-}
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __cargo_athena_load_artifact {
-    ($name:literal) => {
-        $crate::rt::load_artifact($name)
-    };
+        );
+        ::std::vec::Vec::<u8>::new()
+    }};
     ($($t:tt)*) => {
         ::core::compile_error!("load_artifact!(\"name\")")
     };
@@ -127,19 +127,13 @@ macro_rules! __cargo_athena_load_artifact {
 /// Declare an Argo *input* artifact port and read it (UTF-8) at runtime.
 #[macro_export]
 macro_rules! load_artifact_str {
-    ($($t:tt)*) => {
+    ($name:literal) => {{
         ::core::compile_error!(
             "`load_artifact_str!` may only be used directly inside a \
              `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn"
-        )
-    };
-}
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __cargo_athena_load_artifact_str {
-    ($name:literal) => {
-        $crate::rt::load_artifact_str($name)
-    };
+        );
+        ::std::string::String::new()
+    }};
     ($($t:tt)*) => {
         ::core::compile_error!("load_artifact_str!(\"name\")")
     };
@@ -148,19 +142,16 @@ macro_rules! __cargo_athena_load_artifact_str {
 /// Declare an Argo *output* artifact port and write bytes to it at runtime.
 #[macro_export]
 macro_rules! save_artifact {
-    ($($t:tt)*) => {
+    ($name:literal, $data:expr) => {{
         ::core::compile_error!(
             "`save_artifact!` may only be used directly inside a \
              `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn"
-        )
-    };
-}
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __cargo_athena_save_artifact {
-    ($name:literal, $data:expr) => {
-        $crate::rt::save_artifact($name, $data)
-    };
+        );
+        // Force the data expression through `AsRef<[u8]>` so LSP
+        // catches bad-type passes at the call site (e.g. handing an
+        // `i32` to a bytes-port).
+        let _: &dyn ::core::convert::AsRef<[u8]> = &$data;
+    }};
     ($($t:tt)*) => {
         ::core::compile_error!("save_artifact!(\"name\", data)")
     };
@@ -169,45 +160,31 @@ macro_rules! __cargo_athena_save_artifact {
 /// Declare an Argo *output* artifact port and write a string at runtime.
 #[macro_export]
 macro_rules! save_artifact_str {
-    ($($t:tt)*) => {
+    ($name:literal, $data:expr) => {{
         ::core::compile_error!(
             "`save_artifact_str!` may only be used directly inside a \
              `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn"
-        )
-    };
-}
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __cargo_athena_save_artifact_str {
-    ($name:literal, $data:expr) => {
-        $crate::rt::save_artifact_str($name, $data)
-    };
+        );
+        let _: &dyn ::core::convert::AsRef<str> = &$data;
+    }};
     ($($t:tt)*) => {
         ::core::compile_error!("save_artifact_str!(\"name\", data)")
     };
 }
 
 /// Declare a K8s Secret-sourced env var and read it back at runtime as
-/// a `String`. Public form: `compile_error!` outside
-/// `#[container]`/`#[fragment]` (same gating as `host!`). Two literal
-/// args: `(secret_name, key)`. Panics at runtime if the env var the
-/// macro plants isn't set; pair with `secret_opt!` for the no-panic
-/// variant.
+/// a `String`. Two literal args: `(secret_name, key)`. Panics at
+/// runtime if the env var the macro plants isn't set; pair with
+/// `secret_opt!` for the no-panic variant.
 #[macro_export]
 macro_rules! secret {
-    ($($t:tt)*) => {
+    ($name:literal, $key:literal) => {{
         ::core::compile_error!(
             "`secret!` may only be used directly inside a \
              `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn"
-        )
-    };
-}
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __cargo_athena_secret {
-    ($name:literal, $key:literal) => {
-        $crate::rt::secret_value($name, $key)
-    };
+        );
+        ::std::string::String::new()
+    }};
     ($($t:tt)*) => {
         ::core::compile_error!("secret!(\"secret-name\", \"key\")")
     };
@@ -218,86 +195,78 @@ macro_rules! __cargo_athena_secret {
 /// entry instead of failing pod-start when the secret/key is missing.
 #[macro_export]
 macro_rules! secret_opt {
-    ($($t:tt)*) => {
+    ($name:literal, $key:literal) => {{
         ::core::compile_error!(
             "`secret_opt!` may only be used directly inside a \
              `#[cargo_athena::container]` or `#[cargo_athena::fragment]` fn"
-        )
-    };
-}
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __cargo_athena_secret_opt {
-    ($name:literal, $key:literal) => {
-        $crate::rt::secret_value_opt($name, $key)
-    };
+        );
+        ::core::option::Option::<::std::string::String>::None
+    }};
     ($($t:tt)*) => {
         ::core::compile_error!("secret_opt!(\"secret-name\", \"key\")")
     };
 }
 
-/// Runtime shims referenced by the declaration macros. Artifact ports are
-/// plain files at fixed paths; Argo moves them (no S3 from us).
+/// Runtime shims referenced by the declaration macros. Artifact ports
+/// are plain files at fixed paths; Argo moves them (no S3 from us).
+///
+/// Every `&str` argument is **pre-baked at proc-macro expansion time**:
+/// the macros precompute the full artifact path / env var name from
+/// the user's literal and pass it as a string literal. So these
+/// helpers do no string-building of their own — just one I/O call plus
+/// a panic on failure. The original-name args are kept purely for the
+/// panic message context.
 pub mod rt {
-    use std::path::PathBuf;
-
-    // `host!` previously called `rt::host_path` to resolve its mount
-    // path at runtime. The macros now precompute the mount path at
-    // expansion time and emit a literal `Path::new("/athena/mounts/
-    // <hash>")` expression, so there is no runtime resolver to call.
-    // The emit-side helper `super::host_mount_path` is the single
-    // remaining caller of the algorithm.
+    // The host!, load_artifact!/_str, save_artifact!/_str, secret!,
+    // and secret_opt! macros all precompute their derived strings at
+    // expansion time and pass them through here. `super::host_mount
+    // _path` and `super::secret_env_name` remain the single sources of
+    // truth for the formulas (called once at emit time per template);
+    // their proc-macro mirrors are pinned by the algorithm tests.
 
     /// Where Argo drops/collects declared artifact ports inside the pod.
+    /// Kept `pub const` because emit-side code formats Argo template
+    /// artifact paths from it.
     pub const IN_DIR: &str = "/athena/artifacts/in";
     pub const OUT_DIR: &str = "/athena/artifacts/out";
 
-    fn in_path(name: &str) -> PathBuf {
-        PathBuf::from(IN_DIR).join(name)
-    }
-    fn out_path(name: &str) -> PathBuf {
-        PathBuf::from(OUT_DIR).join(name)
+    pub fn load_artifact(path: &str, name: &str) -> Vec<u8> {
+        std::fs::read(path)
+            .unwrap_or_else(|e| panic!("athena: load_artifact!({name:?}) {path}: {e}"))
     }
 
-    pub fn load_artifact(name: &str) -> Vec<u8> {
-        let p = in_path(name);
-        std::fs::read(&p).unwrap_or_else(|e| panic!("load_artifact({name:?}) {}: {e}", p.display()))
+    pub fn load_artifact_str(path: &str, name: &str) -> String {
+        std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("athena: load_artifact_str!({name:?}) {path}: {e}"))
     }
 
-    pub fn load_artifact_str(name: &str) -> String {
-        let p = in_path(name);
-        std::fs::read_to_string(&p)
-            .unwrap_or_else(|e| panic!("load_artifact_str({name:?}) {}: {e}", p.display()))
-    }
-
-    pub fn save_artifact(name: &str, data: impl AsRef<[u8]>) {
-        let p = out_path(name);
-        if let Some(d) = p.parent() {
+    pub fn save_artifact(path: &str, name: &str, data: impl AsRef<[u8]>) {
+        if let Some(d) = std::path::Path::new(path).parent() {
             std::fs::create_dir_all(d).expect("create artifact out dir");
         }
-        std::fs::write(&p, data.as_ref())
-            .unwrap_or_else(|e| panic!("save_artifact({name:?}) {}: {e}", p.display()));
+        std::fs::write(path, data.as_ref())
+            .unwrap_or_else(|e| panic!("athena: save_artifact!({name:?}) {path}: {e}"));
     }
 
-    pub fn save_artifact_str(name: &str, data: impl AsRef<str>) {
-        save_artifact(name, data.as_ref().as_bytes());
+    pub fn save_artifact_str(path: &str, name: &str, data: impl AsRef<str>) {
+        save_artifact(path, name, data.as_ref().as_bytes());
     }
 
-    /// `secret!(name, key)` runtime: read the env var the macro emits.
-    /// Panics if missing (use [`secret_value_opt`] for the no-panic
-    /// flavour, paired with `secret_opt!` on the declaration side).
-    pub fn secret_value(name: &str, key: &str) -> String {
-        let var = super::secret_env_name(name, key);
-        std::env::var(&var).unwrap_or_else(|e| {
-            panic!("athena: secret!({name:?}, {key:?}) env var `{var}` missing: {e}")
+    /// `secret!(name, key)` runtime: read the precomputed env var. The
+    /// macro passes `name`/`key` for the panic message context only;
+    /// the env var name itself was already munged at expand time.
+    pub fn secret_value(env_var: &str, name: &str, key: &str) -> String {
+        std::env::var(env_var).unwrap_or_else(|e| {
+            panic!("athena: secret!({name:?}, {key:?}) env var `{env_var}` missing: {e}")
         })
     }
 
     /// `secret_opt!(name, key)` runtime: `None` when the env var is
     /// unset (e.g. Argo skipped the entry because the secret/key is
-    /// missing and `optional: true`).
-    pub fn secret_value_opt(name: &str, key: &str) -> Option<String> {
-        std::env::var(super::secret_env_name(name, key)).ok()
+    /// missing and `optional: true`). Pure `std::env::var().ok()` —
+    /// kept here so the macros have a stable call target.
+    pub fn secret_value_opt(env_var: &str) -> Option<String> {
+        std::env::var(env_var).ok()
     }
 }
 
