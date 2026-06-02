@@ -1183,13 +1183,13 @@ pub struct BuildCtx {
     /// agree by construction.
     artifact_key: String,
     /// User crate name (`CARGO_PKG_NAME`). Stamped as
-    /// `app.kubernetes.io/name`.
+    /// `cargo.athena/pkg`.
     krate: String,
     /// User crate version (`CARGO_PKG_VERSION`). Stamped as
-    /// `app.kubernetes.io/version`.
+    /// `cargo.athena/version` (version of the user's code, distinct from
+    /// `cargo.athena/toolchain` which is athena's own version).
     version: String,
-    /// User binary name (`CARGO_BIN_NAME`). Stamped as
-    /// `app.kubernetes.io/component`.
+    /// User binary name (`CARGO_BIN_NAME`). Stamped as `cargo.athena/bin`.
     bin: String,
 }
 
@@ -1228,29 +1228,28 @@ impl BuildCtx {
 
     /// Baseline provenance labels stamped onto every emitted
     /// `WorkflowTemplate` (and the `--with-workflow` runnable `Workflow`).
-    /// Follows the well-known k8s `app.kubernetes.io/*` convention for
-    /// the user-facing fields (crate name/version, binary, managed-by) so
-    /// `kubectl describe` / Grafana dashboards / generic tooling pick
-    /// them up for free; athena's own toolchain version stays in
-    /// `cargo.athena/version` (its own namespace, distinct from the user
-    /// app's version). Argo confirmed not to clash: its own labels all
-    /// live under `workflows.argoproj.io/*` and it deliberately stayed
-    /// out of the `app.kubernetes.io/*` namespace
-    /// (`workflow/common/common.go:97`).
+    /// All under the `cargo.athena/*` namespace - intentionally NOT in
+    /// `app.kubernetes.io/*`, despite the convention's appeal. The shared
+    /// namespace would clash with Helm-managed deploys (which stamp
+    /// `managed-by: Helm`), ArgoCD's instance tracking, Backstage/IDP
+    /// catalogs scraping it for service identity, etc. Argo Workflows
+    /// itself made the same call: every Argo label lives under
+    /// `workflows.argoproj.io/*`, with an explicit comment at
+    /// `workflow/common/common.go:97` calling out that their `/component`
+    /// is "intentionally similar to `app.kubernetes.io/component`" but
+    /// staying in their own namespace.
+    ///
+    /// `cargo.athena/version` is the USER crate's version (matches
+    /// reader intuition - "what version of this code emitted this WT?");
+    /// athena's own toolchain version is `cargo.athena/toolchain` to
+    /// avoid the ambiguity from PR #57's first cut.
     pub fn athena_labels(&self) -> std::collections::BTreeMap<String, String> {
         let mut m = std::collections::BTreeMap::new();
-        m.insert("app.kubernetes.io/name".to_string(), self.krate.clone());
+        m.insert("cargo.athena/pkg".to_string(), self.krate.clone());
+        m.insert("cargo.athena/version".to_string(), self.version.clone());
+        m.insert("cargo.athena/bin".to_string(), self.bin.clone());
         m.insert(
-            "app.kubernetes.io/version".to_string(),
-            self.version.clone(),
-        );
-        m.insert("app.kubernetes.io/component".to_string(), self.bin.clone());
-        m.insert(
-            "app.kubernetes.io/managed-by".to_string(),
-            "cargo-athena".to_string(),
-        );
-        m.insert(
-            "cargo.athena/version".to_string(),
+            "cargo.athena/toolchain".to_string(),
             env!("CARGO_PKG_VERSION").to_string(),
         );
         m

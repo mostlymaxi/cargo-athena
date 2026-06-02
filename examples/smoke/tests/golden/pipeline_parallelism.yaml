@@ -3,11 +3,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-fetch
   labels:
-    app.kubernetes.io/component: smoke-parallelism
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-parallelism
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-fetch
   templates:
@@ -83,11 +82,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-parallelism
   labels:
-    app.kubernetes.io/component: smoke-parallelism
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-parallelism
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-parallelism
   templates:
@@ -132,11 +130,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-transform
   labels:
-    app.kubernetes.io/component: smoke-parallelism
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-parallelism
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-transform
   templates:

@@ -3,11 +3,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-make-meta
   labels:
-    app.kubernetes.io/component: smoke-inject
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-inject
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-make-meta
   templates:
@@ -75,11 +74,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-inject
   labels:
-    app.kubernetes.io/component: smoke-inject
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-inject
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-inject
   templates:
@@ -117,11 +115,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-tag-meta
   labels:
-    app.kubernetes.io/component: smoke-inject
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-inject
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-tag-meta
   templates:

@@ -3,11 +3,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-caps
   labels:
-    app.kubernetes.io/component: smoke-fanout
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-fanout
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-caps
   templates:
@@ -80,11 +79,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-make-list
   labels:
-    app.kubernetes.io/component: smoke-fanout
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-fanout
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-make-list
   templates:
@@ -152,11 +150,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-fanout
   labels:
-    app.kubernetes.io/component: smoke-fanout
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-fanout
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-fanout
   templates:
@@ -207,11 +204,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-summarize
   labels:
-    app.kubernetes.io/component: smoke-fanout
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-fanout
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-summarize
   templates:

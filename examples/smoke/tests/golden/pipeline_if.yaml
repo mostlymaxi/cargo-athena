@@ -3,11 +3,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-decide
   labels:
-    app.kubernetes.io/component: smoke-if
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-decide
   templates:
@@ -78,11 +77,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-left
   labels:
-    app.kubernetes.io/component: smoke-if
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-left
   templates:
@@ -153,11 +151,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-make-meta
   labels:
-    app.kubernetes.io/component: smoke-if
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-make-meta
   templates:
@@ -225,11 +222,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-note
   labels:
-    app.kubernetes.io/component: smoke-if
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-note
   templates:
@@ -300,11 +296,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if
   labels:
-    app.kubernetes.io/component: smoke-if
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if
   templates:
@@ -366,11 +361,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if-if0
   labels:
-    app.kubernetes.io/component: smoke-if
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if0
   templates:
@@ -419,11 +413,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if-if0-arm0
   labels:
-    app.kubernetes.io/component: smoke-if
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if0-arm0
   templates:
@@ -462,11 +455,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if-if0-arm1
   labels:
-    app.kubernetes.io/component: smoke-if
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if0-arm1
   templates:
@@ -505,11 +497,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if-if1
   labels:
-    app.kubernetes.io/component: smoke-if
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if1
   templates:
@@ -576,11 +567,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if-if1-arm0
   labels:
-    app.kubernetes.io/component: smoke-if
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if1-arm0
   templates:
@@ -616,11 +606,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if-if1-arm1
   labels:
-    app.kubernetes.io/component: smoke-if
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if1-arm1
   templates:
@@ -656,11 +645,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if-if1-arm2
   labels:
-    app.kubernetes.io/component: smoke-if
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if1-arm2
   templates:
@@ -696,11 +684,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-right
   labels:
-    app.kubernetes.io/component: smoke-if
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-right
   templates:

@@ -3,11 +3,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-pvc
   labels:
-    app.kubernetes.io/component: smoke-pvc
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-pvc
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-pvc
   templates:
@@ -40,11 +39,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pvc-reader
   labels:
-    app.kubernetes.io/component: smoke-pvc
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-pvc
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pvc-reader
   templates:
@@ -117,11 +115,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pvc-writer
   labels:
-    app.kubernetes.io/component: smoke-pvc
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-smoke
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: smoke-pvc
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pvc-writer
   templates:

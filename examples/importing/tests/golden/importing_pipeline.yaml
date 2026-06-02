@@ -3,11 +3,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-importing-consumer-step
   labels:
-    app.kubernetes.io/component: importing
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-importing
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: importing
+    cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-importing-consumer-step
   templates:
@@ -78,11 +77,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-importing-finalize
   labels:
-    app.kubernetes.io/component: importing
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-importing
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: importing
+    cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-importing-finalize
   templates:
@@ -153,11 +151,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-importing-importing-pipeline
   labels:
-    app.kubernetes.io/component: importing
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-importing
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: importing
+    cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-importing-importing-pipeline
   templates:
@@ -213,11 +210,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-importing-local-step
   labels:
-    app.kubernetes.io/component: importing
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-importing
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: importing
+    cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-importing-local-step
   templates:
@@ -288,11 +284,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-importing-module-pipeline
   labels:
-    app.kubernetes.io/component: importing
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-importing
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: importing
+    cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-importing-module-pipeline
   templates:
@@ -333,11 +328,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-branchy
   labels:
-    app.kubernetes.io/component: importing
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-importing
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: importing
+    cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-branchy
   templates:
@@ -438,11 +432,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-combine
   labels:
-    app.kubernetes.io/component: importing
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-importing
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: importing
+    cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-combine
   templates:
@@ -518,11 +511,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-fetch
   labels:
-    app.kubernetes.io/component: importing
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-importing
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: importing
+    cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-fetch
   templates:
@@ -598,11 +590,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-ingest
   labels:
-    app.kubernetes.io/component: importing
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-importing
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: importing
+    cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-ingest
   templates:
@@ -663,11 +654,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline
   labels:
-    app.kubernetes.io/component: importing
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-importing
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: importing
+    cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline
   templates:
@@ -729,11 +719,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-publish
   labels:
-    app.kubernetes.io/component: importing
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-importing
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: importing
+    cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-publish
   templates:
@@ -835,11 +824,10 @@ kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-transform
   labels:
-    app.kubernetes.io/component: importing
-    app.kubernetes.io/managed-by: cargo-athena
-    app.kubernetes.io/name: cargo-athena-example-importing
-    app.kubernetes.io/version: 0.0.0
-    cargo.athena/version: 0.5.2
+    cargo.athena/bin: importing
+    cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-transform
   templates:
