@@ -2,6 +2,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-make-meta
+  labels:
+    cargo.athena/bin: smoke-inject
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-make-meta
   templates:
@@ -68,6 +73,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-inject
+  labels:
+    cargo.athena/bin: smoke-inject
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-inject
   templates:
@@ -104,6 +114,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-tag-meta
+  labels:
+    cargo.athena/bin: smoke-inject
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-tag-meta
   templates:

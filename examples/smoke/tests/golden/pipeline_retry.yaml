@@ -2,6 +2,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-flaky
+  labels:
+    cargo.athena/bin: smoke-retry
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-flaky
   templates:
@@ -74,6 +79,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-flaky-forever
+  labels:
+    cargo.athena/bin: smoke-retry
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-flaky-forever
   templates:
@@ -142,6 +152,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-retry
+  labels:
+    cargo.athena/bin: smoke-retry
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-retry
   templates:

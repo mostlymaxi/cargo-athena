@@ -1182,6 +1182,15 @@ pub struct BuildCtx {
     /// `cargo metadata`, so the upload and the emitted YAML always
     /// agree by construction.
     artifact_key: String,
+    /// User crate name (`CARGO_PKG_NAME`). Stamped as
+    /// `cargo.athena/pkg`.
+    krate: String,
+    /// User crate version (`CARGO_PKG_VERSION`). Stamped as
+    /// `cargo.athena/version` (version of the user's code, distinct from
+    /// `cargo.athena/toolchain` which is athena's own version).
+    version: String,
+    /// User binary name (`CARGO_BIN_NAME`). Stamped as `cargo.athena/bin`.
+    bin: String,
 }
 
 impl BuildCtx {
@@ -1201,6 +1210,9 @@ impl BuildCtx {
             pvcs,
             config: AthenaConfig::load(),
             artifact_key: format!("{krate}/{version}/{bin}.tar.gz"),
+            krate: krate.to_string(),
+            version: version.to_string(),
+            bin: bin.to_string(),
         }
     }
 
@@ -1212,6 +1224,35 @@ impl BuildCtx {
     /// `{crate}/{version}/{bin}.tar.gz`.
     pub fn artifact_key(&self) -> &str {
         &self.artifact_key
+    }
+
+    /// Baseline provenance labels stamped onto every emitted
+    /// `WorkflowTemplate` (and the `--with-workflow` runnable `Workflow`).
+    /// All under the `cargo.athena/*` namespace - intentionally NOT in
+    /// `app.kubernetes.io/*`, despite the convention's appeal. The shared
+    /// namespace would clash with Helm-managed deploys (which stamp
+    /// `managed-by: Helm`), ArgoCD's instance tracking, Backstage/IDP
+    /// catalogs scraping it for service identity, etc. Argo Workflows
+    /// itself made the same call: every Argo label lives under
+    /// `workflows.argoproj.io/*`, with an explicit comment at
+    /// `workflow/common/common.go:97` calling out that their `/component`
+    /// is "intentionally similar to `app.kubernetes.io/component`" but
+    /// staying in their own namespace.
+    ///
+    /// `cargo.athena/version` is the USER crate's version (matches
+    /// reader intuition - "what version of this code emitted this WT?");
+    /// athena's own toolchain version is `cargo.athena/toolchain` to
+    /// avoid the ambiguity from PR #57's first cut.
+    pub fn athena_labels(&self) -> std::collections::BTreeMap<String, String> {
+        let mut m = std::collections::BTreeMap::new();
+        m.insert("cargo.athena/pkg".to_string(), self.krate.clone());
+        m.insert("cargo.athena/version".to_string(), self.version.clone());
+        m.insert("cargo.athena/bin".to_string(), self.bin.clone());
+        m.insert(
+            "cargo.athena/toolchain".to_string(),
+            env!("CARGO_PKG_VERSION").to_string(),
+        );
+        m
     }
 
     /// Own literal decls ∪ the transitive `#[fragment]` closure for one
@@ -1639,12 +1680,18 @@ impl Collector {
     /// `CARGO_ATHENA_EMIT_JSON` mode `cargo athena submit` consumes for
     /// its register/drift checks.
     pub fn build_templates(&self, ctx: &BuildCtx) -> Vec<api::WorkflowTemplate> {
+        let labels = ctx.athena_labels();
         let mut tpls: Vec<api::WorkflowTemplate> = self
             .builders
             .iter()
             .map(|b| {
                 let inner = b(ctx);
-                wrap_workflow_template(inner.name.clone(), inner)
+                let mut wt = wrap_workflow_template(inner.name.clone(), inner);
+                if let Some(meta) = wt.metadata.as_mut() {
+                    meta.labels
+                        .extend(labels.iter().map(|(k, v)| (k.clone(), v.clone())));
+                }
+                wt
             })
             .collect();
         tpls.sort_by_key(name_of);
@@ -1824,6 +1871,7 @@ impl Collector {
             kind: api::KIND_WORKFLOW.to_string(),
             metadata: Some(api::ObjectMeta {
                 generate_name: format!("{}-", E::ARGO_NAME),
+                labels: ctx.athena_labels(),
                 ..Default::default()
             }),
             spec: Some(spec),

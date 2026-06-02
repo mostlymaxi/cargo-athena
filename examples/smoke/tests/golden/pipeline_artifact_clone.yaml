@@ -2,6 +2,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-make-meta-artifact
+  labels:
+    cargo.athena/bin: smoke-artifact-clone
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-make-meta-artifact
   templates:
@@ -78,6 +83,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-artifact-clone
+  labels:
+    cargo.athena/bin: smoke-artifact-clone
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-artifact-clone
   templates:
@@ -124,6 +134,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-use-meta-artifact
+  labels:
+    cargo.athena/bin: smoke-artifact-clone
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-use-meta-artifact
   templates:

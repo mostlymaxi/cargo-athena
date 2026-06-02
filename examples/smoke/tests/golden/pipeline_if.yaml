@@ -2,6 +2,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-decide
+  labels:
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-decide
   templates:
@@ -71,6 +76,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-left
+  labels:
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-left
   templates:
@@ -140,6 +150,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-make-meta
+  labels:
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-make-meta
   templates:
@@ -206,6 +221,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-note
+  labels:
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-note
   templates:
@@ -275,6 +295,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if
+  labels:
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if
   templates:
@@ -335,6 +360,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if-if0
+  labels:
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if0
   templates:
@@ -382,6 +412,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if-if0-arm0
+  labels:
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if0-arm0
   templates:
@@ -419,6 +454,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if-if0-arm1
+  labels:
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if0-arm1
   templates:
@@ -456,6 +496,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if-if1
+  labels:
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if1
   templates:
@@ -521,6 +566,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if-if1-arm0
+  labels:
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if1-arm0
   templates:
@@ -555,6 +605,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if-if1-arm1
+  labels:
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if1-arm1
   templates:
@@ -589,6 +644,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-if-if1-arm2
+  labels:
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if1-arm2
   templates:
@@ -623,6 +683,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-right
+  labels:
+    cargo.athena/bin: smoke-if
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-right
   templates:

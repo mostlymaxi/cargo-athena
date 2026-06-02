@@ -2,6 +2,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-cleanup
+  labels:
+    cargo.athena/bin: smoke-ttl
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-cleanup
   templates:
@@ -68,6 +73,11 @@ apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: cargo-athena-example-smoke-pipeline-ttl
+  labels:
+    cargo.athena/bin: smoke-ttl
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-ttl
   templates:
