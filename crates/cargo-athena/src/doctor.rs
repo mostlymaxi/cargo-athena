@@ -199,28 +199,18 @@ fn check_warn(name: &str, msg: &str) {
 // ---- implementations ------------------------------------------------------
 
 fn try_load_config() -> Option<(String, AthenaConfig)> {
-    // AthenaConfig::load panics on a missing file (it expects to find
-    // one), so probe by walking up first.
-    let cwd = std::env::current_dir().ok()?;
-    let path = walk_up_for(&cwd, "athena.toml")?;
-    let path_str = path.display().to_string();
-    // SAFETY: single-threaded.
-    unsafe { std::env::set_var("ATHENA_CONFIG", &path) };
-    let cfg = AthenaConfig::load();
-    Some((path_str, cfg))
-}
-
-fn walk_up_for(start: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
-    let mut p = start.to_path_buf();
-    loop {
-        let candidate = p.join(name);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-        if !p.pop() {
-            return None;
-        }
+    // `main()` has already resolved the effective config (`--config`,
+    // `$ATHENA_CONFIG`, the repo-local `./athena.toml`, or the global
+    // `~/.config` fallback) and exported `ATHENA_CONFIG`. Report whatever
+    // it landed on; the path itself shows which source won (e.g. a
+    // `~/.config/...` path means the global fallback). `is_file` guards
+    // against `AthenaConfig::load`'s panic on a missing file.
+    let path = std::env::var_os("ATHENA_CONFIG").map(std::path::PathBuf::from)?;
+    if !path.is_file() {
+        return None;
     }
+    let cfg = AthenaConfig::load();
+    Some((path.display().to_string(), cfg))
 }
 
 fn exec_version(cmd: &str, args: &[&str]) -> Option<String> {

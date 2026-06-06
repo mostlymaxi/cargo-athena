@@ -31,6 +31,7 @@ cli = [
     "dep:reqwest",
     "dep:tar",
     "dep:flate2",
+    "dep:etcetera",
     "dep:indicatif",
     "dep:console",
     "dep:futures",
@@ -54,6 +55,7 @@ k8s-openapi = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
+etcetera = { workspace = true, optional = true }
 indicatif = { workspace = true, optional = true }
 console = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }

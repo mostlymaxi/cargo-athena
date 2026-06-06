@@ -151,17 +151,50 @@ enum WorkflowCmd {
     Describe(emulate::DescribeArgs),
 }
 
+/// `~/.config/cargo-athena` (honoring `$XDG_CONFIG_HOME`), where a global
+/// `athena.toml` may live so the consumer commands (`submit` / `emit` /
+/// `ls` / `describe`) work without a per-repo config. `None` if the home
+/// dir can't be determined. The repo-local `./athena.toml` always wins
+/// over this (see `AthenaConfig::resolve_config_path`). Forced `Xdg`
+/// strategy => same path on mac and linux.
+fn global_config_dir() -> Option<std::path::PathBuf> {
+    use etcetera::base_strategy::{BaseStrategy, Xdg};
+    Xdg::new()
+        .ok()
+        .map(|xdg| xdg.config_dir().join("cargo-athena"))
+}
+
 fn main() {
     let Cargo::Athena(a) = Cargo::parse();
-    if let Some(cfg) = &a.config {
-        let abs = std::fs::canonicalize(cfg).unwrap_or_else(|e| {
-            eprintln!("--config {}: {e}", cfg.display());
-            exit(2);
+    // Resolve the effective `athena.toml` ONCE up front and export it via
+    // `ATHENA_CONFIG`, so every in-process helper AND the spawned user
+    // binary load the same file. Order (see `AthenaConfig::resolve_config_path`):
+    // `--config` -> `$ATHENA_CONFIG` -> `./athena.toml` (walking up, the
+    // repo/dev case) -> `~/.config/cargo-athena/athena.toml` (global, for
+    // source-free `submit`/`emit`/etc). The global step is the CLI's job
+    // (core never reaches for `etcetera`); core's own `load()` just reads
+    // the `ATHENA_CONFIG` we export here.
+    let env_cfg = std::env::var_os("ATHENA_CONFIG").map(std::path::PathBuf::from);
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let xdg = global_config_dir();
+    if let Some(path) = AthenaConfig::resolve_config_path(
+        a.config.as_deref(),
+        env_cfg.as_deref(),
+        &cwd,
+        xdg.as_deref(),
+    ) {
+        // Absolutize so the spawned binary (run from a different cwd)
+        // resolves the same file. An explicit, unreadable `--config` is a
+        // hard error (preserve the prior behavior); a discovered or
+        // inherited path is taken best-effort.
+        let abs = std::fs::canonicalize(&path).unwrap_or_else(|e| {
+            if a.config.is_some() {
+                eprintln!("--config {}: {e}", path.display());
+                exit(2);
+            }
+            path.clone()
         });
-        // One unified mechanism: `AthenaConfig::load()` (in core) reads
-        // `ATHENA_CONFIG`, and the `cargo run` child we spawn for
-        // emit/run inherits it. SAFETY: single-threaded, set before any
-        // thread or child process exists.
+        // SAFETY: single-threaded, set before any thread or child exists.
         unsafe { std::env::set_var("ATHENA_CONFIG", &abs) };
     }
     match a.cmd {

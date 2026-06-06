@@ -722,25 +722,76 @@ fn default_targets() -> Vec<String> {
     ]
 }
 
+/// Shown when no `athena.toml` can be located anywhere.
+const CONFIG_NOT_FOUND: &str = "athena.toml not found. Run from your workflow \
+    crate (or a parent dir), set $ATHENA_CONFIG, pass --config <FILE>, or create \
+    a global config at ~/.config/cargo-athena/athena.toml (see `cargo athena init`).";
+
 impl AthenaConfig {
+    /// Resolve *which* `athena.toml` to load, in priority order:
+    ///   1. `flag` (the `--config` flag),
+    ///   2. `env_config` (`$ATHENA_CONFIG`),
+    ///   3. the nearest `athena.toml` walking up from `cwd` (repo/dev mode),
+    ///   4. `<xdg_dir>/athena.toml` (a global config, for source-free use).
+    ///
+    /// Pure: every input is passed in (no env / cwd reads of its own), so
+    /// the ordering is unit-testable. `flag` / `env_config` are returned
+    /// unconditionally (explicit intent; existence is checked at load);
+    /// the walk-up and global candidates are returned only if the file
+    /// exists. `xdg_dir` is supplied by the CLI (resolved via `etcetera`);
+    /// the in-binary [`load`](Self::load) passes `None` and relies on the
+    /// CLI having resolved + exported `ATHENA_CONFIG` first.
+    pub fn resolve_config_path(
+        flag: Option<&std::path::Path>,
+        env_config: Option<&std::path::Path>,
+        cwd: &std::path::Path,
+        xdg_dir: Option<&std::path::Path>,
+    ) -> Option<std::path::PathBuf> {
+        if let Some(p) = flag {
+            return Some(p.to_path_buf());
+        }
+        // A set-but-empty `$ATHENA_CONFIG` (`export ATHENA_CONFIG=`, a blank
+        // `ATHENA_CONFIG=` in CI) is treated as unset, so it falls through
+        // to walk-up / global rather than shadowing them and panicking on an
+        // empty path later. Empty would otherwise silently defeat the global
+        // fallback this resolver exists to provide.
+        if let Some(p) = env_config.filter(|p| !p.as_os_str().is_empty()) {
+            return Some(p.to_path_buf());
+        }
+        if let Some(p) = Self::find_upwards_from(cwd) {
+            return Some(p);
+        }
+        if let Some(dir) = xdg_dir {
+            let p = dir.join("athena.toml");
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+        None
+    }
+
     /// `ATHENA_CONFIG` override, else the nearest `athena.toml` walking up
     /// from the cwd. Only ever called during emit — the in-pod binary
-    /// (run-mode) never needs `athena.toml`.
+    /// (run-mode) never needs `athena.toml`. The global (`~/.config`)
+    /// fallback lives in the CLI, which resolves the effective path and
+    /// exports `ATHENA_CONFIG` before this runs, so the same file loads
+    /// here whether invoked in-process or in the spawned user binary.
     pub fn load() -> Self {
-        let path = std::env::var_os("ATHENA_CONFIG")
-            .map(std::path::PathBuf::from)
-            .or_else(Self::find_upwards)
-            .expect(
-                "athena.toml not found: set ATHENA_CONFIG or add athena.toml \
-                 to the workspace (required by `cargo athena`)",
-            );
-        let text = std::fs::read_to_string(&path)
+        let env_config = std::env::var_os("ATHENA_CONFIG").map(std::path::PathBuf::from);
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let path = Self::resolve_config_path(None, env_config.as_deref(), &cwd, None)
+            .expect(CONFIG_NOT_FOUND);
+        Self::load_path(&path)
+    }
+
+    fn load_path(path: &std::path::Path) -> Self {
+        let text = std::fs::read_to_string(path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         toml::from_str(&text).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()))
     }
 
-    fn find_upwards() -> Option<std::path::PathBuf> {
-        let mut d = std::env::current_dir().ok()?;
+    fn find_upwards_from(start: &std::path::Path) -> Option<std::path::PathBuf> {
+        let mut d = start.to_path_buf();
         loop {
             let p = d.join("athena.toml");
             if p.is_file() {
@@ -894,6 +945,47 @@ pub struct ContainerRunMeta {
     /// File the body writes its serialized return to
     /// (`outputs.parameters.return`); read it back from the bind mount.
     pub result_path: Option<String>,
+}
+
+/// Wire-format version of the binary's metadata modes (PROBE / LIST /
+/// DESCRIBE / EMIT_JSON). The `cargo athena` CLI checks this on PROBE
+/// before trusting the other modes. Bump ONLY on a breaking change to
+/// those JSON shapes, NOT on every release, so an older CLI keeps
+/// working with a newer binary at the same protocol.
+pub const ATHENA_PROTOCOL: u32 = 1;
+
+/// Fixed marker in a [`ProbeInfo`] response (the `kind` field). Lets a
+/// consumer positively identify a cargo-athena binary and reject stray
+/// stdout from a non-athena executable with a clear error, rather than an
+/// opaque deserialization failure.
+pub const ATHENA_PROBE_KIND: &str = "cargo_athena_probe";
+
+/// What a cargo-athena binary reports in `CARGO_ATHENA_PROBE` mode: a
+/// handshake the CLI uses to (a) confirm the executable really is a
+/// cargo-athena binary, (b) detect CLI/binary version skew, and (c)
+/// learn the default/root template (so the workflow argument is optional).
+/// Produced with NO `athena.toml` (no `BuildCtx::collect`): works
+/// source-free / config-free.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct ProbeInfo {
+    /// Always [`ATHENA_PROBE_KIND`]. A consumer checks this first to tell a
+    /// real probe response apart from an unrelated binary's stdout.
+    pub kind: String,
+    /// Metadata wire-format version ([`ATHENA_PROTOCOL`]).
+    pub athena_protocol: u32,
+    /// cargo-athena toolchain version this binary was built against (for
+    /// skew diagnostics; distinct from the user crate `version` below).
+    pub athena_version: String,
+    /// The binary's root template (`entrypoint!(Root)`): a `#[workflow]` for
+    /// the typical DAG, or a `#[container]` for a single-container binary.
+    /// The consumer command uses it as the default when none is named.
+    pub default_template: String,
+    /// User crate name (`CARGO_PKG_NAME`).
+    pub package: String,
+    /// User crate version (`CARGO_PKG_VERSION`); part of the S3 key.
+    pub version: String,
+    /// User binary name (`CARGO_BIN_NAME`).
+    pub bin: String,
 }
 
 /// Drop the spaces `quote!` puts around `<` / `>` / `,` so a type
@@ -2092,6 +2184,29 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
         return;
     }
 
+    // `cargo athena` consumer commands run this FIRST to confirm the
+    // binary is a cargo-athena binary and to agree on the metadata
+    // wire-format version before trusting LIST / DESCRIBE / EMIT_JSON.
+    // Deliberately needs NO `athena.toml` (no `BuildCtx::collect`) so it
+    // works source-free, and it reports the root template the consumer
+    // command defaults to when none is named.
+    if std::env::var_os("CARGO_ATHENA_PROBE").is_some() {
+        let info = ProbeInfo {
+            kind: ATHENA_PROBE_KIND.to_string(),
+            athena_protocol: ATHENA_PROTOCOL,
+            athena_version: env!("CARGO_PKG_VERSION").to_string(),
+            default_template: E::ARGO_NAME.to_string(),
+            package: krate.to_string(),
+            version: version.to_string(),
+            bin: bin.to_string(),
+        };
+        println!(
+            "{}",
+            serde_json::to_string(&info).expect("ProbeInfo is serializable")
+        );
+        return;
+    }
+
     // `cargo athena container ls` sets this to enumerate every reachable
     // template's metadata as a JSON array (same per-template derivation
     // as describe — so names/params shown are exactly what runs).
@@ -2166,4 +2281,112 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
     let with_workflow = std::env::var_os("CARGO_ATHENA_WITH_WORKFLOW").is_some_and(|v| v == "1");
     let ctx = BuildCtx::collect(krate, version, bin);
     print!("{}", collector.emit::<E>(&ctx, with_workflow));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AthenaConfig;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    // `resolve_config_path` is pure (takes its inputs as params, reads no
+    // env / cwd of its own), so these exercise the precedence order
+    // without mutating the process environment, safe under parallel test
+    // runs. Filesystem-touching cases use a unique temp dir each.
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+
+    fn tmpdir(tag: &str) -> PathBuf {
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let d =
+            std::env::temp_dir().join(format!("athena-cfg-test-{}-{tag}-{n}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn touch(dir: &Path, name: &str) -> PathBuf {
+        let p = dir.join(name);
+        std::fs::write(&p, "").unwrap();
+        p
+    }
+
+    // temp_dir may be a symlink (e.g. macOS /tmp -> /private/tmp); compare
+    // canonicalized so the walk-up result matches the file we created.
+    fn canon(p: PathBuf) -> PathBuf {
+        std::fs::canonicalize(p).unwrap()
+    }
+
+    #[test]
+    fn flag_wins_over_everything() {
+        let flag = PathBuf::from("/tmp/explicit-athena.toml");
+        let env = PathBuf::from("/tmp/env-athena.toml");
+        let got = AthenaConfig::resolve_config_path(
+            Some(&flag),
+            Some(&env),
+            Path::new("/nonexistent"),
+            Some(Path::new("/nonexistent")),
+        );
+        assert_eq!(got.as_deref(), Some(flag.as_path()));
+    }
+
+    #[test]
+    fn env_wins_over_walkup_and_global() {
+        let env = PathBuf::from("/tmp/env-athena.toml");
+        let got = AthenaConfig::resolve_config_path(
+            None,
+            Some(&env),
+            Path::new("/nonexistent"),
+            Some(Path::new("/nonexistent")),
+        );
+        assert_eq!(got.as_deref(), Some(env.as_path()));
+    }
+
+    #[test]
+    fn empty_env_is_treated_as_unset() {
+        // A set-but-empty `$ATHENA_CONFIG` must fall through, not shadow the
+        // walk-up / global fallback (the source-free path).
+        let cwd = tmpdir("empty-env-cwd"); // no athena.toml on the walk-up
+        let xdg = tmpdir("empty-env-xdg");
+        let cfg = touch(&xdg, "athena.toml");
+        let got = AthenaConfig::resolve_config_path(None, Some(Path::new("")), &cwd, Some(&xdg));
+        assert_eq!(got.map(canon), Some(canon(cfg)));
+        let _ = std::fs::remove_dir_all(&cwd);
+        let _ = std::fs::remove_dir_all(&xdg);
+    }
+
+    #[test]
+    fn walkup_finds_athena_toml_in_ancestor() {
+        let root = tmpdir("walkup");
+        let cfg = touch(&root, "athena.toml");
+        let nested = root.join("a").join("b");
+        std::fs::create_dir_all(&nested).unwrap();
+        // No flag/env; the global must be ignored because walk-up hits first.
+        let got =
+            AthenaConfig::resolve_config_path(None, None, &nested, Some(Path::new("/nonexistent")));
+        assert_eq!(got.map(canon), Some(canon(cfg)));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn global_fallback_when_no_repo_config() {
+        let cwd = tmpdir("global-cwd"); // no athena.toml anywhere on the walk-up
+        let xdg = tmpdir("global-xdg");
+        let cfg = touch(&xdg, "athena.toml");
+        let got = AthenaConfig::resolve_config_path(None, None, &cwd, Some(&xdg));
+        assert_eq!(got.map(canon), Some(canon(cfg)));
+        let _ = std::fs::remove_dir_all(&cwd);
+        let _ = std::fs::remove_dir_all(&xdg);
+    }
+
+    #[test]
+    fn none_when_nothing_resolves() {
+        let cwd = tmpdir("none");
+        let got = AthenaConfig::resolve_config_path(
+            None,
+            None,
+            &cwd,
+            Some(Path::new("/definitely/not/here")),
+        );
+        assert_eq!(got, None);
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
 }

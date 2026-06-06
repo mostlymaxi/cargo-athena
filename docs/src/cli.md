@@ -25,9 +25,12 @@ The typical flow is **`publish`** to ship the binary, then
 [`init`](#init) to scaffold a fresh crate and [`doctor`](#doctor) to
 check that your toolchain is ready.
 
-`-c, --config <FILE>` (global) points at an `athena.toml`. By default
-the nearest one walking up from the cwd is used (like `Cargo.toml`),
-or `$ATHENA_CONFIG`.
+`-c, --config <FILE>` (global) points at an `athena.toml`. With no flag,
+it is resolved in order: `$ATHENA_CONFIG`, then the nearest `athena.toml`
+walking up from the cwd (like `Cargo.toml`), then a global
+`~/.config/cargo-athena/athena.toml` (honoring `$XDG_CONFIG_HOME`). The
+global fallback lets you run `submit` / `emit` / `ls` / `describe`
+against an already-published workflow with no per-repo config.
 
 ## `init`
 

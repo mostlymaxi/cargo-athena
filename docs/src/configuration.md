@@ -3,9 +3,16 @@
 `athena.toml` describes where the binary and artifacts live and a few
 pod defaults. It is required by `cargo athena` and is
 **never read in-pod** (everything it controls is baked into the emitted
-YAML). The nearest one walking up from the cwd is used (like
-`Cargo.toml`); point at a specific file with `cargo athena -c FILE …`
-or the `ATHENA_CONFIG` env var.
+YAML).
+
+It is resolved in order: `cargo athena -c FILE …`, then the
+`ATHENA_CONFIG` env var, then the nearest `athena.toml` walking up from
+the cwd (like `Cargo.toml`), then a global
+`~/.config/cargo-athena/athena.toml` (honoring `$XDG_CONFIG_HOME`). The
+global fallback is for consumers of an already-published workflow:
+`submit` / `emit` / `ls` / `describe` work from anywhere without a
+per-repo config. First match wins (no merging); a repo-local
+`athena.toml` always shadows the global one.
 
 A complete example (the one the kind e2e uses):
 
