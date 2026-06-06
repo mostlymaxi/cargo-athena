@@ -84,6 +84,39 @@ fn run_bin_argv(bin: &str, envs: &[(&str, &str)], argv: &[&str]) -> String {
     String::from_utf8(out.stdout).expect("binary stdout was not UTF-8")
 }
 
+/// `CARGO_ATHENA_PROBE`: the handshake the `cargo athena` CLI runs to
+/// confirm a binary is a cargo-athena binary, agree on the metadata
+/// wire-format version, and learn the default/root template. It must
+/// work source-free: no `ATHENA_CONFIG`, no `athena.toml` needed
+/// (unlike emit/list, which load config).
+#[test]
+fn probe_reports_identity_config_free() {
+    use cargo_athena::serde_json;
+    let out = run_bin(BIN_PIPELINE, &[("CARGO_ATHENA_PROBE", "1")]);
+    let v: serde_json::Value = serde_json::from_str(&out).expect("probe output is JSON");
+    // The fixed marker that lets the CLI tell a real probe from stray stdout.
+    assert_eq!(v["kind"], "cargo_athena_probe");
+    assert_eq!(v["athena_protocol"], serde_json::json!(1));
+    let pkg = v["package"].as_str().expect("package present");
+    let def = v["default_template"]
+        .as_str()
+        .expect("default_template present");
+    assert_eq!(pkg, "cargo-athena-example-smoke");
+    // The default/root template is `<crate>-<fn>` kebab, crate-prefixed.
+    assert!(
+        def.starts_with(pkg),
+        "default template is crate-prefixed: {def}"
+    );
+    assert!(
+        v["athena_version"].as_str().is_some_and(|s| !s.is_empty()),
+        "athena_version present"
+    );
+    assert!(
+        v["bin"].as_str().is_some_and(|s| !s.is_empty()),
+        "bin present"
+    );
+}
+
 /// Emit mode: the multi-doc WorkflowTemplate stream for `pipeline`
 /// (templates only — the default).
 #[test]
