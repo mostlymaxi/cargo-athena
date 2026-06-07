@@ -106,6 +106,60 @@ pub fn version_tag(raw: &str) -> String {
     out
 }
 
+/// Prefix that marks a dev-channel version tag. The CLI mints dev tags
+/// as `dev-<slot>`; everything else (a `kebab(semver)`) is a release.
+/// Both the producer (`format!("{DEV_PREFIX}{slot}")`) and every consumer
+/// ([`channel_of`]) key off this one symbol, so the channel contract
+/// can't drift across crates.
+pub const DEV_PREFIX: &str = "dev-";
+
+/// `dev` if `tag` is a dev slot, else `release`. The single home of the
+/// `dev-`-prefix → channel rule: core (label stamping + the config-free
+/// probe) and the CLI (gitinfo) all call this instead of re-spelling
+/// `starts_with`, so a dev binary can't silently report `release`.
+pub fn channel_of(tag: &str) -> &'static str {
+    if tag.starts_with(DEV_PREFIX) {
+        "dev"
+    } else {
+        "release"
+    }
+}
+
+/// Resolve a binary's sealed version tag from its build-time-baked value:
+/// the baked tag munged (in case a plain `cargo build` baked a raw /
+/// dotted / empty value, bypassing the CLI's gitinfo munge), else
+/// `kebab(semver)`. Idempotent on an already-kebab tag. The single owner
+/// of "what tag did this binary seal?", shared by `BuildCtx::collect` and
+/// the config-free probe path so the two can never disagree.
+pub fn seal_tag(baked: Option<&str>, semver: &str) -> String {
+    baked
+        .map(version_tag)
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| version_tag(semver))
+}
+
+/// The S3 object key of a binary's tarball: `{pkg}/<tag>/{bin}.tar.gz`.
+/// The ONE owner of the publish ↔ emit ↔ prune contract — the in-binary
+/// emit side, the `publish` uploader, and `prune` all call this, so the
+/// key segments / extension can't drift and orphan a tarball.
+pub fn binary_key(pkg: &str, tag: &str, bin: &str) -> String {
+    format!("{pkg}/{tag}/{bin}.tar.gz")
+}
+
+/// `cargo.athena/*` provenance label keys: stamped on every emitted
+/// `WorkflowTemplate` (core's `athena_labels`) and selected on by `cargo
+/// athena prune`. Shared consts so the emit side and the prune selector
+/// reference one spelling — a rename moves both, where a silent typo
+/// would make `prune` match zero templates and look like success.
+pub const LABEL_PKG: &str = "cargo.athena/pkg";
+pub const LABEL_VERSION: &str = "cargo.athena/version";
+pub const LABEL_BIN: &str = "cargo.athena/bin";
+pub const LABEL_TOOLCHAIN: &str = "cargo.athena/toolchain";
+pub const LABEL_TAG: &str = "cargo.athena/tag";
+pub const LABEL_CHANNEL: &str = "cargo.athena/channel";
+pub const LABEL_COMMIT: &str = "cargo.athena/commit";
+pub const LABEL_DIRTY: &str = "cargo.athena/dirty";
+
 /// In-pod mount path for a `host!("/p")` literal.
 pub fn host_mount_path(host_path: &str) -> String {
     format!("{ATHENA_MOUNTS_DIR}/{}", fnv_1a_64_hex(host_path))
@@ -263,6 +317,38 @@ mod tests {
         assert_eq!(version_tag("1.0.0-rc.1+build"), "1-0-0-rc-1-build");
         assert_eq!(version_tag("dev-foo"), "dev-foo");
         assert_eq!(version_tag("dev-a1b2c3d"), "dev-a1b2c3d");
+    }
+
+    #[test]
+    fn channel_of_keys_off_dev_prefix() {
+        assert_eq!(channel_of("dev-foo"), "dev");
+        assert_eq!(channel_of("dev-a1b2c3d"), "dev");
+        assert_eq!(channel_of("1-2-3"), "release");
+        assert_eq!(channel_of("0-0-0"), "release");
+    }
+
+    #[test]
+    fn seal_tag_normalizes_and_falls_back() {
+        // A baked tag wins, munged to DNS-1123 form.
+        assert_eq!(seal_tag(Some("dev-foo"), "9.9.9"), "dev-foo");
+        assert_eq!(seal_tag(Some("1.2.3"), "9.9.9"), "1-2-3");
+        // An empty / all-symbol baked tag falls back to kebab(semver).
+        assert_eq!(seal_tag(Some(""), "1.2.3"), "1-2-3");
+        assert_eq!(seal_tag(Some("+++"), "1.2.3"), "1-2-3");
+        // No baked tag (plain `cargo build`) -> kebab(semver).
+        assert_eq!(seal_tag(None, "1.2.3"), "1-2-3");
+    }
+
+    #[test]
+    fn binary_key_pins_the_layout() {
+        assert_eq!(
+            binary_key("myapp", "1-2-3", "app"),
+            "myapp/1-2-3/app.tar.gz"
+        );
+        assert_eq!(
+            binary_key("myapp", "dev-foo", "app"),
+            "myapp/dev-foo/app.tar.gz"
+        );
     }
 
     #[test]

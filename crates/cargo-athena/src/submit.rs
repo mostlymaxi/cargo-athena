@@ -653,22 +653,24 @@ pub fn prune(a: PruneArgs) {
     // Every WorkflowTemplate carrying this exact (pkg, bin, tag). All
     // three pinned so the selector matches EXACTLY this binary's version,
     // not sibling bins of a multi-bin crate (which share pkg + tag) — the
-    // selector scope mirrors the S3 key, which also includes {bin}.
-    let selector = format!("cargo.athena/pkg={pkg},cargo.athena/bin={bin},cargo.athena/tag={tag}");
+    // selector scope mirrors the S3 key, which also includes {bin}. Label
+    // keys are the shared `api::munge::LABEL_*` the emit side stamps with.
+    let selector = format!(
+        "{}={pkg},{}={bin},{}={tag}",
+        api::munge::LABEL_PKG,
+        api::munge::LABEL_BIN,
+        api::munge::LABEL_TAG,
+    );
     let names = cluster.list_templates(&ns, &selector);
 
     // The S3 binary for this tag: repo coords from athena.toml, key from
     // (pkg, tag, bin) — the same `{pkg}/<tag>/{bin}.tar.gz` the binary
-    // bakes and `publish` uploads.
+    // bakes and `publish` uploads, via the shared `binary_key`.
     let cfg = AthenaConfig::load();
-    let repo = &cfg.artifact_repository.s3;
-    let s3 = S3Ref {
-        endpoint: repo.endpoint.clone(),
-        bucket: repo.bucket.clone(),
-        region: repo.region.clone(),
-        insecure: repo.insecure,
-        key: format!("{pkg}/{tag}/{bin}.tar.gz"),
-    };
+    let s3 = S3Ref::from_repo(
+        &cfg.artifact_repository.s3,
+        api::munge::binary_key(&pkg, &tag, &bin),
+    );
 
     if names.is_empty() && a.keep_binary {
         eprintln!("nothing to prune: no WorkflowTemplates match {selector}.");

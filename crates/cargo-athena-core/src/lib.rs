@@ -886,6 +886,23 @@ pub struct S3Ref {
     pub key: String,
 }
 
+impl S3Ref {
+    /// A concrete object reference at `key` against the repo's bucket /
+    /// endpoint. The one place the `S3Repo` -> `S3Ref` field copy lives,
+    /// so `publish`, `prune`, and `doctor` can't drift on the mapping.
+    /// (Distinct from `S3Repo::s3_loc`, which targets Argo's
+    /// `api::S3Artifact` and also emits the secret-key selectors.)
+    pub fn from_repo(repo: &S3Repo, key: String) -> Self {
+        S3Ref {
+            endpoint: repo.endpoint.clone(),
+            bucket: repo.bucket.clone(),
+            region: repo.region.clone(),
+            insecure: repo.insecure,
+            key,
+        }
+    }
+}
+
 /// One artifact bound into the container at `path`, backed by S3.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct ArtifactRef {
@@ -1335,21 +1352,17 @@ impl BuildCtx {
         for p in inventory::iter::<PvcReg> {
             pvcs.insert(p.argo_name, p);
         }
-        // Normalize the baked tag the SAME way the None fallback is, so a
-        // raw/dotted/empty `ATHENA_VERSION_TAG` baked by a plain `cargo
-        // build` (bypassing the CLI's gitinfo munge) can't emit a
-        // non-DNS-1123 name or a `{pkg}//{bin}` key. munge is idempotent,
-        // so the wrapper path (already-kebab tag) is unaffected; an
-        // empty-after-munge value falls back to the semver.
-        let version_tag = version_tag
-            .map(crate::api::munge::version_tag)
-            .filter(|t| !t.is_empty())
-            .unwrap_or_else(|| crate::api::munge::version_tag(version));
+        // Seal the version tag (baked value munged, else kebab(semver))
+        // and build the S3 key from it. Both rules live in `api::munge`,
+        // shared with the config-free probe path, so emit and probe can't
+        // disagree on the sealed tag, and publish/prune can't drift on the
+        // key layout.
+        let version_tag = crate::api::munge::seal_tag(version_tag, version);
         Self {
             fragments,
             pvcs,
             config: AthenaConfig::load(),
-            artifact_key: format!("{krate}/{version_tag}/{bin}.tar.gz"),
+            artifact_key: crate::api::munge::binary_key(krate, &version_tag, bin),
             krate: krate.to_string(),
             version: version.to_string(),
             bin: bin.to_string(),
@@ -1410,13 +1423,9 @@ impl BuildCtx {
     }
 
     /// `release` (clean build on the release branch) or `dev` (off-road),
-    /// derived from the tag — the CLI prefixes every dev tag with `dev-`.
+    /// derived from the sealed tag via the shared `api::munge::channel_of`.
     fn channel(&self) -> &'static str {
-        if self.version_tag.starts_with("dev-") {
-            "dev"
-        } else {
-            "release"
-        }
+        crate::api::munge::channel_of(&self.version_tag)
     }
 
     /// Baseline provenance labels stamped onto every emitted
@@ -1437,12 +1446,13 @@ impl BuildCtx {
     /// athena's own toolchain version is `cargo.athena/toolchain` to
     /// avoid the ambiguity from PR #57's first cut.
     pub fn athena_labels(&self) -> std::collections::BTreeMap<String, String> {
+        use crate::api::munge;
         let mut m = std::collections::BTreeMap::new();
-        m.insert("cargo.athena/pkg".to_string(), self.krate.clone());
-        m.insert("cargo.athena/version".to_string(), self.version.clone());
-        m.insert("cargo.athena/bin".to_string(), self.bin.clone());
+        m.insert(munge::LABEL_PKG.to_string(), self.krate.clone());
+        m.insert(munge::LABEL_VERSION.to_string(), self.version.clone());
+        m.insert(munge::LABEL_BIN.to_string(), self.bin.clone());
         m.insert(
-            "cargo.athena/toolchain".to_string(),
+            munge::LABEL_TOOLCHAIN.to_string(),
             env!("CARGO_PKG_VERSION").to_string(),
         );
         // Build-time-sealed version coordinate + provenance. `tag` and
@@ -1450,17 +1460,15 @@ impl BuildCtx {
         // `kebab(version)` for a plain build); `commit`/`dirty` only when
         // `cargo athena build`/`publish` baked them. `tag` makes `cargo
         // athena prune` a pure label-selector delete; the rest describe
-        // the *artifact*, not the deploy environment.
-        m.insert("cargo.athena/tag".to_string(), self.version_tag.clone());
-        m.insert(
-            "cargo.athena/channel".to_string(),
-            self.channel().to_string(),
-        );
+        // the *artifact*, not the deploy environment. Keys are the shared
+        // `api::munge::LABEL_*` consts, so the prune selector can't drift.
+        m.insert(munge::LABEL_TAG.to_string(), self.version_tag.clone());
+        m.insert(munge::LABEL_CHANNEL.to_string(), self.channel().to_string());
         if let Some(c) = &self.commit {
-            m.insert("cargo.athena/commit".to_string(), c.clone());
+            m.insert(munge::LABEL_COMMIT.to_string(), c.clone());
         }
         if let Some(d) = self.dirty {
-            m.insert("cargo.athena/dirty".to_string(), d.to_string());
+            m.insert(munge::LABEL_DIRTY.to_string(), d.to_string());
         }
         m
     }
@@ -2376,18 +2384,11 @@ pub fn entrypoint_impl<E: Template>(
     // works source-free, and it reports the root template the consumer
     // command defaults to when none is named.
     if std::env::var_os("CARGO_ATHENA_PROBE").is_some() {
-        // Resolve the sealed tag without a BuildCtx (probe is config-free):
-        // baked `ATHENA_VERSION_TAG`, else `kebab(version)`. Normalize the
-        // baked value too (matches BuildCtx::collect).
-        let tag = version_tag
-            .map(crate::api::munge::version_tag)
-            .filter(|t| !t.is_empty())
-            .unwrap_or_else(|| crate::api::munge::version_tag(version));
-        let channel = if tag.starts_with("dev-") {
-            "dev"
-        } else {
-            "release"
-        };
+        // Resolve the sealed tag + channel without a BuildCtx (probe is
+        // config-free), via the SAME `api::munge` helpers `BuildCtx::collect`
+        // uses, so probe and emit can't disagree on either.
+        let tag = crate::api::munge::seal_tag(version_tag, version);
+        let channel = crate::api::munge::channel_of(&tag);
         let info = ProbeInfo {
             kind: ATHENA_PROBE_KIND.to_string(),
             athena_protocol: ATHENA_PROTOCOL,

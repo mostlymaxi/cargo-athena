@@ -247,15 +247,12 @@ fn rustup_installed_targets() -> Option<Vec<String>> {
 }
 
 fn check_s3_reachable(cfg: &AthenaConfig) -> Result<(), String> {
-    let s3 = cargo_athena::S3Ref {
-        endpoint: cfg.artifact_repository.s3.endpoint.clone(),
-        bucket: cfg.artifact_repository.s3.bucket.clone(),
-        region: cfg.artifact_repository.s3.region.clone(),
-        insecure: cfg.artifact_repository.s3.insecure,
-        // A sentinel key we don't care about; we only need the
-        // request to make it to the server. 404 is still "reachable".
-        key: ".athena-doctor-probe".to_string(),
-    };
+    // A sentinel key we don't care about; we only need the request to
+    // make it to the server. 404 is still "reachable".
+    let s3 = cargo_athena::S3Ref::from_repo(
+        &cfg.artifact_repository.s3,
+        ".athena-doctor-probe".to_string(),
+    );
     let store = crate::emulate::s3_store(&s3);
     let key = object_store::path::Path::from(s3.key.as_str());
     let result = crate::emulate::rt()
