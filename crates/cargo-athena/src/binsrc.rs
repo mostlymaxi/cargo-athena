@@ -140,29 +140,49 @@ impl BinarySource {
                 out.status.code()
             ));
         }
-        let info: ProbeInfo = serde_json::from_slice(&out.stdout).unwrap_or_else(|_| {
+        // Check the two handshake fields off a tolerant `Value` FIRST (no
+        // serde derive needed), so a `kind`/protocol mismatch reports a
+        // clear message instead of failing the full `ProbeInfo` parse. The
+        // full parse must not gate the handshake check: a struct mismatch at
+        // a matching protocol is a CLI/library version skew, which we want
+        // to name precisely.
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|_| {
             die(&format!(
                 "{} does not look like a cargo-athena binary (unrecognized probe response).",
                 self.label()
             ))
         });
-        if info.kind != ATHENA_PROBE_KIND {
+        if v.get("kind").and_then(|k| k.as_str()) != Some(ATHENA_PROBE_KIND) {
             die(&format!("{} is not a cargo-athena binary.", self.label()));
         }
-        if info.athena_protocol != ATHENA_PROTOCOL {
-            let hint = if info.athena_protocol > ATHENA_PROTOCOL {
+        let proto = v
+            .get("athena_protocol")
+            .and_then(|p| p.as_u64())
+            .unwrap_or(0) as u32;
+        if proto != ATHENA_PROTOCOL {
+            let hint = if proto > ATHENA_PROTOCOL {
                 "upgrade the CLI (`cargo install cargo-athena`)"
             } else {
-                "rebuild/republish the binary with a newer cargo-athena, or use a matching CLI"
+                "rebuild the workflow binary against this cargo-athena (its library + the CLI must match), or use a matching CLI"
             };
             die(&format!(
-                "version mismatch: {} speaks cargo-athena probe protocol {}, this CLI speaks {} ({hint}).",
+                "version mismatch: {} speaks cargo-athena probe protocol {proto}, this CLI speaks {ATHENA_PROTOCOL} ({hint}).",
                 self.label(),
-                info.athena_protocol,
-                ATHENA_PROTOCOL
             ));
         }
-        info
+        // kind + protocol matched, so this IS a cargo-athena binary; if the
+        // full struct still doesn't parse, the binary and this CLI were
+        // built from struct-incompatible cargo-athena versions (a dev skew,
+        // e.g. a stale path-dependency).
+        serde_json::from_value(v).unwrap_or_else(|_| {
+            die(&format!(
+                "{} was built with a different cargo-athena than this CLI (its \
+                 probe is missing fields the CLI expects). Rebuild the workflow \
+                 binary against the same cargo-athena — its library dependency \
+                 and the `cargo athena` CLI must be the same version.",
+                self.label()
+            ))
+        })
     }
 
     /// Run a `CARGO_ATHENA_*` metadata mode; return its stdout (the JSON
