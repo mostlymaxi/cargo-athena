@@ -325,6 +325,16 @@ pub fn submit(a: SubmitArgs) {
     // Confirm it's a cargo-athena binary (+ protocol) and learn its root
     // template (the default when no `-w` is given).
     let info = src.probe();
+    // The binary's identity is sealed at build time; surface the channel
+    // so a dev build deployed to a shared cluster is never a surprise
+    // (the apply step below still confirms before any cluster write).
+    if info.channel == "dev" {
+        eprintln!(
+            "note: deploying a DEV build (tag `{}`); its WorkflowTemplates are \
+             version-suffixed and won't collide with releases.",
+            info.version_tag
+        );
+    }
     let template = a.workflow.clone().unwrap_or(info.default_template);
 
     // 1. Introspect every reachable template (names, params+types, the

@@ -22,6 +22,8 @@ mod doctor;
 mod emulate;
 #[path = "../feedback.rs"]
 mod feedback;
+#[path = "../gitinfo.rs"]
+mod gitinfo;
 #[path = "../init.rs"]
 mod init;
 #[path = "../ls.rs"]
@@ -103,6 +105,8 @@ enum Cmd {
         /// Override the `athena.toml` target matrix (repeatable).
         #[arg(long = "target")]
         targets: Vec<String>,
+        #[command(flatten)]
+        gate: GateArgs,
         /// Dry run: resolve + report the key without building/uploading.
         #[arg(long)]
         print: bool,
@@ -119,10 +123,35 @@ enum Cmd {
         /// (build-once / upload-many, e.g. a CI artifact).
         #[arg(long)]
         tarball: Option<String>,
+        #[command(flatten)]
+        gate: GateArgs,
         /// Dry run: resolve + report the key without building/uploading.
         #[arg(long)]
         print: bool,
     },
+}
+
+/// The release-gate flags shared by `build` / `publish`. The version tag
+/// they resolve is baked into the binary (and used as the S3 key), so a
+/// clean build on a release branch is the only path to a `kebab(semver)`
+/// release; everything else is a dev version. `--allow-dirty` and the
+/// off-branch confirm are deliberately SEPARATE gates (dirty = binary
+/// integrity; off-branch = release provenance).
+#[derive(clap::Args)]
+struct GateArgs {
+    /// Build a dev version and name its slot. Bare `--dev-tag` = the
+    /// short commit (`dev-<sha>`); `--dev-tag foo` = `dev-foo` (a stable
+    /// slot you overwrite while iterating). Forces the dev channel even
+    /// on a clean release branch.
+    #[arg(long = "dev-tag", value_name = "TAG", num_args = 0..=1)]
+    dev_tag: Option<Option<String>>,
+    /// Allow a dirty working tree: uncommitted changes get baked into the
+    /// binary. Required to build off a clean tree (a dev version).
+    #[arg(long = "allow-dirty")]
+    allow_dirty: bool,
+    /// Skip the off-release-branch confirmation prompt (for CI).
+    #[arg(long)]
+    yes: bool,
 }
 
 /// `~/.config/cargo-athena` (honoring `$XDG_CONFIG_HOME`), where a global
@@ -186,15 +215,17 @@ fn main() {
         Cmd::Build {
             pkg,
             targets,
+            gate,
             print,
         } => {
             let (package, bin) = pkg.resolve();
-            build(package.as_deref(), bin.as_deref(), &targets, print);
+            build(package.as_deref(), bin.as_deref(), &targets, gate, print);
         }
         Cmd::Publish {
             pkg,
             targets,
             tarball,
+            gate,
             print,
         } => {
             let (package, bin) = pkg.resolve();
@@ -203,6 +234,7 @@ fn main() {
                 bin.as_deref(),
                 &targets,
                 tarball.as_deref(),
+                gate,
                 print,
             );
         }
@@ -300,8 +332,14 @@ fn preflight_zig() {
     exit(1);
 }
 
-fn build(package: Option<&str>, bin: Option<&str>, cli_targets: &[String], print: bool) {
-    if let Some((tarball, _s3, dest)) = build_tarball(package, bin, cli_targets, print) {
+fn build(
+    package: Option<&str>,
+    bin: Option<&str>,
+    cli_targets: &[String],
+    gate: GateArgs,
+    print: bool,
+) {
+    if let Some((tarball, _s3, dest)) = build_tarball(package, bin, cli_targets, gate, print) {
         eprintln!("packaged {tarball}  ->  {dest}");
         eprintln!(
             "(`build` packages only — `cargo athena publish` does \
@@ -312,14 +350,15 @@ fn build(package: Option<&str>, bin: Option<&str>, cli_targets: &[String], print
 
 /// The artifact's S3 location (the exact key `emit` injects into every
 /// container, so the upload lands where the in-pod bootstrap reads it)
-/// plus a human-readable `dest` string. The key is hardcoded as
-/// `{crate}/{version}/{bin}.tar.gz`, the same form `BuildCtx::collect`
-/// builds in-binary, so the two sites can never drift.
+/// plus a human-readable `dest` string. The key is `{crate}/<tag>/{bin}
+/// .tar.gz`, the same form `BuildCtx::collect` builds in-binary from the
+/// baked `version_tag`, so the upload and the emitted YAML can't drift —
+/// and a dev binary never overwrites a release tarball.
 ///
 /// `AWS_ENDPOINT_URL` can override the endpoint at upload time without
 /// changing what `emit` injects.
-fn artifact_s3(cfg: &AthenaConfig, krate: &str, version: &str, bin: &str) -> (S3Ref, String) {
-    let key = format!("{krate}/{version}/{bin}.tar.gz");
+fn artifact_s3(cfg: &AthenaConfig, krate: &str, tag: &str, bin: &str) -> (S3Ref, String) {
+    let key = format!("{krate}/{tag}/{bin}.tar.gz");
     let repo = &cfg.artifact_repository.s3;
     // Same field mapping core uses to emit the binary artifact.
     let s3 = S3Ref {
@@ -350,6 +389,7 @@ fn build_tarball(
     package: Option<&str>,
     bin: Option<&str>,
     cli_targets: &[String],
+    gate: GateArgs,
     print: bool,
 ) -> Option<(String, S3Ref, String)> {
     let cfg = AthenaConfig::load();
@@ -362,15 +402,35 @@ fn build_tarball(
         cli_targets.to_vec()
     };
 
-    let (s3, dest) = artifact_s3(&cfg, &krate, &version, &bin);
+    // Resolve the build-time-sealed version tag (git-aware + the two
+    // gates; not gated on a `--print` dry run). It keys the S3 upload AND
+    // is baked into the binary below, so the two agree by construction.
+    let bt = gitinfo::resolve(&version, gate.dev_tag, gate.allow_dirty, gate.yes, !print);
+    let (s3, dest) = artifact_s3(&cfg, &krate, &bt.tag, &bin);
     let tarball = format!("target/athena/{bin}.tar.gz");
 
     eprintln!("crate={krate} version={version} bin={bin}");
+    eprintln!("tag={} channel={}", bt.tag, bt.channel);
     eprintln!("targets: {}", targets.join(", "));
     eprintln!("destination: {dest}");
 
     if print {
         return None;
+    }
+
+    // Bake the resolved tag + provenance into the binary: rustc reads
+    // these via `option_env!` (in `entrypoint!`) at compile time, and the
+    // cargo children below inherit this process's env. Setting them here
+    // (not per-Command) means one source for every target build.
+    // SAFETY: single-threaded; set before spawning any cargo child.
+    unsafe {
+        std::env::set_var("ATHENA_VERSION_TAG", &bt.tag);
+        if let Some(c) = &bt.commit {
+            std::env::set_var("ATHENA_GIT_COMMIT", c);
+        }
+        if bt.dirty {
+            std::env::set_var("ATHENA_GIT_DIRTY", "true");
+        }
     }
 
     preflight_zig();
@@ -443,19 +503,27 @@ fn publish(
     bin: Option<&str>,
     cli_targets: &[String],
     tarball_in: Option<&str>,
+    gate: GateArgs,
     print: bool,
 ) {
     if let Some(path) = tarball_in {
         let cfg = AthenaConfig::load();
         let (krate, version, default_bin) = package_meta(package);
         let bin = bin.map(str::to_string).unwrap_or(default_bin);
-        let (s3, dest) = artifact_s3(&cfg, &krate, &version, &bin);
+        // A prebuilt tarball already has its tag baked in; resolve the
+        // SAME tag here for the upload key. No gating (the build, not the
+        // upload, is where the dirty/branch gates belong) — set
+        // `ATHENA_VERSION_TAG=<tag>` to force the exact tag when the
+        // current repo state doesn't match the build's (the CI path).
+        let bt = gitinfo::resolve(&version, gate.dev_tag, gate.allow_dirty, gate.yes, false);
+        let (s3, dest) = artifact_s3(&cfg, &krate, &bt.tag, &bin);
         let p = std::path::Path::new(path);
         if !p.exists() {
             eprintln!("no tarball at {path}");
             exit(1);
         }
         eprintln!("crate={krate} version={version} bin={bin}");
+        eprintln!("tag={} channel={}", bt.tag, bt.channel);
         eprintln!("upload key: {}", s3.key);
         eprintln!("destination: {dest}");
         if print {
@@ -465,7 +533,7 @@ fn publish(
         do_upload(&s3, p, &dest);
         return;
     }
-    let Some((tarball, s3, dest)) = build_tarball(package, bin, cli_targets, print) else {
+    let Some((tarball, s3, dest)) = build_tarball(package, bin, cli_targets, gate, print) else {
         return; // --print dry run: nothing built, nothing to upload
     };
     do_upload(&s3, std::path::Path::new(&tarball), &dest);
