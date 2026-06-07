@@ -98,6 +98,15 @@ pub fn resolve(
         && !t.is_empty()
     {
         let tag = munge::version_tag(&t);
+        // Reject a value that normalizes to empty (all-symbol) — baking
+        // tag="" would yield a `<base>-` name + a `{pkg}//{bin}` key.
+        if tag.is_empty() {
+            eprintln!(
+                "error: ATHENA_VERSION_TAG={t:?} normalizes to an empty tag \
+                 (no [a-z0-9] characters)."
+            );
+            exit(2);
+        }
         return BuildTag {
             channel: channel_of(&tag),
             tag,
@@ -135,23 +144,37 @@ pub fn resolve(
     }
 
     // Dev channel. Gate 2 (soft): off the release branch → warn + confirm.
+    // Only PROMPT on a TTY; non-interactively (CI) proceed to the dev
+    // build (the intended off-main outcome) with a printed warning, so a
+    // plain `build`/`publish` on a feature branch / detached HEAD never
+    // hangs on a closed stdin or hard-fails. (The HARD dirty gate above
+    // still protects via --allow-dirty.)
     if gate
         && let Some(state) = &st
         && !on_release
         && !yes
     {
-        eprint!(
-            "warning: not on a release branch (on {:?}); this builds a DEV \
-             version, not a clean semver release.\nProceed? [y/N] ",
-            state.branch
-        );
-        use std::io::Write;
-        let _ = std::io::stderr().flush();
-        let mut s = String::new();
-        std::io::stdin().read_line(&mut s).ok();
-        if !matches!(s.trim(), "y" | "Y" | "yes" | "Yes") {
-            eprintln!("aborted.");
-            exit(1);
+        use std::io::IsTerminal;
+        if std::io::stdin().is_terminal() {
+            use std::io::Write;
+            eprint!(
+                "warning: not on a release branch (on {:?}); this builds a DEV \
+                 version, not a clean semver release.\nProceed? [y/N] ",
+                state.branch
+            );
+            let _ = std::io::stderr().flush();
+            let mut s = String::new();
+            std::io::stdin().read_line(&mut s).ok();
+            if !matches!(s.trim(), "y" | "Y" | "yes" | "Yes") {
+                eprintln!("aborted.");
+                exit(1);
+            }
+        } else {
+            eprintln!(
+                "warning: not on a release branch (on {:?}); building a DEV \
+                 version (non-interactive — pass --yes to silence).",
+                state.branch
+            );
         }
     }
 

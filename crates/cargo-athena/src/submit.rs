@@ -639,9 +639,11 @@ pub fn prune(a: PruneArgs) {
     let cluster = connect_to(a.argo_server.clone(), a.insecure);
     eprintln!("cluster: {} (namespace {ns})", cluster.describe());
 
-    // Every WorkflowTemplate carrying this exact (pkg, tag). Both pinned,
-    // so no broad-selector mass-delete is possible.
-    let selector = format!("cargo.athena/pkg={pkg},cargo.athena/tag={tag}");
+    // Every WorkflowTemplate carrying this exact (pkg, bin, tag). All
+    // three pinned so the selector matches EXACTLY this binary's version,
+    // not sibling bins of a multi-bin crate (which share pkg + tag) — the
+    // selector scope mirrors the S3 key, which also includes {bin}.
+    let selector = format!("cargo.athena/pkg={pkg},cargo.athena/bin={bin},cargo.athena/tag={tag}");
     let names = cluster.list_templates(&ns, &selector);
 
     // The S3 binary for this tag: repo coords from athena.toml, key from
@@ -684,11 +686,8 @@ pub fn prune(a: PruneArgs) {
     }
     if !a.keep_binary {
         let st = crate::feedback::step(format!("Deleting s3://{}/{}", s3.bucket, s3.key));
-        let deleted = crate::emulate::s3_delete(&s3);
+        crate::emulate::s3_delete(&s3);
         st.finish();
-        if !deleted {
-            eprintln!("  (S3 binary was already absent)");
-        }
     }
     eprintln!(
         "pruned {} WorkflowTemplate(s){} for `{pkg}` @ `{tag}`.",

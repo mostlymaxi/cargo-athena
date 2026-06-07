@@ -787,13 +787,21 @@ pub(crate) fn s3_exists(s3: &S3Ref) -> bool {
     ok
 }
 
-/// Delete the S3 object. Returns `true` if it was deleted, `false` if it
-/// was already absent (idempotent — `prune` re-runs cleanly).
-pub(crate) fn s3_delete(s3: &S3Ref) -> bool {
+/// Delete the S3 object. Idempotent (a genuinely-absent key is fine), but
+/// a REAL failure (403/no-perms, bad endpoint, network) hard-fails loudly
+/// rather than being misreported as "already gone" — symmetric with the
+/// WorkflowTemplate delete in `submit`.
+pub(crate) fn s3_delete(s3: &S3Ref) {
     let store = s3_store(s3);
     let key = object_store::path::Path::from(s3.key.as_str());
-    rt().block_on(async { object_store::ObjectStore::delete(&store, &key).await })
-        .is_ok()
+    match rt().block_on(async { object_store::ObjectStore::delete(&store, &key).await }) {
+        Ok(()) => {}
+        // Non-S3 backends may surface a missing key as NotFound; S3/MinIO
+        // DeleteObject returns 204 (Ok) for an absent key, so this arm is
+        // belt-and-suspenders for idempotent re-runs.
+        Err(object_store::Error::NotFound { .. }) => {}
+        Err(e) => die(&format!("delete s3://{}/{}: {e}", s3.bucket, s3.key)),
+    }
 }
 
 /// Stream the S3 object to `dst` with a byte-progress bar.

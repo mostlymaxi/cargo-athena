@@ -174,6 +174,12 @@ runs:
         args=("${IN_COMMAND}")
         if [ -n "${IN_PACKAGE}" ]; then args+=(--package "${IN_PACKAGE}"); fi
         if [ -n "${IN_BIN}" ];     then args+=(--bin "${IN_BIN}"); fi
+        # CI is non-interactive: auto-confirm the off-release-branch gate
+        # (the hard --allow-dirty gate still applies — set it via inputs if
+        # you intend to publish a dirty tree).
+        case "${IN_COMMAND}" in
+          build|publish) args+=(--yes) ;;
+        esac
         IFS=',' read -ra TARR <<< "${IN_TARGETS}"
         for t in "${TARR[@]}"; do
           if [ -n "$t" ]; then args+=(--target "$t"); fi
