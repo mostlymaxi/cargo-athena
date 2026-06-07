@@ -1,0 +1,188 @@
+name: "cargo-athena build & publish"
+description: >
+  Cross-compile a cargo-athena workflow binary (static-musl, multi-arch) and
+  publish the tarball to any S3-compatible object store, driven by your athena.toml.
+branding:
+  icon: upload-cloud
+  color: purple
+
+# A composite action: drop it as a step in your own job (after actions/checkout)
+# so it shares your checkout + cache. It encapsulates the documented publish
+# prereqs - the Zig cross-compiler, the rustup musl targets, and the
+# `cargo athena` CLI - so you never re-derive the flow by hand.
+inputs:
+  command:
+    description: "`publish` (cross-compile + upload) or `build` (package only; no upload, no creds)."
+    default: "publish"
+  package:
+    description: "Cargo package to build (-p). Default: athena.toml [defaults].package, else the sole package."
+    default: ""
+  bin:
+    description: "Cargo bin within the package. Default: [defaults].bin, else the package's default bin."
+    default: ""
+  targets:
+    description: >
+      Comma- or space-separated target triples. These are both `rustup target add`-ed
+      and passed to the build, so they never drift. Default: read from athena.toml
+      [bootstrap].targets (else the two musl defaults).
+    default: ""
+  config:
+    description: "Path to athena.toml (relative to working-directory). Default: discovered by walking up."
+    default: ""
+  working-directory:
+    description: "Run dir for the cargo steps. Must be your Cargo workspace root (where ./target lives)."
+    default: "."
+  tarball:
+    description: "publish only: upload this prebuilt tarball verbatim instead of building (build-once / upload-many)."
+    default: ""
+  rust-toolchain:
+    description: "Rust toolchain to install."
+    default: "stable"
+  doctor:
+    description: "Run `cargo athena doctor` preflight before building (fails fast with fix hints)."
+    default: "true"
+  access-key:
+    description: "S3 access key. Maps to AWS_ACCESS_KEY_ID. Omit to use ambient identity (IMDS / ECS / IRSA)."
+    default: ""
+  secret-key:
+    description: "S3 secret key. Maps to AWS_SECRET_ACCESS_KEY."
+    default: ""
+  session-token:
+    description: "Optional S3 session token (AWS-STS temporary creds). Maps to AWS_SESSION_TOKEN."
+    default: ""
+  endpoint:
+    description: >
+      Optional S3 endpoint for the uploader (e.g. https://<acct>.r2.cloudflarestorage.com).
+      Default: the endpoint in athena.toml. Set only to override it for CI (split-horizon).
+      Maps to AWS_ENDPOINT_URL.
+    default: ""
+
+outputs:
+  s3-uri:
+    description: "s3://bucket/key the tarball was uploaded to (empty for command=build)."
+    value: ${{ steps.run.outputs.s3-uri }}
+
+runs:
+  using: "composite"
+  steps:
+    # Use a cargo-athena already on PATH (e.g. pre-installed via nix, or this
+    # repo's own self-test) instead of installing one. On a fresh runner none
+    # is present, so the pinned version is installed below.
+    - name: Detect cargo-athena
+      id: detect
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v cargo-athena >/dev/null 2>&1; then
+          echo "present=true" >> "$GITHUB_OUTPUT"
+          echo "Using pre-installed cargo-athena on PATH."
+        else
+          echo "present=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    # Resolve the target matrix once, used for BOTH `rustup target add` and the
+    # build's `--target` flags so the two can never disagree.
+    - name: Resolve targets
+      id: targets
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        IN_TARGETS: ${{ inputs.targets }}
+        IN_CONFIG: ${{ inputs.config }}
+      run: |
+        set -euo pipefail
+        if [ -n "${IN_TARGETS}" ]; then
+          list=$(echo "${IN_TARGETS}" | tr ', ' '\n' | sed '/^$/d' | paste -sd, -)
+        else
+          cfg="${IN_CONFIG:-athena.toml}"
+          # Mirror core's default_targets() when [bootstrap].targets is absent.
+          list=$(CFG="$cfg" python3 -c 'import os,tomllib; p=os.environ["CFG"]; d=(tomllib.load(open(p,"rb")) if os.path.exists(p) else {}); print(",".join(d.get("bootstrap",{}).get("targets") or ["x86_64-unknown-linux-musl","aarch64-unknown-linux-musl"]))')
+        fi
+        echo "list=${list}" >> "$GITHUB_OUTPUT"
+        echo "Resolved targets: ${list}"
+
+    # The CLI version is the action ref: read it from the action's own
+    # checked-out workspace, so pinning this action @vX installs cargo-athena X.
+    - name: Resolve cargo-athena version
+      id: ver
+      if: steps.detect.outputs.present != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        ct="${GITHUB_ACTION_PATH}/../../../Cargo.toml"
+        v=$(CT="$ct" python3 -c 'import os,tomllib; print(tomllib.load(open(os.environ["CT"],"rb"))["workspace"]["package"]["version"])')
+        echo "version=${v}" >> "$GITHUB_OUTPUT"
+        echo "Will install cargo-athena ${v} (pinned by the action ref)."
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ inputs.rust-toolchain }}
+        targets: ${{ steps.targets.outputs.list }}
+
+    - name: Cache cargo build
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: ${{ inputs.working-directory }}
+
+    - name: Install Zig
+      uses: mlugg/setup-zig@v1
+
+    - name: Install cargo-zigbuild
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-zigbuild
+
+    - name: Install cargo-athena
+      if: steps.detect.outputs.present != 'true'
+      uses: baptiste0928/cargo-install@v3
+      with:
+        crate: cargo-athena
+        version: ${{ steps.ver.outputs.version }}
+
+    - name: Build & publish
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        IN_COMMAND: ${{ inputs.command }}
+        IN_PACKAGE: ${{ inputs.package }}
+        IN_BIN: ${{ inputs.bin }}
+        IN_TARGETS: ${{ steps.targets.outputs.list }}
+        IN_CONFIG: ${{ inputs.config }}
+        IN_TARBALL: ${{ inputs.tarball }}
+        IN_DOCTOR: ${{ inputs.doctor }}
+        IN_ACCESS_KEY: ${{ inputs.access-key }}
+        IN_SECRET_KEY: ${{ inputs.secret-key }}
+        IN_SESSION_TOKEN: ${{ inputs.session-token }}
+        IN_ENDPOINT: ${{ inputs.endpoint }}
+      run: |
+        set -euo pipefail
+
+        if [ -n "${IN_ACCESS_KEY}" ];    then export AWS_ACCESS_KEY_ID="${IN_ACCESS_KEY}"; fi
+        if [ -n "${IN_SECRET_KEY}" ];    then export AWS_SECRET_ACCESS_KEY="${IN_SECRET_KEY}"; fi
+        if [ -n "${IN_SESSION_TOKEN}" ]; then export AWS_SESSION_TOKEN="${IN_SESSION_TOKEN}"; fi
+        if [ -n "${IN_ENDPOINT}" ];      then export AWS_ENDPOINT_URL="${IN_ENDPOINT}"; fi
+
+        common=()
+        if [ -n "${IN_CONFIG}" ]; then common+=(--config "${IN_CONFIG}"); fi
+
+        if [ "${IN_DOCTOR}" = "true" ]; then
+          cargo athena "${common[@]}" doctor
+        fi
+
+        args=("${IN_COMMAND}")
+        if [ -n "${IN_PACKAGE}" ]; then args+=(--package "${IN_PACKAGE}"); fi
+        if [ -n "${IN_BIN}" ];     then args+=(--bin "${IN_BIN}"); fi
+        IFS=',' read -ra TARR <<< "${IN_TARGETS}"
+        for t in "${TARR[@]}"; do
+          if [ -n "$t" ]; then args+=(--target "$t"); fi
+        done
+        if [ "${IN_COMMAND}" = "publish" ] && [ -n "${IN_TARBALL}" ]; then
+          args+=(--tarball "${IN_TARBALL}")
+        fi
+
+        echo "+ cargo athena ${common[*]} ${args[*]}"
+        cargo athena "${common[@]}" "${args[@]}" | tee /tmp/athena-publish.out
+        uri=$(grep -m1 '^s3://' /tmp/athena-publish.out || true)
+        echo "s3-uri=${uri}" >> "$GITHUB_OUTPUT"
