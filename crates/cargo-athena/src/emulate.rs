@@ -27,22 +27,26 @@ use crate::binsrc::{BinSel, BinarySource};
 pub struct EmulateArgs {
     #[command(flatten)]
     bin: BinSel,
-    /// Container template to emulate (`<crate>-<fn>` kebab, or the
-    /// `#[container(name = "…")]` override). Default: the binary's root
-    /// template. `cargo athena ls --kind container` lists them.
+    /// Container template to emulate
+    ///
+    /// `<crate>-<fn>` kebab, or the `#[container(name = "…")]` override.
+    /// Default: the binary's root template.
+    /// `cargo athena ls --kind container` lists them.
     #[arg(short = 'w', long = "workflow", value_name = "TEMPLATE")]
     workflow: Option<String>,
-    /// Set one input parameter: `-a name=value`. `value` is parsed as
-    /// JSON if it parses (so `-a n=4` is the number 4, `-a b=true` a
-    /// bool), else treated as a string. Repeatable.
+    /// Set one input parameter: `-a name=value` (repeatable)
+    ///
+    /// `value` is parsed as JSON if it parses (so `-a n=4` is the number 4,
+    /// `-a b=true` a bool), else treated as a string.
     #[arg(short = 'a', long = "arg", value_name = "NAME=VALUE")]
     args: Vec<String>,
     /// JSON object of the function arguments (merged under `-a`).
     #[arg(long = "input-file", value_name = "FILE")]
     input_file: Option<PathBuf>,
-    /// Build a local host-arch musl binary for the run instead of pulling
-    /// the deployed S3 tarball. Needs source, so omit BINARY (and pass
-    /// `-p`/`--bin`/`--manifest-path` if not the current crate).
+    /// Build a local host-arch musl binary instead of pulling from S3
+    ///
+    /// Needs source, so omit BINARY (and pass `-p`/`--bin`/`--manifest-path`
+    /// if not the current crate).
     #[arg(long, conflicts_with_all = ["tarball", "binary"])]
     build: bool,
     /// Use this tarball verbatim for the run (skip pull/build).
@@ -60,13 +64,15 @@ pub struct EmulateArgs {
 pub struct DescribeArgs {
     #[command(flatten)]
     bin: BinSel,
-    /// Template to describe (`<crate>-<fn>` kebab, or the
-    /// `#[container(name = "…")]` override). Default: the binary's root
-    /// template.
+    /// Template to describe
+    ///
+    /// `<crate>-<fn>` kebab, or the `#[container(name = "…")]` override.
+    /// Default: the binary's root template.
     #[arg(short = 'w', long = "workflow", value_name = "TEMPLATE")]
     workflow: Option<String>,
-    /// Print the raw `ContainerRunMeta` JSON (scriptable). Default is
-    /// a short human-readable summary listing inputs + resources.
+    /// Print the raw `ContainerRunMeta` JSON (scriptable)
+    ///
+    /// Default is a short human-readable summary listing inputs + resources.
     #[arg(long)]
     json: bool,
 }

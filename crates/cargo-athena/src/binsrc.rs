@@ -20,13 +20,15 @@ use std::process::{Command, Stdio, exit};
 /// (positional), or - absent that - a source build.
 #[derive(clap::Args)]
 pub struct BinSel {
-    /// A cargo-athena binary: a path, or a bare name resolved on `$PATH`
-    /// (e.g. one installed with `cargo install`). Omit to build from
-    /// source instead (the current crate, or `--manifest-path`).
+    /// A cargo-athena binary: a path, or a `$PATH`-resolved name
+    ///
+    /// E.g. one installed with `cargo install`. Omit to build from source
+    /// instead (the current crate, or `--manifest-path`).
     #[arg(value_name = "BINARY")]
     binary: Option<String>,
-    /// Build from source instead of running a prebuilt binary: the crate
-    /// (a directory or its `Cargo.toml`) to build. Defaults to the cwd.
+    /// Build from source: the crate (dir or `Cargo.toml`) to build
+    ///
+    /// Defaults to the cwd. Use instead of a positional prebuilt binary.
     #[arg(long = "manifest-path", value_name = "PATH", conflicts_with = "binary")]
     manifest_path: Option<PathBuf>,
     /// (source build) cargo package to build / drive.

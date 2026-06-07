@@ -9,8 +9,9 @@ use std::process::{Command, Stdio, exit};
 
 #[derive(clap::Args)]
 pub struct DoctorArgs {
-    /// Also try a live HEAD against the configured S3 bucket. Off by
-    /// default because it needs working credentials and network.
+    /// Also try a live HEAD against the configured S3 bucket
+    ///
+    /// Off by default because it needs working credentials and network.
     #[arg(long)]
     check_s3: bool,
 }

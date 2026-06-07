@@ -11,8 +11,9 @@ use std::process::exit;
 
 #[derive(clap::Args)]
 pub struct InitArgs {
-    /// Directory to scaffold (default: current directory). Like
-    /// `cargo init`, refuses if a `Cargo.toml` already exists there.
+    /// Directory to scaffold (default: current directory)
+    ///
+    /// Like `cargo init`, refuses if a `Cargo.toml` already exists there.
     #[arg(value_name = "PATH")]
     path: Option<PathBuf>,
     /// Cargo package name. Default: the directory basename.

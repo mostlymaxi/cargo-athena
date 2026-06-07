@@ -27,21 +27,25 @@ expected inputs (name + Rust type) plus a copy-pasteable submit line.")]
 pub struct SubmitArgs {
     #[command(flatten)]
     bin: crate::binsrc::BinSel,
-    /// Template to submit - a `#[workflow]` (the whole DAG) or one
-    /// `#[container]`. `<crate>-<fn>` kebab, or the `#[..(name = "…")]`
-    /// override (the short `<fn>` form works too). Default: the binary's
-    /// root template. `cargo athena ls` lists them.
+    /// Template to submit: a workflow or one container
+    ///
+    /// A `#[workflow]` runs the whole DAG; a `#[container]` runs one step.
+    /// `<crate>-<fn>` kebab, or the `#[..(name = "…")]` override (the short
+    /// `<fn>` form works too). Default: the binary's root template.
+    /// `cargo athena ls` lists them.
     #[arg(short = 'w', long = "workflow", value_name = "TEMPLATE")]
     workflow: Option<String>,
-    /// Build a dev version and name its slot, baked into the source build
-    /// (symmetric with `publish --dev-tag`, so the names + S3 key line up).
-    /// Bare `--dev-tag` = the short commit. Only valid when building from
-    /// source (NOT with a positional prebuilt binary, which has its own
-    /// sealed tag).
+    /// Build a dev version and name its slot
+    ///
+    /// Baked into the source build (symmetric with `publish --dev-tag`, so
+    /// the names + S3 key line up). Bare `--dev-tag` = the short commit.
+    /// Only valid when building from source (NOT with a positional prebuilt
+    /// binary, which has its own sealed tag).
     #[arg(long = "dev-tag", value_name = "SLOT", num_args = 0..=1)]
     dev_tag: Option<Option<String>>,
-    /// A workflow input: `-a name=value` (parsed as JSON if it parses,
-    /// else a string). Repeatable.
+    /// Set a workflow input: `-a name=value` (repeatable)
+    ///
+    /// `value` is parsed as JSON if it parses, else treated as a string.
     #[arg(short = 'a', long = "arg", value_name = "NAME=VALUE")]
     args: Vec<String>,
     /// JSON object of the inputs (merged under `-a`).
@@ -54,17 +58,20 @@ pub struct SubmitArgs {
     /// ServiceAccount for the run. Default: `[defaults].service_account`.
     #[arg(long = "service-account")]
     service_account: Option<String>,
-    /// Root-scoped `nodeSelector` on the submitted Workflow — `k=v`,
-    /// repeatable (Argo applies it to every pod).
+    /// Root-scoped `nodeSelector` on the submitted Workflow
+    ///
+    /// `k=v`, repeatable (Argo applies it to every pod).
     #[arg(long = "node-selector", value_name = "K=V")]
     node_selector: Vec<String>,
-    /// Workflow priority (int32). Higher = scheduled first when the
-    /// controller hits its parallelism limit. No default; Argo treats
-    /// absence as 0.
+    /// Workflow priority (int32)
+    ///
+    /// Higher = scheduled first when the controller hits its parallelism
+    /// limit. No default; Argo treats absence as 0.
     #[arg(long, value_name = "N")]
     priority: Option<i32>,
-    /// Submit via this Argo Server URL instead of the kube API (else
-    /// `$ARGO_SERVER`; absent ⇒ kubeconfig/in-cluster).
+    /// Submit via this Argo Server URL instead of the kube API
+    ///
+    /// Else `$ARGO_SERVER`; absent ⇒ kubeconfig/in-cluster.
     #[arg(long = "argo-server", value_name = "URL")]
     argo_server: Option<String>,
     /// Skip TLS verification talking to the Argo Server.
@@ -600,8 +607,10 @@ pub fn submit(a: SubmitArgs) {
 /// fan out into an accidental mass-delete.
 #[derive(clap::Args)]
 pub struct PruneArgs {
-    /// Version to remove: a dev slot (`dev-foo`), a release tag
-    /// (`0-6-0`), or a raw semver (`0.6.0`, normalized to `0-6-0`).
+    /// Version to remove
+    ///
+    /// A dev slot (`dev-foo`), a release tag (`0-6-0`), or a raw semver
+    /// (`0.6.0`, normalized to `0-6-0`).
     #[arg(value_name = "TAG")]
     tag: String,
     #[command(flatten)]
@@ -613,8 +622,9 @@ pub struct PruneArgs {
     /// `[defaults].namespace` → `default`.
     #[arg(short = 'n', long)]
     namespace: Option<String>,
-    /// Prune via this Argo Server URL instead of the kube API (else
-    /// `$ARGO_SERVER`; absent ⇒ kubeconfig/in-cluster).
+    /// Prune via this Argo Server URL instead of the kube API
+    ///
+    /// Else `$ARGO_SERVER`; absent ⇒ kubeconfig/in-cluster.
     #[arg(long = "argo-server", value_name = "URL")]
     argo_server: Option<String>,
     /// Skip TLS verification talking to the Argo Server.
