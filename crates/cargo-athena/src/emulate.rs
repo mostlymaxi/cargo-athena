@@ -1,4 +1,4 @@
-//! `cargo athena container emulate` — realize ONE `#[container]`'s
+//! `cargo athena emulate` - realize ONE `#[container]`'s
 //! emitted spec locally under docker/podman, *exactly as Argo would*: same
 //! image, the same injected bootstrap, the same positional argv,
 //! the same `/athena` scratch dir, `host!` binds, and S3 artifact ports.
@@ -21,15 +21,17 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio, exit};
 
-use crate::pkg::PkgSel;
+use crate::binsrc::{BinSel, BinarySource};
 
 #[derive(clap::Args)]
 pub struct EmulateArgs {
-    /// Template name (`<crate>-<fn>` kebab, or the
-    /// `#[container(name = "…")]` override). `container ls` lists them.
-    template: String,
     #[command(flatten)]
-    pkg: PkgSel,
+    bin: BinSel,
+    /// Container template to emulate (`<crate>-<fn>` kebab, or the
+    /// `#[container(name = "…")]` override). Default: the binary's root
+    /// template. `cargo athena ls --kind container` lists them.
+    #[arg(short = 'w', long = "workflow", value_name = "TEMPLATE")]
+    workflow: Option<String>,
     /// Set one input parameter: `-a name=value`. `value` is parsed as
     /// JSON if it parses (so `-a n=4` is the number 4, `-a b=true` a
     /// bool), else treated as a string. Repeatable.
@@ -38,12 +40,12 @@ pub struct EmulateArgs {
     /// JSON object of the function arguments (merged under `-a`).
     #[arg(long = "input-file", value_name = "FILE")]
     input_file: Option<PathBuf>,
-    /// Build a local musl binary instead of pulling the deployed S3
-    /// tarball (packages only the host-arch musl target — for the full
-    /// multi-arch deployed artifact, `cargo athena build` then pull).
-    #[arg(long, conflicts_with = "tarball")]
+    /// Build a local host-arch musl binary for the run instead of pulling
+    /// the deployed S3 tarball. Needs source, so omit BINARY (and pass
+    /// `-p`/`--bin`/`--manifest-path` if not the current crate).
+    #[arg(long, conflicts_with_all = ["tarball", "binary"])]
     build: bool,
-    /// Use this tarball verbatim (skip pull/build).
+    /// Use this tarball verbatim for the run (skip pull/build).
     #[arg(long, value_name = "FILE", conflicts_with = "build")]
     tarball: Option<PathBuf>,
     /// `docker` | `podman`. Default: autodetect (prefer docker).
@@ -56,44 +58,27 @@ pub struct EmulateArgs {
 
 #[derive(clap::Args)]
 pub struct DescribeArgs {
-    /// Template name (`<crate>-<fn>` kebab, or the
-    /// `#[container(name = "…")]` override).
-    template: String,
     #[command(flatten)]
-    pkg: PkgSel,
+    bin: BinSel,
+    /// Template to describe (`<crate>-<fn>` kebab, or the
+    /// `#[container(name = "…")]` override). Default: the binary's root
+    /// template.
+    #[arg(short = 'w', long = "workflow", value_name = "TEMPLATE")]
+    workflow: Option<String>,
     /// Print the raw `ContainerRunMeta` JSON (scriptable). Default is
     /// a short human-readable summary listing inputs + resources.
     #[arg(long)]
     json: bool,
 }
 
-/// `workflow describe <name>` - print one template's metadata
-/// (inputs, image, resources). Accepts either a `#[container]` or a
-/// `#[workflow]` since a workflow is the more general thing.
-pub fn describe_workflow(a: DescribeArgs) {
-    print_describe(a, /*containers_only=*/ false);
-}
-
-/// `container describe <name>` - same as `workflow describe` for
-/// containers, but errors if the target is a `#[workflow]` (the
-/// `container` namespace is the narrow view, used alongside
-/// `container ls` and `container emulate` which are container-only).
-pub fn describe_container(a: DescribeArgs) {
-    print_describe(a, /*containers_only=*/ true);
-}
-
-fn print_describe(a: DescribeArgs, containers_only: bool) {
-    let (pkg, bin) = a.pkg.resolve();
-    let meta = describe(&a.template, pkg.as_deref(), bin.as_deref());
-    if containers_only && meta.kind != "container" {
-        eprintln!(
-            "cargo athena container describe: {:?} is a #[{}]; use \
-             `cargo athena workflow describe {}` instead (workflow \
-             accepts either kind).",
-            meta.name, meta.kind, meta.name
-        );
-        exit(2);
-    }
+/// `cargo athena describe [BINARY] [-w TEMPLATE]` - print one template's
+/// metadata (inputs, image, resources), for either a `#[container]` or a
+/// `#[workflow]`. Defaults to the binary's root template.
+pub fn describe(a: DescribeArgs) {
+    let src = a.bin.resolve();
+    let info = src.probe();
+    let template = a.workflow.clone().unwrap_or(info.default_template);
+    let meta = describe_meta(&src, &template);
     if a.json {
         println!(
             "{}",
@@ -198,7 +183,7 @@ fn print_human(m: &ContainerRunMeta) {
     // Copy-pasteable submit line. Short name (submit accepts either).
     println!();
     let cmd = if m.params.is_empty() {
-        format!("cargo athena submit {short}")
+        format!("cargo athena submit <BINARY> -w {short}")
     } else {
         let args: Vec<String> = m
             .params
@@ -212,26 +197,28 @@ fn print_human(m: &ContainerRunMeta) {
                 format!("-a {}=<{}>", p.name, ty)
             })
             .collect();
-        format!("cargo athena submit {short} {}", args.join(" "))
+        format!("cargo athena submit <BINARY> -w {short} {}", args.join(" "))
     };
     println!("  {} {}", label_s.apply_to("$"), cmd_s.apply_to(cmd));
     println!();
 }
 
 fn die(msg: &str) -> ! {
-    eprintln!("cargo athena container emulate: {msg}");
+    eprintln!("cargo athena emulate: {msg}");
     exit(2);
 }
 
-pub fn container_emulate(a: EmulateArgs) {
-    let (pkg, bin) = a.pkg.resolve();
+pub fn emulate(a: EmulateArgs) {
+    let src = a.bin.resolve();
+    let info = src.probe();
+    let template = a.workflow.clone().unwrap_or(info.default_template);
     // 1. Introspect — the binary builds the *same* template `emit` does
     //    and reports it in the runner's vocabulary.
-    let meta = describe(&a.template, pkg.as_deref(), bin.as_deref());
+    let meta = describe_meta(&src, &template);
     if meta.kind != "container" {
         die(&format!(
-            "{:?} is a #[{}]; `container emulate` targets a single #[container]. \
-             A #[workflow] is a DAG with no pod — run its containers individually.",
+            "{:?} is a #[{}]; `emulate` targets a single #[container]. \
+             A #[workflow] is a DAG with no pod - run its containers individually.",
             meta.name, meta.kind
         ));
     }
@@ -256,10 +243,23 @@ pub fn container_emulate(a: EmulateArgs) {
         work.join(rel)
     };
 
-    // Binary: pull (default) / build / explicit.
+    // Run payload: pull the deployed tarball (default) / build locally /
+    // explicit --tarball. Distinct from the metadata source above: the
+    // payload is the multi-arch tarball the pod would run, not the host
+    // binary we introspected.
     let tarball = match (&a.tarball, a.build) {
         (Some(p), _) => p.clone(),
-        (None, true) => build_local(pkg.as_deref(), bin.as_deref()),
+        (None, true) => {
+            // `--build` conflicts with a prebuilt BINARY (clap-enforced),
+            // so this is always the Cargo path; the unwrap guards anyway.
+            let (pkg, bin) = src.cargo_pkg_bin().unwrap_or_else(|| {
+                die(
+                    "--build needs source: omit the BINARY argument (build from the \
+                     current crate, or pass -p/--bin/--manifest-path)",
+                )
+            });
+            build_local(pkg.as_deref(), bin.as_deref())
+        }
         (None, false) => {
             let ba = meta.binary_artifact.as_ref().unwrap_or_else(|| {
                 die(
@@ -390,42 +390,31 @@ pub fn container_emulate(a: EmulateArgs) {
     exit(status.code().unwrap_or(1));
 }
 
-/// Spawn the user binary in describe-mode and parse its metadata.
-///
-/// The binary is *your workflow crate's* (the one whose `main` calls
-/// `cargo_athena::entrypoint!(Root)`). Run from that crate, or pass
-/// `--package`/`--bin`. A common gotcha: running inside the
-/// `cargo-athena` crate itself makes `cargo run` build the CLI, not a
-/// workflow — hence the explicit guidance below instead of dumping its
-/// clap usage.
-pub(crate) fn describe(
-    template: &str,
-    package: Option<&str>,
-    bin: Option<&str>,
-) -> ContainerRunMeta {
+/// Run the workflow binary in describe-mode and parse one template's
+/// metadata. The caller has already [`probe`](BinarySource::probe)d the
+/// source, so a failure here means the named template isn't reachable.
+pub(crate) fn describe_meta(src: &BinarySource, template: &str) -> ContainerRunMeta {
     let hint = || -> String {
-        let where_ = match (package, bin) {
-            (Some(p), Some(b)) => format!("--package {p} --bin {b}"),
-            (Some(p), None) => format!("--package {p}"),
-            (None, Some(b)) => format!("--bin {b}"),
-            (None, None) => "this directory".to_string(),
-        };
         format!(
-            "could not get container metadata from your workflow binary ({where_}).\n\
-             \x20 - run this from your workflow crate, or pass --package/--bin;\n\
-             \x20 - its `main` must call `cargo_athena::entrypoint!(Root)`;\n\
-             \x20 - {template:?} must be a template reachable from that root \
-             (`<crate>-<fn>` kebab, or the #[container(name=…)] override)."
+            "could not get metadata for {template:?} from the workflow binary.\n\
+             \x20 - {template:?} must be a template reachable from the binary's root \
+             (`<crate>-<fn>` kebab, or the #[container(name=…)] override);\n\
+             \x20 - `cargo athena ls` shows what the binary exposes."
         )
     };
-    let mut cmd = crate::cargo_run(package, bin);
-    cmd.env("CARGO_ATHENA_DESCRIBE", template);
-    // Stream cargo + binary stderr to the user; capture stdout (the
-    // metadata JSON) ourselves.
-    cmd.stderr(Stdio::inherit());
-    let out = cmd
+    let out = src
+        .command()
+        .env("CARGO_ATHENA_DESCRIBE", template)
+        // Stream the binary's stderr to the user; capture stdout (JSON).
+        .stderr(Stdio::inherit())
+        .stdout(Stdio::piped())
         .output()
-        .unwrap_or_else(|e| die(&format!("failed to spawn `cargo run`: {e}\n{}", hint())));
+        .unwrap_or_else(|e| {
+            die(&format!(
+                "failed to run the workflow binary: {e}\n{}",
+                hint()
+            ))
+        });
     if !out.status.success() || out.stdout.is_empty() {
         let err = String::from_utf8_lossy(&out.stderr);
         let tail: String = err

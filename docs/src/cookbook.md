@@ -465,7 +465,7 @@ dynamic values at root scope. Same goes for the container-level
 
 The boundary tier covers the case "all pods that live inside this
 specific dag inherit these scheduling constraints" (`boundary_tolerations`
-+ `boundary_affinity`, mirroring `boundary_node_selector`). Pods that
+and `boundary_affinity`, mirroring `boundary_node_selector`). Pods that
 set their own override the inheritance; pods that don't pick up the
 boundary's values. Literal only — Argo's boundary-copy makes
 per-arg injection unsafe at this tier (use `*_if_root` for dynamic).

@@ -75,14 +75,16 @@ needs a fresh `publish`.
 ### "could not list templates" / "could not get template metadata"
 
 ```
-cargo athena container ls: could not list templates
-(run from your workflow crate, or pass --package/--bin)
+cargo athena: could not get template list from the workflow crate
 ```
 
-`cargo athena` can't find a workflow binary to drive. Either:
+`cargo athena` can't find a workflow binary to act on. Either:
 
-- Run from inside your workflow crate, or
-- Pass `-p <package>` (and `--bin <name>` if the crate has multiple bins), or
+- Pass a built/installed binary as the positional argument
+  (`cargo athena ls ./my-workflow`), or
+- Build from source: run from inside your workflow crate, pass
+  `-p <package>` (and `--bin <name>` for a multi-bin crate) or
+  `--manifest-path <dir>`, or
 - Set `[defaults].package` (and optionally `.bin`) in `athena.toml`.
 
 If you get a compile error from the user binary, that's now streamed

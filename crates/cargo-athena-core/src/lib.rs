@@ -401,7 +401,7 @@ pub trait Template {
     /// Declared input parameter names, in order.
     const INPUTS: &'static [&'static str];
     /// Stringified Rust types of [`Self::INPUTS`], same order — for
-    /// `container emulate`'s pre-launch arg checking and the `ls`
+    /// `emulate`'s pre-launch arg checking and the `ls`
     /// listings. Emitted by `#[container]` and `#[workflow]`; defaulted
     /// empty for synthetic/hand impls.
     const INPUT_TYPES: &'static [&'static str] = &[];
@@ -423,7 +423,7 @@ pub trait Template {
     const OUTPUT_KIND: IoKind = IoKind::Parameter;
     /// `true` for athena-synthesized templates (the `if`/`else`
     /// wrapper + per-arm sub-workflows). They're an implementation
-    /// detail, so `workflow ls` hides them unless `--include-synthetic`.
+    /// detail, so `ls` hides them unless `--include-synthetic`.
     const SYNTHETIC: bool = false;
     const KIND: TemplateKind;
     /// Whole-workflow exit-handler template name, from
@@ -875,7 +875,7 @@ pub fn is_container_run() -> bool {
 }
 
 /// Resolved S3 coordinates for one artifact (creds are supplied
-/// locally, e.g. via AWS env vars — `cargo athena container run` uses
+/// locally, e.g. via AWS env vars - `cargo athena emulate` uses
 /// `object_store`; the in-cluster path uses the k8s Secret refs).
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct S3Ref {
@@ -906,22 +906,21 @@ pub struct ParamRef {
 /// *same* `Template::build()` `emit` uses (so it never drifts), but
 /// expressed in the runner's vocabulary instead of Argo's. Emitted as
 /// JSON by the binary when `CARGO_ATHENA_DESCRIBE=<name>` is set;
-/// consumed by `cargo athena container run` to realize the spec under
-/// docker/podman locally. Also the basis for a future
-/// `cargo athena container describe`.
+/// consumed by `cargo athena emulate` to realize the spec under
+/// docker/podman locally, and by `cargo athena describe`.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct ContainerRunMeta {
     /// Argo template name (`<crate>-<fn>`).
     pub name: String,
     /// Source crate (CARGO_PKG_NAME of the user binary). Used for the
-    /// `PACKAGE` column in `container ls` / `workflow ls`; an empty
+    /// `PACKAGE` column in `cargo athena ls`; an empty
     /// string means the caller didn't fill it in.
     #[serde(default)]
     pub package: String,
     /// `"container"`, `"workflow"`, or `"other"`.
     pub kind: String,
     /// athena-synthesized template (an `if`/`else` wrapper or arm) —
-    /// `workflow ls` hides these unless `--include-synthetic`.
+    /// `ls` hides these unless `--include-synthetic`.
     pub synthetic: bool,
     /// Resolved container image.
     pub image: String,
@@ -1626,10 +1625,10 @@ pub struct Collector {
     /// that WT's `spec.parallelism`.
     parallelism_if_root: HashMap<String, i64>,
     /// `<argo name> -> stringified input types` (parallel to the
-    /// template's INPUTS), for `container emulate` arg type-checking.
+    /// template's INPUTS), for `emulate` arg type-checking.
     types: HashMap<String, &'static [&'static str]>,
     /// Argo names of athena-synthesized templates (`Template::SYNTHETIC`)
-    /// so `workflow ls` can hide them by default.
+    /// so `ls` can hide them by default.
     synthetic: HashSet<String>,
 }
 
@@ -2207,7 +2206,7 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
         return;
     }
 
-    // `cargo athena container ls` sets this to enumerate every reachable
+    // `cargo athena ls` sets this to enumerate every reachable
     // template's metadata as a JSON array (same per-template derivation
     // as describe — so names/params shown are exactly what runs).
     if std::env::var_os("CARGO_ATHENA_LIST").is_some() {
@@ -2231,7 +2230,7 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
         return;
     }
 
-    // `cargo athena container emulate/describe` sets this to fetch ONE
+    // `cargo athena emulate/describe` sets this to fetch ONE
     // template's metadata as JSON (it then realizes that exact spec
     // locally via docker/podman). Reusing `Template::build` here is what
     // makes the local run identical to Argo by construction — same

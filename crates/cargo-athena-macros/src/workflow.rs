@@ -153,8 +153,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     let wf_args = fn_args(&func);
     let arg_names: Vec<String> = wf_args.iter().map(|(i, _)| i.to_string()).collect();
     let inputs_slice = str_slice(&arg_names);
-    // Stringified arg types, parallel to INPUTS — `workflow ls` shows
-    // them (same as `container ls`).
+    // Stringified arg types, parallel to INPUTS - `cargo athena ls`
+    // shows them.
     let arg_type_strs: Vec<String> = wf_args
         .iter()
         .map(|(_, t)| quote!(#t).to_string())

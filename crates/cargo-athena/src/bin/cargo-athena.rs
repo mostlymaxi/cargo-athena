@@ -13,7 +13,9 @@ use std::process::{Command, Stdio, exit};
 
 // Lives in `src/` (not `src/bin/`, which would make it a second
 // binary); a `#[path]` module so it stays bin-private and can use the
-// helpers below (`cargo_run`, `tool_ok`, `package_meta`, …).
+// helpers below (`tool_ok`, `package_meta`, …).
+#[path = "../binsrc.rs"]
+mod binsrc;
 #[path = "../doctor.rs"]
 mod doctor;
 #[path = "../emulate.rs"]
@@ -60,10 +62,10 @@ enum Cmd {
     /// zig, rustup targets, athena.toml, AWS creds, optional S3 reach).
     /// Reports each as green/red with a fix hint. Exit 0 on all-pass.
     Doctor(doctor::DoctorArgs),
-    /// Run the user binary in emit-mode; relay the WorkflowTemplate YAML.
+    /// Run a workflow binary in emit-mode; relay the WorkflowTemplate YAML.
     Emit {
         #[command(flatten)]
-        pkg: pkg::PkgSel,
+        bin: binsrc::BinSel,
         /// Write the YAML here instead of stdout.
         #[arg(long)]
         out: Option<String>,
@@ -73,16 +75,20 @@ enum Cmd {
         #[arg(long)]
         with_workflow: bool,
     },
-    /// Single-`#[container]` operations (room for more later).
-    Container {
-        #[command(subcommand)]
-        cmd: ContainerCmd,
-    },
-    /// `#[workflow]` operations.
-    Workflow {
-        #[command(subcommand)]
-        cmd: WorkflowCmd,
-    },
+    /// List the templates a workflow binary exposes (both `#[container]`s
+    /// and `#[workflow]`s). `--kind` filters; synthetic `if`/`else`
+    /// internals are hidden unless `--include-synthetic`.
+    Ls(ls::LsArgs),
+    /// Print one template's metadata: signature, image, mounts, and a
+    /// copy-pasteable submit line. Defaults to the binary's root template;
+    /// pick another with `-w/--workflow`.
+    Describe(emulate::DescribeArgs),
+    /// Emulate one `#[container]` locally under docker/podman, exactly as
+    /// Argo would (same image, the injected bootstrap, positional argv,
+    /// the `/athena` scratch dir, `host!` binds, S3 artifact ports). The
+    /// run payload is the deployed S3 tarball by default (`--build` /
+    /// `--tarball` to override).
+    Emulate(emulate::EmulateArgs),
     /// Submit a `#[workflow]`/`#[container]` to a cluster: type-checks
     /// args, confirms the binary is uploaded, registers/drift-checks the
     /// `WorkflowTemplate`s (y/N), then creates the run and prints its
@@ -117,38 +123,6 @@ enum Cmd {
         #[arg(long)]
         print: bool,
     },
-}
-
-#[derive(Subcommand)]
-enum ContainerCmd {
-    /// Emulate one `#[container]` locally under docker/podman, exactly
-    /// as Argo would: same image, the injected bootstrap,
-    /// positional argv, the `/athena` scratch dir, `host!` binds,
-    /// and S3 artifact ports. By default the binary is *pulled* from
-    /// the deployed S3 tarball, so you can smoke-test what's live with
-    /// no source on the node.
-    Emulate(emulate::EmulateArgs),
-    /// Print the runner metadata one template reports — image,
-    /// parameters + their types, the binary/`host!`/artifact ports, the
-    /// scratch + result paths. Exactly what `emulate` consumes (derived
-    /// from the same `Template::build()` as `emit`).
-    Describe(emulate::DescribeArgs),
-    /// List the `#[container]`s in the package (the things `container
-    /// emulate` runs). For the wider view that also includes
-    /// `#[workflow]`s, run `cargo athena workflow ls`.
-    Ls(ls::LsArgs),
-}
-
-#[derive(Subcommand)]
-enum WorkflowCmd {
-    /// List every reachable template - both `#[container]`s and
-    /// `#[workflow]`s (workflow is the more general view).
-    /// Synthetic `if`/`else` wrappers + arms are hidden unless
-    /// `--include-synthetic`.
-    Ls(ls::WorkflowLsArgs),
-    /// Print one workflow's metadata (same as `container describe`,
-    /// for any template).
-    Describe(emulate::DescribeArgs),
 }
 
 /// `~/.config/cargo-athena` (honoring `$XDG_CONFIG_HOME`), where a global
@@ -201,27 +175,13 @@ fn main() {
         Cmd::Init(args) => init::init(args),
         Cmd::Doctor(args) => doctor::doctor(args),
         Cmd::Emit {
-            pkg,
+            bin,
             out,
             with_workflow,
-        } => {
-            let (package, bin) = pkg.resolve();
-            emit(
-                package.as_deref(),
-                bin.as_deref(),
-                out.as_deref(),
-                with_workflow,
-            );
-        }
-        Cmd::Container { cmd } => match cmd {
-            ContainerCmd::Emulate(args) => emulate::container_emulate(args),
-            ContainerCmd::Describe(args) => emulate::describe_container(args),
-            ContainerCmd::Ls(args) => ls::container_ls(args),
-        },
-        Cmd::Workflow { cmd } => match cmd {
-            WorkflowCmd::Ls(args) => ls::workflow_ls(args),
-            WorkflowCmd::Describe(args) => emulate::describe_workflow(args),
-        },
+        } => emit(&bin.resolve(), out.as_deref(), with_workflow),
+        Cmd::Ls(args) => ls::ls(args),
+        Cmd::Describe(args) => emulate::describe(args),
+        Cmd::Emulate(args) => emulate::emulate(args),
         Cmd::Submit(args) => submit::submit(args),
         Cmd::Build {
             pkg,
@@ -249,27 +209,13 @@ fn main() {
     }
 }
 
-/// `cargo run` invocation for the user binary. NO `--quiet`: cargo's
-/// "Compiling foo..." progress and any compile errors stream to the
-/// user's terminal (stderr) by default. Callers that need to capture
-/// the binary's stdout (the YAML / JSON payload) should explicitly
-/// `.stdout(Stdio::piped())` and let stderr inherit.
-fn cargo_run(package: Option<&str>, bin: Option<&str>) -> Command {
-    let mut c = Command::new("cargo");
-    c.arg("run");
-    if let Some(p) = package {
-        c.args(["--package", p]);
-    }
-    if let Some(b) = bin {
-        c.args(["--bin", b]);
-    }
-    c
-}
-
 // ---- emit -----------------------------------------------------------------
 
-fn emit(package: Option<&str>, bin: Option<&str>, out: Option<&str>, with_workflow: bool) {
-    let mut cmd = cargo_run(package, bin);
+fn emit(src: &binsrc::BinarySource, out: Option<&str>, with_workflow: bool) {
+    // Confirm it's a cargo-athena binary (and protocol-compatible) before
+    // trusting its emit output.
+    src.probe();
+    let mut cmd = src.command();
     if with_workflow {
         cmd.env("CARGO_ATHENA_WITH_WORKFLOW", "1");
     }

@@ -1,73 +1,62 @@
-//! `cargo athena container ls` / `cargo athena workflow ls` — list the
-//! templates a workflow binary reports. Sibling to `emulate` (which runs
-//! one container locally) and to the `describe` subcommands; spawns the
-//! user binary in `CARGO_ATHENA_LIST` mode and renders a small table.
+//! `cargo athena ls` - list the templates a workflow binary exposes.
+//! Sibling to `emulate` (runs one container locally) and `describe`
+//! (one template's metadata); runs the binary in `CARGO_ATHENA_LIST`
+//! mode and renders a small table.
 //!
-//! * `container ls` filters to `#[container]`s (the things `container
-//!   emulate` can drive).
-//! * `workflow ls` is the more general view: every reachable template,
-//!   container or workflow. Synthetic `if`/`else` wrappers + arms are
-//!   hidden unless `--include-synthetic` (an implementation detail of
-//!   how the macros lower control flow).
+//! Lists every reachable template - `#[container]`s and `#[workflow]`s -
+//! by default. `--kind container|workflow` narrows it. Synthetic
+//! `if`/`else` wrappers + arms (an implementation detail of how the
+//! macros lower control flow) are hidden unless `--include-synthetic`.
 
 use cargo_athena::{ContainerRunMeta, serde_json};
-use std::process::{Stdio, exit};
+use std::process::exit;
 
-use crate::pkg::PkgSel;
+use crate::binsrc::{BinSel, BinarySource};
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub enum KindFilter {
+    Container,
+    Workflow,
+}
 
 #[derive(clap::Args)]
 pub struct LsArgs {
     #[command(flatten)]
-    pkg: PkgSel,
-}
-
-#[derive(clap::Args)]
-pub struct WorkflowLsArgs {
-    #[command(flatten)]
-    pkg: PkgSel,
+    bin: BinSel,
+    /// Only show this template kind (default: both).
+    #[arg(long, value_enum)]
+    kind: Option<KindFilter>,
     /// Also list athena-synthesized `if`/`else` wrapper + arm
     /// sub-workflows (an implementation detail, hidden by default).
     #[arg(long)]
     include_synthetic: bool,
 }
 
-/// `cargo athena container ls` - the `#[container]`s in the package
-/// (the things `container emulate` runs). For a wider view that also
-/// includes `#[workflow]`s, run `cargo athena workflow ls`.
-pub fn container_ls(a: LsArgs) {
-    let (pkg, bin) = a.pkg.resolve();
-    let all = fetch_list(pkg.as_deref(), bin.as_deref());
-    print_table(all.iter().filter(|m| m.kind == "container").collect());
-}
-
-/// `cargo athena workflow ls` - every reachable template, both
-/// `#[container]`s and `#[workflow]`s (workflow is the more general
-/// view). Synthetic `if`/`else` wrappers are hidden unless
-/// `--include-synthetic`.
-pub fn workflow_ls(a: WorkflowLsArgs) {
-    let (pkg, bin) = a.pkg.resolve();
-    let all = fetch_list(pkg.as_deref(), bin.as_deref());
+/// `cargo athena ls` - every reachable template the binary exposes,
+/// optionally filtered to one `--kind`. Synthetic `if`/`else` wrappers
+/// are hidden unless `--include-synthetic`.
+pub fn ls(a: LsArgs) {
+    let src = a.bin.resolve();
+    src.probe();
+    let all = fetch_list(&src);
+    let want = match a.kind {
+        Some(KindFilter::Container) => Some("container"),
+        Some(KindFilter::Workflow) => Some("workflow"),
+        None => None,
+    };
     print_table(
         all.iter()
             .filter(|m| a.include_synthetic || !m.synthetic)
+            .filter(|m| want.is_none_or(|k| m.kind == k))
             .collect(),
     );
 }
 
-/// Spawn the workflow binary in list-mode and parse every template's
+/// Run the workflow binary in list-mode and parse every template's
 /// metadata.
-fn fetch_list(pkg: Option<&str>, bin: Option<&str>) -> Vec<ContainerRunMeta> {
-    let mut cmd = crate::cargo_run(pkg, bin);
-    cmd.env("CARGO_ATHENA_LIST", "1");
-    // Stream cargo's "Compiling..." progress to the user's terminal.
-    cmd.stderr(Stdio::inherit());
-    let out = cmd
-        .output()
-        .unwrap_or_else(|e| die(&format!("failed to spawn `cargo run`: {e}")));
-    if !out.status.success() || out.stdout.is_empty() {
-        die("could not list templates (run from your workflow crate, or pass --package/--bin)");
-    }
-    serde_json::from_slice(&out.stdout)
+fn fetch_list(src: &BinarySource) -> Vec<ContainerRunMeta> {
+    let out = src.run_mode("CARGO_ATHENA_LIST", "1", "template list");
+    serde_json::from_slice(&out)
         .unwrap_or_else(|e| die(&format!("could not parse template list ({e})")))
 }
 

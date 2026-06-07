@@ -187,23 +187,25 @@ else
   echo "FAIL: node_selector not on pods (got '$SEL')"; exit 1
 fi
 
-say "CLI gate: container emulate (docker)"
+say "CLI gate: emulate (docker)"
 # Run one #[container] under docker exactly as Argo would, from the
 # already-built tarball (no S3 needed). Proves the emulate runtime path.
+# Source/Cargo mode (no positional BINARY): --package/--bin select the
+# crate, -w names the template.
 EMU=$( cd "$ROOT" && cargo run -q -p cargo-athena --bin cargo-athena -- \
-  athena container emulate cargo-athena-example-e2e-transform \
+  athena emulate -w cargo-athena-example-e2e-transform \
   --package "$PKG" --bin "$BIN" --tarball "$TARBALL" \
   -a input=ci --skip-artifacts 2>/dev/null | tail -1 )
 echo "emulate returned: $EMU"
 [ "$EMU" = 'return: "ci-transformed"' ] || {
-  echo "FAIL: container emulate — expected 'return: \"ci-transformed\"'"; exit 1; }
+  echo "FAIL: emulate - expected 'return: \"ci-transformed\"'"; exit 1; }
 
 say "CLI gate: submit (kube path)"
 # `cargo athena submit` against the kube API (kubeconfig current-context
 # = this kind cluster). Templates already applied above; --skip-binary-
 # check because MinIO is only reachable by its in-cluster DNS here.
 SUBWF=$( cd "$ROOT" && cargo run -q -p cargo-athena --bin cargo-athena -- \
-  athena submit cargo-athena-example-e2e-finalize-wf \
+  athena submit -w cargo-athena-example-e2e-finalize-wf \
   --package "$PKG" --bin "$BIN" -n "$NS" --skip-binary-check -y \
   2>/dev/null | tail -1 )
 echo "submit created: $SUBWF"
@@ -219,7 +221,7 @@ say "submit pipeline_steps (#[workflow(steps)]) — live steps-mode assertion"
 # accepts the `steps:` template + cross-step `{{steps.X.outputs.…}}`
 # refs on a live cluster across the v4.0/v3.7/v3.6 matrix.
 STEPSWF=$( cd "$ROOT" && cargo run -q -p cargo-athena --bin cargo-athena -- \
-  athena submit cargo-athena-example-e2e-pipeline-steps \
+  athena submit -w cargo-athena-example-e2e-pipeline-steps \
   --package "$PKG" --bin "$BIN" -n "$NS" --skip-binary-check -y \
   2>/dev/null | tail -1 )
 echo "submit created: $STEPSWF"

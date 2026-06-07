@@ -22,17 +22,17 @@ use std::process::exit;
 
 #[derive(clap::Args)]
 #[command(after_help = "\
-Tip: `cargo athena workflow describe <TEMPLATE>` lists the template's \
+Tip: `cargo athena describe <BINARY> -w <TEMPLATE>` lists the template's \
 expected inputs (name + Rust type) plus a copy-pasteable submit line.")]
 pub struct SubmitArgs {
-    /// Template to submit — a `#[workflow]` (the whole DAG) or one
-    /// `#[container]`. Full name (`<crate>-<fn>` kebab, or the
-    /// `#[..(name = "…")]` override); list with
-    /// `cargo athena workflow ls` / `container ls`. Run
-    /// `cargo athena workflow describe <TEMPLATE>` to see its inputs.
-    template: String,
     #[command(flatten)]
-    pkg: crate::pkg::PkgSel,
+    bin: crate::binsrc::BinSel,
+    /// Template to submit - a `#[workflow]` (the whole DAG) or one
+    /// `#[container]`. `<crate>-<fn>` kebab, or the `#[..(name = "…")]`
+    /// override (the short `<fn>` form works too). Default: the binary's
+    /// root template. `cargo athena ls` lists them.
+    #[arg(short = 'w', long = "workflow", value_name = "TEMPLATE")]
+    workflow: Option<String>,
     /// A workflow input: `-a name=value` (parsed as JSON if it parses,
     /// else a string). Repeatable.
     #[arg(short = 'a', long = "arg", value_name = "NAME=VALUE")]
@@ -90,29 +90,16 @@ fn confirm(prompt: &str, assume_yes: bool) -> bool {
     matches!(s.trim(), "y" | "Y" | "yes" | "Yes")
 }
 
-/// Spawn the user binary in a `CARGO_ATHENA_*` mode; return its stdout
+/// Run the workflow binary in a `CARGO_ATHENA_*` mode; return its stdout
 /// parsed as JSON (callers `from_value` into the concrete type).
 fn from_bin(
-    pkg: Option<&str>,
-    bin: Option<&str>,
+    src: &crate::binsrc::BinarySource,
     env: &str,
     val: &str,
     what: &str,
 ) -> serde_json::Value {
-    let out = crate::cargo_run(pkg, bin)
-        .env(env, val)
-        // Stream cargo's compile progress through to the user.
-        .stderr(std::process::Stdio::inherit())
-        .output()
-        .unwrap_or_else(|e| die(&format!("failed to spawn `cargo run`: {e}")));
-    if !out.status.success() || out.stdout.is_empty() {
-        die(&format!(
-            "could not get {what} from your workflow binary \
-             (run from the crate, or pass --package/--bin)"
-        ));
-    }
-    serde_json::from_slice(&out.stdout)
-        .unwrap_or_else(|e| die(&format!("could not parse {what} ({e})")))
+    let out = src.run_mode(env, val, what);
+    serde_json::from_slice(&out).unwrap_or_else(|e| die(&format!("could not parse {what} ({e})")))
 }
 
 // ---- cluster transport ----------------------------------------------------
@@ -334,28 +321,25 @@ impl Cluster for ArgoServer {
 // ---- orchestration --------------------------------------------------------
 
 pub fn submit(a: SubmitArgs) {
-    let (pkg, bin) = a.pkg.resolve();
+    let src = a.bin.resolve();
+    // Confirm it's a cargo-athena binary (+ protocol) and learn its root
+    // template (the default when no `-w` is given).
+    let info = src.probe();
+    let template = a.workflow.clone().unwrap_or(info.default_template);
 
     // 1. Introspect every reachable template (names, params+types, the
     //    binary S3 coords). Resolve the root.
-    let metas: Vec<ContainerRunMeta> = serde_json::from_value(from_bin(
-        pkg.as_deref(),
-        bin.as_deref(),
-        "CARGO_ATHENA_LIST",
-        "1",
-        "template list",
-    ))
-    .unwrap_or_else(|e| die(&format!("could not parse template list ({e})")));
-    // Accept either the full `<crate>-<fn>` name or the short form
-    // (no package prefix) — the user already passed `--package`/`--bin`,
-    // so re-typing the package prefix is just noise.
+    let metas: Vec<ContainerRunMeta> =
+        serde_json::from_value(from_bin(&src, "CARGO_ATHENA_LIST", "1", "template list"))
+            .unwrap_or_else(|e| die(&format!("could not parse template list ({e})")));
+    // Accept either the full `<crate>-<fn>` name or the short form (no
+    // package prefix) - the binary's package is already known.
     let root = metas
         .iter()
-        .find(|m| m.name == a.template || m.name == format!("{}-{}", m.package, a.template))
+        .find(|m| m.name == template || m.name == format!("{}-{}", m.package, template))
         .unwrap_or_else(|| {
             die(&format!(
-                "no template named {:?} (see `cargo athena workflow ls` / `container ls`)",
-                a.template
+                "no template named {template:?} (see `cargo athena ls`)"
             ))
         });
 
@@ -383,8 +367,7 @@ pub fn submit(a: SubmitArgs) {
     // 4. The deterministic WorkflowTemplate set (structured, for the
     //    register/drift checks).
     let wts: Vec<api::WorkflowTemplate> = serde_json::from_value(from_bin(
-        pkg.as_deref(),
-        bin.as_deref(),
+        &src,
         "CARGO_ATHENA_EMIT_JSON",
         "1",
         "emitted templates",

@@ -68,7 +68,7 @@ spec:
 | `fn main()` | the entrypoint into your workflow binary |
 
 Ship and run it in two commands: `cargo athena publish` (cross-compile
-+ upload the binary), then `cargo athena submit <workflow>` (registers
+and upload the binary), then `cargo athena submit <workflow>` (registers
 the templates and starts the run) - see the [CLI](cli.md).
 
 Read [Getting Started](getting-started.md) to go hands-on, then
