@@ -18,8 +18,9 @@ cargo athena [-c F] emulate  [BINARY] [-w TEMPLATE] [-a k=v].. [--input-file F]
                              [--build|--tarball F] [--runtime R] [--skip-artifacts]
 cargo athena [-c F] submit   [BINARY] [-w TEMPLATE] [-a k=v].. [-n NS] [--service-account SA]
                              [--node-selector k=v].. [--priority N] [--argo-server URL] [-y] [--update]
-cargo athena [-c F] build   [-p PKG] [--bin B] [--target T].. [--print]
-cargo athena [-c F] publish [-p PKG] [--bin B] [--target T].. [--tarball F] [--print]
+cargo athena [-c F] build   [-p PKG] [--bin B] [--target T].. [--allow-dirty] [--dev-tag T] [-y] [--print]
+cargo athena [-c F] publish [-p PKG] [--bin B] [--target T].. [--tarball F] [--allow-dirty] [--dev-tag T] [-y] [--print]
+cargo athena [-c F] prune    <TAG> [BINARY] [--keep-binary] [-n NS] [--argo-server URL] [-y]
 
   [BINARY]   a cargo-athena binary (path or $PATH name). Omit to build from
              source instead: --manifest-path DIR / -p PKG / --bin B (default: the cwd crate).
@@ -36,6 +37,54 @@ it is discovered automatically (`$ATHENA_CONFIG`, the nearest
 `emit` / `ls` / `describe` work against an already-published workflow
 with no per-repo config. See [`athena.toml`](configuration.md) for the
 full precedence order.
+
+## Versioning
+
+Every emitted `WorkflowTemplate` carries a **version tag** in its name
+(`<crate>-<fn>-<tag>`), so a cluster can hold many versions of the same
+template-set side by side. The tag is **sealed into the binary at build
+time** by `cargo athena build` / `publish`: it is read back, never
+recomputed, so editing `Cargo.toml` after a build cannot change a built
+binary's deployed version. A binary built with plain `cargo build` (no
+wrapper) falls back to its `CARGO_PKG_VERSION` as a release tag.
+
+There are two channels, gated like `cargo publish`:
+
+- **release** - a clean tree on `main` (or `master`) → the tag is your
+  crate's semver, kebab'd (`0.6.0` → `myapp-train-0-6-0`). This is the
+  only way to mint a clean semver name.
+- **dev** - anything else. Two **separate** gates decide it:
+  - **`--allow-dirty`** - a dirty working tree would bake uncommitted
+    code into the binary, so `build` / `publish` hard-fail without it.
+  - **off a release branch** - a warning + confirmation (`-y` / `--yes`
+    to skip, for CI).
+
+  `--dev-tag` names the dev slot: bare `--dev-tag` uses the short commit
+  (`myapp-train-dev-a1b2c3d`, a new slot per commit), while `--dev-tag
+  foo` gives a **stable** slot (`myapp-train-dev-foo`) you overwrite
+  while iterating. It forces the dev channel even on a clean release
+  branch.
+
+Each version's binary lands at its own S3 key
+(`{pkg}/<tag>/{bin}.tar.gz`), so a dev build never clobbers a release.
+Provenance rides in labels on every WT - `cargo.athena/tag`,
+`cargo.athena/channel`, `cargo.athena/commit`, `cargo.athena/dirty` - so
+`kubectl get wt -l cargo.athena/tag=<tag>` finds a version and
+[`prune`](#prune) removes it.
+
+**Fast-iteration loop** - keep one slot, redeploy in place, clean up
+when done:
+
+```bash
+cargo athena publish --allow-dirty --dev-tag wip   # -> ...-dev-wip
+cargo athena submit  ./app --dev-tag wip           # deploy that slot
+# ... iterate: publish + submit again overwrite the same slot ...
+cargo athena prune dev-wip ./app                   # remove the WTs + S3 binary
+```
+
+**CI / explicit tag** - set `ATHENA_VERSION_TAG=<tag>` to force the tag
+verbatim and skip git entirely (the universal escape hatch; useful when
+the build and the publish happen on different machines).
 
 ## `init`
 
@@ -152,7 +201,11 @@ identity (EC2 IMDS / ECS task role / IRSA). The shared
 Flags:
 - `--target T` (repeatable) - override the `athena.toml` target matrix.
 - `--tarball F` - upload `F` verbatim; skip the build (build-once / upload-many).
-- `--print` - dry run: resolve and print the destination key, no build or upload.
+- `--allow-dirty` / `--dev-tag [T]` / `-y` - the version gates (see
+  [Versioning](#versioning)). They resolve the tag baked into the binary
+  and the S3 key.
+- `--print` - dry run: resolve and print the destination key (and the
+  resolved tag), no build or upload.
 - `AWS_ENDPOINT_URL` env var - override the endpoint for this upload
   only (port-forward / public-vs-in-cluster split).
 
@@ -167,7 +220,27 @@ cargo athena build --package my-crate
 cargo athena build --package my-crate --print    # just resolve + print the key
 ```
 
-Same flags as `publish` minus `--tarball` and the upload step.
+Same flags as `publish` minus `--tarball` and the upload step, including
+the `--allow-dirty` / `--dev-tag` version gates.
+
+## `prune`
+
+Remove one deployed [version](#versioning) of this binary's
+template-set: every `WorkflowTemplate` labelled `cargo.athena/tag=<TAG>`,
+plus its `{pkg}/<tag>/{bin}.tar.gz` S3 binary. For cleaning up dev
+iterations.
+
+```sh
+cargo athena prune dev-wip ./app        # delete the dev-wip WTs + its S3 binary
+cargo athena prune 0.5.0 ./app --keep-binary   # WTs only; leave the tarball
+```
+
+`<TAG>` is a dev slot (`dev-wip`), a release tag (`0-6-0`), or a raw
+semver (`0.6.0`, normalized). `pkg` / `bin` come from the probed binary,
+and the selector always pins both package and tag, so it can never
+fan out into a broad delete. Prints what it will remove and asks for
+confirmation (`-y` to skip). Talks to the same transport as `submit`
+(`--argo-server` / `$ARGO_SERVER`, else the kube API).
 
 ## `emulate`
 
