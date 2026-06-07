@@ -33,6 +33,13 @@ pub struct SubmitArgs {
     /// root template. `cargo athena ls` lists them.
     #[arg(short = 'w', long = "workflow", value_name = "TEMPLATE")]
     workflow: Option<String>,
+    /// Build a dev version and name its slot, baked into the source build
+    /// (symmetric with `publish --dev-tag`, so the names + S3 key line up).
+    /// Bare `--dev-tag` = the short commit. Only valid when building from
+    /// source (NOT with a positional prebuilt binary, which has its own
+    /// sealed tag).
+    #[arg(long = "dev-tag", value_name = "SLOT", num_args = 0..=1)]
+    dev_tag: Option<Option<String>>,
     /// A workflow input: `-a name=value` (parsed as JSON if it parses,
     /// else a string). Repeatable.
     #[arg(short = 'a', long = "arg", value_name = "NAME=VALUE")]
@@ -379,6 +386,10 @@ impl Cluster for ArgoServer {
 // ---- orchestration --------------------------------------------------------
 
 pub fn submit(a: SubmitArgs) {
+    // Honor `--dev-tag` BEFORE resolve(): for a source build it seals the
+    // named slot into the compile (symmetric with publish), so submit's
+    // names + S3 key match a `publish --dev-tag <same>`.
+    a.bin.apply_dev_tag(a.dev_tag.clone());
     let src = a.bin.resolve();
     // Confirm it's a cargo-athena binary (+ protocol) and learn its root
     // template (the default when no `-w` is given).

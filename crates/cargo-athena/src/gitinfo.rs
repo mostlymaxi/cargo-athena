@@ -105,6 +105,41 @@ pub fn export_source_build_tag() {
     }
 }
 
+/// Seal the slot named by a consumer `--dev-tag` (on `submit`/`emit`) into
+/// the source build, symmetric with `build`/`publish`'s `--dev-tag`. Forces
+/// the dev channel: `Some(Some("maxi"))` -> `dev-maxi`, bare `Some(None)` ->
+/// `dev-<commit>`. No-op when the flag is absent. Sets `ATHENA_VERSION_TAG`
+/// (which the later `export_source_build_tag` then respects), so the
+/// compile bakes the named slot.
+pub fn export_dev_tag(flag: Option<Option<String>>) {
+    let st = git_state();
+    let slot = match flag {
+        None => return,
+        Some(Some(v)) => v,
+        Some(None) => st
+            .as_ref()
+            .map(|s| s.commit.clone())
+            .filter(|c| !c.is_empty())
+            .unwrap_or_default(),
+    };
+    let slot = match munge::version_tag(&slot) {
+        s if s.is_empty() => "local".to_string(),
+        s => s,
+    };
+    // SAFETY: single-threaded, set before any cargo child is spawned.
+    unsafe {
+        std::env::set_var("ATHENA_VERSION_TAG", format!("dev-{slot}"));
+        if let Some(s) = &st {
+            if !s.commit.is_empty() {
+                std::env::set_var("ATHENA_GIT_COMMIT", &s.commit);
+            }
+            if s.dirty {
+                std::env::set_var("ATHENA_GIT_DIRTY", "true");
+            }
+        }
+    }
+}
+
 /// Resolve the build tag, applying the two **separate** release gates:
 ///   - `--allow-dirty` (HARD): a dirty tree would bake uncommitted code
 ///     into the binary, so building one without the flag is a hard error.

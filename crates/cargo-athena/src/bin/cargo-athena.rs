@@ -68,6 +68,11 @@ enum Cmd {
     Emit {
         #[command(flatten)]
         bin: binsrc::BinSel,
+        /// Build a dev version and name its slot (symmetric with `publish
+        /// --dev-tag`); bare `--dev-tag` = the short commit. Source build
+        /// only (not with a positional prebuilt binary).
+        #[arg(long = "dev-tag", value_name = "SLOT", num_args = 0..=1)]
+        dev_tag: Option<Option<String>>,
         /// Write the YAML here instead of stdout.
         #[arg(long)]
         out: Option<String>,
@@ -211,9 +216,13 @@ fn main() {
         Cmd::Doctor(args) => doctor::doctor(args),
         Cmd::Emit {
             bin,
+            dev_tag,
             out,
             with_workflow,
-        } => emit(&bin.resolve(), out.as_deref(), with_workflow),
+        } => {
+            bin.apply_dev_tag(dev_tag);
+            emit(&bin.resolve(), out.as_deref(), with_workflow);
+        }
         Cmd::Ls(args) => ls::ls(args),
         Cmd::Describe(args) => emulate::describe(args),
         Cmd::Emulate(args) => emulate::emulate(args),
