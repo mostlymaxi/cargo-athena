@@ -36,6 +36,14 @@ html.ayu {
   line-height: 1.75;
 }
 
+/* mdBook's base theme sets `.content p { line-height: 1.45em }`, which is
+   more specific than the rule above and reads dense at this size. Restore
+   comfortable leading and give paragraphs a little vertical separation. */
+.content p {
+  line-height: 1.7;
+  margin-block: 1.1em;
+}
+
 main {
   max-width: 82rem;
 }
