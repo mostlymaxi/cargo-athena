@@ -70,6 +70,42 @@ pub fn kebab(s: &str) -> String {
     s.trim_matches('-').to_string()
 }
 
+/// DNS-1123-safe version-tag suffix. Appended to `WorkflowTemplate`
+/// names (`<base>-<tag>`), reused as the S3 binary-key path segment
+/// (`{pkg}/<tag>/{bin}.tar.gz`) and the `cargo.athena/tag` label value,
+/// so the one coordinate is identical everywhere it appears. A semver
+/// `1.2.3` becomes `1-2-3`; a dev tag `dev-foo` stays `dev-foo`;
+/// pre-release/build metadata flattens (`1.0.0-rc.1+build` ->
+/// `1-0-0-rc-1-build`). Lowercases, maps every non-`[a-z0-9]` char to
+/// `-`, collapses runs of `-`, trims leading/trailing `-`.
+///
+/// NOTE: distinct from the `cargo.athena/version` *label* value, which
+/// keeps the raw semver — dots are legal in a label value but not
+/// idiomatic in a k8s resource name. This deriver is for the *name* /
+/// key-segment, where the kebab form is required. Returns `""` only for
+/// input with no `[a-z0-9]` at all (a pathological dev tag); callers
+/// that accept user tags reject an empty result.
+pub fn version_tag(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    // Start `true` so a leading run of separators produces no leading
+    // `-`; the run-collapse + trailing trim fall out of the same flag.
+    let mut prev_dash = true;
+    for c in raw.chars() {
+        let c = c.to_ascii_lowercase();
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            out.push(c);
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
 /// In-pod mount path for a `host!("/p")` literal.
 pub fn host_mount_path(host_path: &str) -> String {
     format!("{ATHENA_MOUNTS_DIR}/{}", fnv_1a_64_hex(host_path))
@@ -215,6 +251,38 @@ mod tests {
         // Internal `__` is intentional (e.g. macro-generated names);
         // becomes `--` and stays.
         assert_eq!(kebab("inner__bar"), "inner--bar");
+    }
+
+    #[test]
+    fn version_tag_pins_known_values() {
+        // Pinned so an accidental change to the suffix scheme fails LOUD
+        // here — the tag is part of every versioned WT name AND the S3
+        // binary key, so a silent change would orphan deployed templates.
+        assert_eq!(version_tag("1.2.3"), "1-2-3");
+        assert_eq!(version_tag("0.0.0"), "0-0-0");
+        assert_eq!(version_tag("1.0.0-rc.1+build"), "1-0-0-rc-1-build");
+        assert_eq!(version_tag("dev-foo"), "dev-foo");
+        assert_eq!(version_tag("dev-a1b2c3d"), "dev-a1b2c3d");
+    }
+
+    #[test]
+    fn version_tag_is_dns_1123_safe() {
+        for raw in [
+            "1.2.3",
+            "1.0.0-rc.1+build.5",
+            "dev-Foo_Bar",
+            "  weird +.+ ",
+        ] {
+            let t = version_tag(raw);
+            assert!(!t.is_empty(), "{raw:?} -> empty tag");
+            assert!(
+                t.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                "{t:?} contains non-DNS-1123 chars"
+            );
+            assert!(!t.starts_with('-') && !t.ends_with('-'), "{t:?} edge dash");
+            assert!(!t.contains("--"), "{t:?} has an uncollapsed run");
+        }
     }
 
     #[test]
