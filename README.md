@@ -8,7 +8,7 @@
 
 Compile regular Rust into [Argo Workflow](https://argoproj.github.io/workflows/) YAML.
 
-```rust
+```rust,ignore
 use cargo_athena::{workflow, container};
 
 #[workflow]
@@ -69,7 +69,7 @@ that live result:
 | Argo | Support | e2e |
 |---|---|---|
 | v4.0.5  | maintained (latest minor) | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v4.0.5.json) |
-| v3.7.14 | maintained (n‑1 minor)    | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v3.7.14.json) |
+| v3.7.14 | maintained (n-1 minor)    | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v3.7.14.json) |
 | v3.6.19 | minimum supported (EOL)   | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v3.6.19.json) |
 
 Argo ≤ 3.5 is unsupported (cross-templateRef output resolution was

@@ -123,16 +123,12 @@ cargo athena publish             # cross-compile + upload the binary
 cargo athena submit my-pipeline-pipeline
 ```
 
-`submit` does the safe-deploy steps for you:
-
-1. type-checks the arguments against the function signature,
-2. confirms the binary is uploaded,
-3. registers every WorkflowTemplate (asking y/N if any drifted),
-4. creates the run and prints its name.
-
-S3 credentials come from the standard AWS env vars or instance-role
-identity. See [the CLI page](cli.md#submit) for the `-y`, `--update`,
-and `--argo-server` flags.
+`submit` runs the safe-deploy preflight for you (type-check the args,
+confirm the binary is uploaded, register every WorkflowTemplate with a
+y/N on drift) and then creates the run. S3 credentials come from the
+standard AWS env vars or instance-role identity. See
+[the CLI page](cli.md#submit) for the steps in full and the `-y`,
+`--update`, and `--argo-server` flags.
 
 > **Automate it.** To build and publish from GitHub Actions without
 > wiring up the toolchain yourself, use the `athena-publish` action.
@@ -144,6 +140,7 @@ and `--argo-server` flags.
 
 Want to try one step locally before deploying?
 [`cargo athena emulate`](cli.md#emulate) runs a single `#[container]`
-under docker / podman exactly as Argo would.
+under docker / podman exactly as Argo would; see [Testing](testing.md)
+for the full inner-loop options.
 
 Next: [Core Concepts](concepts.md).

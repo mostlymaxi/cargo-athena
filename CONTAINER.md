@@ -98,7 +98,7 @@ All optional.
 | `mutexes_if_root = [{ name, namespace }, …]` | Serialize the whole submitted run against other runs holding the same mutex. **Root-only.** |
 | `tolerations = [{ key, operator, value, effect, toleration_seconds }, …]` | K8s `Toleration` list on this template's pod. Required: `key`, `operator` (`"Equal"` \| `"Exists"`), `effect` (`"NoSchedule"` \| `"PreferNoSchedule"` \| `"NoExecute"`). Optional: `value` (required only with `Equal`), `toleration_seconds` (NoExecute only). `key`, `value`, `effect` accept `"lit" + arg` injection. |
 | `tolerations_if_root = [{ key, operator, value, effect, ... }, …]` | Same, but applied to every pod in the run (3rd tier of Argo's `tmpl → boundary → wfSpec` lookup). **Root-only.** |
-| `affinity = "<json\|yaml>"` | Opaque YAML/JSON string for K8s pod affinity. Athena does NOT model the deeply-nested `apiv1.Affinity` schema by design — use `pod_spec_patch` if you'd rather express it patch-style. |
+| `affinity = "<json\|yaml>"` | Opaque YAML/JSON string for K8s pod affinity. athena keeps it opaque rather than modelling the deeply-nested Kubernetes `Affinity` schema; use `pod_spec_patch` if you'd rather express it patch-style. |
 | `affinity_if_root = "<json\|yaml>"` | Same, but applied to every pod in the run. **Root-only.** Hand-write `{{workflow.parameters.X}}` substitutions inside the YAML body if you need dynamic values. |
 | `pod_spec_patch = "<json\|yaml>"` | Strategic-merge patch applied to this template's pod just before submission. Universal escape hatch for any podSpec field athena doesn't have a first-class attr for (resources, sidecars, init containers, fsGroup, …). String accepts `"lit" + arg` injection. **Dangerous-by-design**: athena does NOT validate the patch shape; Argo / k8s reject malformed input at submit / admission time. |
 | `pod_spec_patch_if_root = "<json\|yaml>"` | Same, but applied to **every** pod in the run. Argo concats with each template's own `pod_spec_patch`. **Root-only.** |
@@ -108,8 +108,8 @@ All optional.
 
 Mark a function parameter as filled by Argo's substitution rather than
 a normal `inputs.parameters` entry. The expression is passed verbatim
-to Argo — athena does NOT validate it (the user owns Argo's variable
-scope rules + any JSON wrapping needed for the arg type).
+to Argo: athena does NOT validate it (the user owns Argo's variable
+scope rules and any JSON wrapping needed for the arg type).
 
 ```rust,ignore
 #[container]
@@ -120,18 +120,16 @@ fn smart_retry(
 ) { /* ... */ }
 ```
 
-The container's `container.args[]` carries one positional slot per fn
-parameter in declaration order; param args contribute
-`{{inputs.parameters.<name>}}`, inject args contribute the user's raw
-expression verbatim. The run-side decodes every slot the same way
-(positional argv → `serde_json::from_str`), so:
+A normal parameter contributes its `inputs.parameters` value; an
+`#[inject]` parameter contributes your raw expression verbatim. Each
+is decoded back into its Rust type the same way, so match the wrapping
+to the type:
 
-- numeric / bool Rust types: bare expression (`{{retries}}` → `3` →
-  `3_i64`)
+- numeric / bool types: a bare expression (`{{retries}}` → `3`)
 - `String` (and friends): wrap in `"..."` yourself
-  (`"\"{{pod.name}}\""` → `"podname"` → `String "podname"`)
+  (`"\"{{pod.name}}\""` → `"podname"`)
 
-Workflow bodies call the template without passing inject args — they're
+Workflow bodies call the template without passing inject args: they're
 invisible to the caller. Allowed anywhere in the signature.
 
 This is **dangerous by design**: athena trusts the expression. Argo's
@@ -281,7 +279,7 @@ Declare a PersistentVolumeClaim as a unit struct and mount it with
 )]
 pub struct BuildCache;
 
-// Pre-existing PVC reference. Athena emits nothing at the workflow
+// Pre-existing PVC reference. athena emits nothing at the workflow
 // spec level - the PVC must already exist in the workflow's
 // namespace. `read_only` defaults to false.
 #[cargo_athena::external_pvc(claim_name = "shared-data-pvc", read_only = true)]
@@ -295,7 +293,7 @@ fn build() {
 }
 ```
 
-The mount path is deterministic but opaque (`/athena/pvcs/<fnv-hash>`).
+The mount path is deterministic but opaque (`/athena/pvcs/<hash>`).
 Use the returned `&'static Path` value; never hard-code the path.
 
 **Argo CRD requires `access_modes`** to be one of `ReadWriteOnce`,
@@ -310,11 +308,11 @@ Every `#[ephemeral_pvc]` linked into your binary lands in
 so Argo creates ALL of them at workflow start - even ones the
 submitted root doesn't reach. Two ways this bites in practice:
 
-1. **Multi-workflow binaries** (multiple `#[workflow]`s in one bin
+1. **Multi-workflow binaries** (multiple `#[workflow]` fns in one bin
    with disjoint PVCs): submitting workflow A creates B's PVCs too.
-2. **Library crates** declaring `#[ephemeral_pvc]`s: any downstream
-   crate that imports the library inherits the PVCs in its emitted
-   YAML, whether it uses them or not.
+2. **Library crates** declaring `#[ephemeral_pvc]` structs: any
+   downstream crate that imports the library inherits the PVCs in its
+   emitted YAML, whether it uses them or not.
 
 Functionally harmless (the extra PVCs are created and immediately
 GC'd at workflow end), but it churns cluster resources. The simplest
@@ -354,8 +352,14 @@ Cookbook recipes that exercise these features:
 - [Timeouts](cookbook.md#timeouts)
 - [Mutual exclusion across runs](cookbook.md#mutual-exclusion-across-runs)
 - [Pin a single pod (image, service account, node)](cookbook.md#pin-a-single-pod-image-service-account-node)
+- [Tolerate node taints and steer with affinity](cookbook.md#tolerate-node-taints-and-steer-with-affinity)
+- [Reach a podSpec field athena has no attr for](cookbook.md#reach-a-podspec-field-athena-doesnt-have-an-attr-for)
+- [Pull images from a private registry](cookbook.md#pull-images-from-a-private-registry)
+- [Inject an Argo built-in variable as a parameter](cookbook.md#inject-an-argo-built-in-variable-as-a-parameter)
 - [Pull a Kubernetes Secret as an env var](cookbook.md#pull-a-kubernetes-secret-as-an-env-var)
 - [Reuse setup across containers](cookbook.md#reuse-setup-across-containers)
+- [Set up tracing once for every container](cookbook.md#set-up-tracing-or-any-pod-only-init-once-for-every-container)
 - [Async `#[container]` fns](cookbook.md#async-container-fns)
+- [Share a PVC across containers in a workflow](cookbook.md#share-a-pvc-across-containers-in-a-workflow)
 
 Hitting an error? See [Troubleshooting](troubleshooting.md).

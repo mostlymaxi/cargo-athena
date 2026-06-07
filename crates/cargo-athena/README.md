@@ -26,10 +26,21 @@ fn run_a_container(a: String) {
 fn main() { cargo_athena::entrypoint!(run_foo); }
 ```
 
-This facade is the only crate you depend on; it re-exports the runtime
-and proc macros behind one `::cargo_athena` path. Install the
-`cargo athena` subcommand (emit / publish / submit / container / workflow)
-with `cargo install cargo-athena`.
+## Install
+
+```sh
+cargo add cargo-athena --no-default-features   # the library, in a workflow crate
+cargo install cargo-athena                     # the `cargo athena` CLI
+```
+
+> **Library users: keep `default-features = false`.** A workflow crate
+> needs only the proc macros and runtime; the default `cli` feature
+> pulls a heavy CLI tree (`kube`, `reqwest`, `tokio`, …) it doesn't use.
+
+This facade is the only crate you depend on: it re-exports the runtime
+and proc macros behind one `::cargo_athena` path. The `cargo athena`
+subcommands are `emit` / `publish` / `submit` / `emulate` / `ls` /
+`describe`.
 
 - **Feature reference:** the full `#[workflow]` and `#[container]`
   documentation is on [docs.rs](https://docs.rs/cargo-athena) (on the

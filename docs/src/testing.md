@@ -44,10 +44,9 @@ Arguments are type-checked against the real function signature
 before anything launches, so wrong types fail fast with a clear
 message instead of a serde panic inside the pod.
 
-**Not emulated:** anything Kubernetes-specific.
-`#[container(service_account=…)]`, RBAC, `nodeSelector`,
-podSpecPatch all need the real Argo path. See
-[the CLI page](cli.md#emulate) for full details and flags.
+**Not emulated:** anything Kubernetes-specific (ServiceAccount, RBAC,
+`nodeSelector`, podSpecPatch). See [the CLI page](cli.md#emulate) for
+the full list and flags.
 
 ## 3. Snapshot the emitted YAML
 

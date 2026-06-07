@@ -7,7 +7,7 @@ whole thing: it installs the Zig cross-compiler and the rustup musl targets,
 installs the pinned `cargo athena` CLI, and runs `cargo athena publish` against
 your `athena.toml`.
 
-It works with **any S3-compatible store** : the access key, secret key, and endpoint
+It works with **any S3-compatible store**: the access key, secret key, and endpoint
 are all you provide, and the endpoint (which usually already lives in your
 `athena.toml`) is what selects the provider.
 

@@ -1,6 +1,6 @@
 # Examples
 
-Five examples live in the [repo's `examples/`](https://github.com/mostlymaxi/cargo-athena/tree/main/examples)
+Six examples live in the [repo's `examples/`](https://github.com/mostlymaxi/cargo-athena/tree/main/examples)
 directory, each illustrating something different.
 
 ## `getting-started`
@@ -14,9 +14,9 @@ summarize -> publish` chain. Mirrors the
 
 ## `basic`
 
-The minimum viable shape - two `#[workflow]`s, one `#[container]`,
-one `#[fragment]`. Good for seeing the macros without surrounding
-detail.
+The minimum viable shape: two `#[workflow]` functions, one
+`#[container]`, one `#[fragment]`. Good for seeing the macros without
+surrounding detail.
 
 [Source](https://github.com/mostlymaxi/cargo-athena/blob/main/examples/basic/src/main.rs)
 
@@ -53,3 +53,15 @@ If you want to see a workflow that's verified-running on real Argo,
 this is the one.
 
 [Source](https://github.com/mostlymaxi/cargo-athena/blob/main/examples/e2e/src/main.rs)
+
+## tracing
+
+A two-container `greet -> shout` pipeline that emits `tracing::info!`
+records. The subscriber is installed once in `main()`, gated on
+`cargo_athena::is_container_run()` so it fires only in-pod, never on a
+local `cargo athena emit` / `ls` / `submit`. The runnable companion to
+the cookbook's
+[Set up tracing](cookbook.md#set-up-tracing-or-any-pod-only-init-once-for-every-container)
+recipe.
+
+[Source](https://github.com/mostlymaxi/cargo-athena/blob/main/examples/tracing/src/main.rs)
