@@ -776,15 +776,26 @@ pub(crate) fn rt() -> tokio::runtime::Runtime {
 /// Does the S3 object exist? (`cargo athena submit` pre-flights the
 /// binary tarball so it doesn't submit a workflow whose pods can't
 /// bootstrap.)
+/// Whether the object exists. `true`/`false` ONLY distinguish present from
+/// genuinely-absent (404); a real failure (403/no-creds, wrong endpoint,
+/// unreachable) hard-fails with a clear message rather than masquerading
+/// as "absent" — otherwise a bad credential reads as "binary not uploaded"
+/// and sends you to `publish` instead of fixing the creds/endpoint.
 pub(crate) fn s3_exists(s3: &S3Ref) -> bool {
     let store = s3_store(s3);
     let key = object_store::path::Path::from(s3.key.as_str());
     let sp = crate::feedback::spinner(format!("checking s3://{}/{}", s3.bucket, s3.key));
-    let ok = rt()
-        .block_on(async { object_store::ObjectStore::head(&store, &key).await })
-        .is_ok();
+    let res = rt().block_on(async { object_store::ObjectStore::head(&store, &key).await });
     sp.finish_and_clear();
-    ok
+    match res {
+        Ok(_) => true,
+        Err(object_store::Error::NotFound { .. }) => false,
+        Err(e) => die(&format!(
+            "could not check s3://{}/{} ({e}).\n  Check the endpoint, \
+             AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, and that the bucket exists.",
+            s3.bucket, s3.key
+        )),
+    }
 }
 
 /// Delete the S3 object. Idempotent (a genuinely-absent key is fine), but
