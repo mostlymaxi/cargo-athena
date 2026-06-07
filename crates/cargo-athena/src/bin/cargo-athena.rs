@@ -45,71 +45,81 @@ enum Cargo {
 }
 
 #[derive(clap::Args)]
-#[command(version, about, long_about = None)]
+#[command(
+    version,
+    about,
+    long_about = None,
+    after_help = "Typical flow:  init -> publish -> submit"
+)]
 struct Athena {
-    /// Path to `athena.toml`. Default: the nearest one found walking up
-    /// from the cwd (like `Cargo.toml`), or `$ATHENA_CONFIG`.
+    /// Path to `athena.toml`.
+    ///
+    /// Default: the nearest one found walking up from the cwd (like
+    /// `Cargo.toml`), or `$ATHENA_CONFIG`.
     #[arg(short = 'c', long = "config", global = true, value_name = "FILE")]
     config: Option<std::path::PathBuf>,
     #[command(subcommand)]
     cmd: Cmd,
 }
 
+// Variant order is the rendered help order (clap lists subcommands as
+// declared): a lifecycle arc, author -> inspect -> run -> ship -> deploy
+// -> diagnose. Each doc is a punchy first line (the one-liner shown in
+// the command list) + a blank line + detail (shown under `<cmd> --help`).
 #[derive(Subcommand)]
 enum Cmd {
-    /// Scaffold a new workflow crate (Cargo.toml, src/main.rs,
-    /// athena.toml). Interactive on a TTY; flag-driven otherwise.
+    /// Scaffold a new workflow crate
+    ///
+    /// Writes a `Cargo.toml`, `src/main.rs`, and `athena.toml`.
+    /// Interactive on a TTY; flag-driven otherwise.
     Init(init::InitArgs),
-    /// Preflight every prereq for `publish` / `submit` (cargo-zigbuild,
-    /// zig, rustup targets, athena.toml, AWS creds, optional S3 reach).
-    /// Reports each as green/red with a fix hint. Exit 0 on all-pass.
-    Doctor(doctor::DoctorArgs),
-    /// Run a workflow binary in emit-mode; relay the WorkflowTemplate YAML.
+    /// List the templates a binary exposes
+    ///
+    /// Shows both `#[container]`s and `#[workflow]`s. `--kind` filters;
+    /// synthetic `if`/`else` internals are hidden unless
+    /// `--include-synthetic`.
+    Ls(ls::LsArgs),
+    /// Show a template's inputs, image, and submit line
+    ///
+    /// Prints one template's metadata: signature, image, mounts, and a
+    /// copy-pasteable submit line. Defaults to the binary's root template;
+    /// pick another with `-w/--workflow`.
+    Describe(emulate::DescribeArgs),
+    /// Print a binary's WorkflowTemplate YAML
+    ///
+    /// Runs a workflow binary in emit-mode and relays the WorkflowTemplate
+    /// YAML to stdout.
     Emit {
         #[command(flatten)]
         bin: binsrc::BinSel,
-        /// Build a dev version and name its slot (symmetric with `publish
-        /// --dev-tag`); bare `--dev-tag` = the short commit. Source build
-        /// only (not with a positional prebuilt binary).
+        /// Build a dev version and name its slot
+        ///
+        /// Symmetric with `publish --dev-tag`; bare `--dev-tag` = the short
+        /// commit. Source build only (not with a positional prebuilt binary).
         #[arg(long = "dev-tag", value_name = "SLOT", num_args = 0..=1)]
         dev_tag: Option<Option<String>>,
         /// Write the YAML here instead of stdout.
         #[arg(long)]
         out: Option<String>,
-        /// Also append a convenience runnable `Workflow` (generateName)
-        /// for `kubectl create -f -`. Default: templates only — register
-        /// them and run with `argo submit --from workflowtemplate/<root>`.
+        /// Also append a convenience runnable `Workflow`
+        ///
+        /// A `generateName` Workflow for `kubectl create -f -`. Default:
+        /// templates only; register them and run with `argo submit --from
+        /// workflowtemplate/<root>`.
         #[arg(long)]
         with_workflow: bool,
     },
-    /// List the templates a workflow binary exposes (both `#[container]`s
-    /// and `#[workflow]`s). `--kind` filters; synthetic `if`/`else`
-    /// internals are hidden unless `--include-synthetic`.
-    Ls(ls::LsArgs),
-    /// Print one template's metadata: signature, image, mounts, and a
-    /// copy-pasteable submit line. Defaults to the binary's root template;
-    /// pick another with `-w/--workflow`.
-    Describe(emulate::DescribeArgs),
-    /// Emulate one `#[container]` locally under docker/podman, exactly as
-    /// Argo would (same image, the injected bootstrap, positional argv,
-    /// the `/athena` scratch dir, `host!` binds, S3 artifact ports). The
-    /// run payload is the deployed S3 tarball by default (`--build` /
-    /// `--tarball` to override).
+    /// Run one container locally under Docker/Podman
+    ///
+    /// Emulates one `#[container]` exactly as Argo would (same image, the
+    /// injected bootstrap, positional argv, the `/athena` scratch dir,
+    /// `host!` binds, S3 artifact ports). The run payload is the deployed
+    /// S3 tarball by default (`--build` / `--tarball` to override).
     Emulate(emulate::EmulateArgs),
-    /// Submit a `#[workflow]`/`#[container]` to a cluster: type-checks
-    /// args, confirms the binary is uploaded, registers/drift-checks the
-    /// `WorkflowTemplate`s (y/N), then creates the run and prints its
-    /// name. Talks to the Argo Server (`--argo-server`/`$ARGO_SERVER`)
-    /// or the kube API (kubeconfig/in-cluster).
-    Submit(submit::SubmitArgs),
-    /// Delete one deployed version of this binary's template-set: the
-    /// `WorkflowTemplate`s tagged `cargo.athena/tag=<TAG>` plus the
-    /// `{pkg}/<TAG>/{bin}.tar.gz` S3 binary (`--keep-binary` spares it).
-    /// `<TAG>` is a dev slot (`dev-foo`), a release tag (`0-6-0`), or a
-    /// raw semver (`0.6.0`). For cleaning up dev iterations.
-    Prune(submit::PruneArgs),
-    /// Cross-compile + package the tarball locally (no upload); print
-    /// the upload key. Use `publish` to build **and** upload in one step.
+    /// Cross-compile and package the binary (no upload)
+    ///
+    /// Packages the tarball locally and prints the upload key. Use
+    /// `publish` to build **and** upload in one step.
     Build {
         #[command(flatten)]
         pkg: pkg::PkgSel,
@@ -122,8 +132,10 @@ enum Cmd {
         #[arg(long)]
         print: bool,
     },
-    /// One-shot `build` + S3 upload: cross-compile, package, and upload
-    /// the tarball to the `athena.toml` artifact repository.
+    /// Build and upload the binary to S3
+    ///
+    /// One-shot `build` + S3 upload: cross-compile, package, and upload the
+    /// tarball to the `athena.toml` artifact repository.
     Publish {
         #[command(flatten)]
         pkg: pkg::PkgSel,
@@ -131,7 +143,8 @@ enum Cmd {
         #[arg(long = "target")]
         targets: Vec<String>,
         /// Upload this prebuilt tarball verbatim instead of building
-        /// (build-once / upload-many, e.g. a CI artifact).
+        ///
+        /// Build-once / upload-many, e.g. a CI artifact.
         #[arg(long)]
         tarball: Option<String>,
         #[command(flatten)]
@@ -140,6 +153,27 @@ enum Cmd {
         #[arg(long)]
         print: bool,
     },
+    /// Submit a workflow or container to a cluster
+    ///
+    /// Type-checks args, confirms the binary is uploaded, registers and
+    /// drift-checks the `WorkflowTemplate`s (y/N), then creates the run and
+    /// prints its name. Talks to the Argo Server
+    /// (`--argo-server`/`$ARGO_SERVER`) or the kube API
+    /// (kubeconfig/in-cluster).
+    Submit(submit::SubmitArgs),
+    /// Delete one deployed version's templates and binary
+    ///
+    /// Removes the `WorkflowTemplate`s tagged `cargo.athena/tag=<TAG>` plus
+    /// the `{pkg}/<TAG>/{bin}.tar.gz` S3 binary (`--keep-binary` spares it).
+    /// `<TAG>` is a dev slot (`dev-foo`), a release tag (`0-6-0`), or a raw
+    /// semver (`0.6.0`). For cleaning up dev iterations.
+    Prune(submit::PruneArgs),
+    /// Check publish/submit prerequisites
+    ///
+    /// Preflights every prereq for `publish` / `submit` (cargo-zigbuild,
+    /// zig, rustup targets, athena.toml, AWS creds, optional S3 reach).
+    /// Reports each as green/red with a fix hint. Exit 0 on all-pass.
+    Doctor(doctor::DoctorArgs),
 }
 
 /// The release-gate flags shared by `build` / `publish`. The version tag
@@ -150,14 +184,17 @@ enum Cmd {
 /// integrity; off-branch = release provenance).
 #[derive(clap::Args)]
 struct GateArgs {
-    /// Build a dev version and name its slot. Bare `--dev-tag` = the
-    /// short commit (`dev-<sha>`); `--dev-tag foo` = `dev-foo` (a stable
-    /// slot you overwrite while iterating). Forces the dev channel even
-    /// on a clean release branch.
+    /// Build a dev version and name its slot
+    ///
+    /// Bare `--dev-tag` = the short commit (`dev-<sha>`); `--dev-tag foo` =
+    /// `dev-foo` (a stable slot you overwrite while iterating). Forces the
+    /// dev channel even on a clean release branch.
     #[arg(long = "dev-tag", value_name = "TAG", num_args = 0..=1)]
     dev_tag: Option<Option<String>>,
-    /// Allow a dirty working tree: uncommitted changes get baked into the
-    /// binary. Required to build off a clean tree (a dev version).
+    /// Allow a dirty working tree
+    ///
+    /// Uncommitted changes get baked into the binary. Required when
+    /// building off an uncommitted tree (a dev version).
     #[arg(long = "allow-dirty")]
     allow_dirty: bool,
     /// Skip the off-release-branch confirmation prompt (for CI).

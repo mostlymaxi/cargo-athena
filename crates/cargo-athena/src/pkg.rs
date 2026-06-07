@@ -10,12 +10,15 @@ use cargo_athena::AthenaConfig;
 
 #[derive(clap::Args)]
 pub struct PkgSel {
-    /// Cargo package to drive. Default: `[defaults].package` in
-    /// athena.toml, else the sole workspace package.
+    /// Cargo package to drive
+    ///
+    /// Default: `[defaults].package` in athena.toml, else the sole
+    /// workspace package.
     #[arg(short = 'p', long)]
     package: Option<String>,
-    /// Cargo bin within it. Default: `[defaults].bin`, else the
-    /// package's default bin.
+    /// Cargo bin within it
+    ///
+    /// Default: `[defaults].bin`, else the package's default bin.
     #[arg(long)]
     bin: Option<String>,
 }
