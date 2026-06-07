@@ -30,6 +30,8 @@ mod init;
 mod ls;
 #[path = "../pkg.rs"]
 mod pkg;
+#[path = "../style.rs"]
+mod style;
 #[path = "../submit.rs"]
 mod submit;
 #[path = "../tarball.rs"]

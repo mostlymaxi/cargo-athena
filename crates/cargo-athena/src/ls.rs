@@ -12,6 +12,7 @@ use cargo_athena::{ContainerRunMeta, serde_json};
 use std::process::exit;
 
 use crate::binsrc::{BinSel, BinarySource};
+use crate::style;
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum KindFilter {
@@ -68,21 +69,15 @@ fn fetch_list(src: &BinarySource) -> Vec<ContainerRunMeta> {
 /// `(name: Type, …)` so each row already tells you exactly how to
 /// invoke it.
 ///
-/// Coloring uses `console::Style`, which auto-disables when stdout
-/// isn't a TTY or `NO_COLOR` is set, so piped output stays clean.
+/// Coloring goes through the shared `style` palette (`console`-backed, so
+/// it auto-disables when stdout isn't a TTY or `NO_COLOR` is set, keeping
+/// piped output clean).
 fn print_table(mut rows: Vec<&ContainerRunMeta>) {
-    use console::Style;
     rows.sort_by(|x, y| x.name.cmp(&y.name));
     if rows.is_empty() {
         eprintln!("(no matching templates)");
         return;
     }
-    let header_s = Style::new().dim().bold();
-    let pkg_s = Style::new().dim();
-    let name_s = Style::new().bold();
-    let kind_container = Style::new().cyan();
-    let kind_workflow = Style::new().magenta();
-    let kind_other = Style::new();
 
     let short = |m: &ContainerRunMeta| -> String {
         let pfx = format!("{}-", m.package);
@@ -117,22 +112,17 @@ fn print_table(mut rows: Vec<&ContainerRunMeta>) {
         .max(4);
     println!(
         "{}  {}  {}  {}",
-        header_s.apply_to(format!("{:<pw$}", "PACKAGE", pw = pw)),
-        header_s.apply_to(format!("{:<nw$}", "NAME", nw = nw)),
-        header_s.apply_to("KIND     "),
-        header_s.apply_to("SIGNATURE"),
+        style::header().apply_to(format!("{:<pw$}", "PACKAGE", pw = pw)),
+        style::header().apply_to(format!("{:<nw$}", "NAME", nw = nw)),
+        style::header().apply_to("KIND     "),
+        style::header().apply_to("SIGNATURE"),
     );
     for m in rows {
-        let kind_s = match m.kind.as_str() {
-            "container" => &kind_container,
-            "workflow" => &kind_workflow,
-            _ => &kind_other,
-        };
         println!(
             "{}  {}  {}  {}",
-            pkg_s.apply_to(format!("{:<pw$}", m.package, pw = pw)),
-            name_s.apply_to(format!("{:<nw$}", short(m), nw = nw)),
-            kind_s.apply_to(format!("{:<9}", m.kind)),
+            style::label().apply_to(format!("{:<pw$}", m.package, pw = pw)),
+            style::name().apply_to(format!("{:<nw$}", short(m), nw = nw)),
+            style::kind(&m.kind).apply_to(format!("{:<9}", m.kind)),
             sig(m),
         );
     }

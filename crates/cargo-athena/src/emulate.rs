@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio, exit};
 
 use crate::binsrc::{BinSel, BinarySource};
+use crate::style;
 
 #[derive(clap::Args)]
 pub struct EmulateArgs {
@@ -99,18 +100,20 @@ pub fn describe(a: DescribeArgs) {
 /// Rust-style fn signature, then a copy-pasteable submit command. The
 /// raw JSON form (back-compat for scripts) is one `--json` away.
 ///
-/// Coloring uses `console::Style`, which auto-disables when stdout
-/// isn't a TTY or `NO_COLOR` is set, so piped output stays clean.
+/// Coloring goes through the shared `style` palette (`console`-backed, so
+/// it auto-disables off-TTY / under `NO_COLOR`, keeping piped output
+/// clean); two describe-specific header accents stay local.
 fn print_human(m: &ContainerRunMeta) {
     use console::Style;
-    // `Style::for_stderr/stdout` would inherit each stream's TTY state,
-    // but we write to stdout exclusively here.
+    // `style::*` is stdout-targeted (we write to stdout exclusively here).
+    // The kind accent (cyan + bold) and the `fn` keyword (magenta) are
+    // describe-local, so they're built inline.
     let kind_s = Style::new().cyan().bold();
-    let name_s = Style::new().bold();
-    let pkg_s = Style::new().dim();
-    let label_s = Style::new().dim();
     let sig_kw = Style::new().magenta();
-    let cmd_s = Style::new().green();
+    let name_s = style::name();
+    let pkg_s = style::label();
+    let label_s = style::label();
+    let cmd_s = style::cmd();
 
     let kind = if m.kind.is_empty() {
         "template"
