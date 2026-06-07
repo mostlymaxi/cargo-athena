@@ -54,14 +54,11 @@ fn git_state() -> Option<GitState> {
     })
 }
 
-/// Channel a kebab tag implies: dev tags are `dev-…`, everything else
-/// (a `kebab(semver)`) is a release.
+/// Channel a kebab tag implies (`dev-…` -> dev, else release). The rule
+/// lives once in `api::munge`; this local alias keeps the gitinfo call
+/// sites reading locally and in sync with the emit/probe sides.
 fn channel_of(tag: &str) -> &'static str {
-    if tag.starts_with("dev-") {
-        "dev"
-    } else {
-        "release"
-    }
+    munge::channel_of(tag)
 }
 
 /// For a consumer command's SOURCE build (`emit`/`submit`/… run with no
@@ -92,7 +89,7 @@ pub fn export_source_build_tag() {
     } else {
         st.commit.clone()
     };
-    let tag = format!("dev-{}", munge::version_tag(&slot));
+    let tag = format!("{}{}", munge::DEV_PREFIX, munge::version_tag(&slot));
     // SAFETY: single-threaded, set before any cargo child is spawned.
     unsafe {
         std::env::set_var("ATHENA_VERSION_TAG", &tag);
@@ -128,7 +125,7 @@ pub fn export_dev_tag(flag: Option<Option<String>>) {
     };
     // SAFETY: single-threaded, set before any cargo child is spawned.
     unsafe {
-        std::env::set_var("ATHENA_VERSION_TAG", format!("dev-{slot}"));
+        std::env::set_var("ATHENA_VERSION_TAG", format!("{}{slot}", munge::DEV_PREFIX));
         if let Some(s) = &st {
             if !s.commit.is_empty() {
                 std::env::set_var("ATHENA_GIT_COMMIT", &s.commit);
@@ -255,8 +252,8 @@ pub fn resolve(
     }
 
     // Dev slot: explicit `--dev-tag v` (kebabed), else the short commit,
-    // else `local`. Prefix is fixed `dev-` so the channel derives back
-    // unambiguously (core checks `tag.starts_with("dev-")`).
+    // else `local`. Prefix is the shared `munge::DEV_PREFIX` so the
+    // channel derives back unambiguously via `munge::channel_of`.
     let slot_raw = match dev_tag {
         Some(Some(v)) => v,
         _ => commit.clone().unwrap_or_default(),
@@ -274,7 +271,7 @@ pub fn resolve(
         }
     };
     BuildTag {
-        tag: format!("dev-{slot}"),
+        tag: format!("{}{slot}", munge::DEV_PREFIX),
         channel: "dev",
         commit,
         dirty,

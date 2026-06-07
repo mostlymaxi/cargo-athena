@@ -374,17 +374,9 @@ fn build(
 /// `AWS_ENDPOINT_URL` can override the endpoint at upload time without
 /// changing what `emit` injects.
 fn artifact_s3(cfg: &AthenaConfig, krate: &str, tag: &str, bin: &str) -> (S3Ref, String) {
-    let key = format!("{krate}/{tag}/{bin}.tar.gz");
-    let repo = &cfg.artifact_repository.s3;
-    // Same field mapping core uses to emit the binary artifact.
-    let s3 = S3Ref {
-        endpoint: repo.endpoint.clone(),
-        bucket: repo.bucket.clone(),
-        region: repo.region.clone(),
-        insecure: repo.insecure,
-        key: key.clone(),
-    };
-    let dest = format!("s3://{}/{} (endpoint {})", s3.bucket, key, s3.endpoint);
+    let key = cargo_athena::api::munge::binary_key(krate, tag, bin);
+    let s3 = S3Ref::from_repo(&cfg.artifact_repository.s3, key);
+    let dest = format!("s3://{}/{} (endpoint {})", s3.bucket, s3.key, s3.endpoint);
     (s3, dest)
 }
 
