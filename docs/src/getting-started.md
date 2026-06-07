@@ -134,6 +134,10 @@ S3 credentials come from the standard AWS env vars or instance-role
 identity. See [the CLI page](cli.md#submit) for the `-y`, `--update`,
 and `--argo-server` flags.
 
+> **Automate it.** To build and publish from GitHub Actions without
+> wiring up the toolchain yourself, use the `athena-publish` action.
+> See [Publishing from CI](ci.md).
+
 > **GitOps alternative:** `cargo athena emit | kubectl apply -f -`
 > registers the templates; `argo submit --from workflowtemplate/<root>`
 > runs them. Names are stable and deterministic.

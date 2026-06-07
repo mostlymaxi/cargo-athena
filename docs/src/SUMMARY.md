@@ -15,6 +15,7 @@
 # Going Further
 
 - [Cookbook](cookbook.md)
+- [Publishing from CI](ci.md)
 - [Troubleshooting](troubleshooting.md)
 - [Testing](testing.md)
 - [Examples](examples.md)
