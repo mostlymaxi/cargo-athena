@@ -53,6 +53,10 @@ jobs:
       - name: cargo athena build (static-musl, all targets)
         env:
           ATHENA_CONFIG: scripts/athena.toml
+          # Pin the version tag baked into the tarball (matches
+          # e2e-test.sh) so the build is gate-free on CI's detached HEAD
+          # and the emitted WT names line up with the prebuilt binary.
+          ATHENA_VERSION_TAG: e2e
         run: |
           nix develop .#build -c cargo run -q -p cargo-athena --bin cargo-athena -- athena build \
             --package cargo-athena-example-e2e --bin e2e
