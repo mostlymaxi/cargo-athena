@@ -16,7 +16,7 @@
 //! exec-credential plugins for EKS/GKE/AKS). All of this is behind the
 //! `cli` feature; library consumers use `default-features = false`.
 
-use cargo_athena::{AthenaConfig, ContainerRunMeta, api, serde_json};
+use cargo_athena::{AthenaConfig, ContainerRunMeta, S3Ref, api, serde_json};
 use std::io::Write;
 use std::process::exit;
 
@@ -110,17 +110,25 @@ trait Cluster {
     fn get_template(&self, ns: &str, name: &str) -> Option<serde_json::Value>;
     fn apply_template(&self, ns: &str, wt: &api::WorkflowTemplate);
     fn submit_workflow(&self, ns: &str, wf: &api::Workflow) -> String;
+    /// Names of WorkflowTemplates matching a k8s label selector (e.g.
+    /// `cargo.athena/pkg=foo,cargo.athena/tag=dev-bar`).
+    fn list_templates(&self, ns: &str, selector: &str) -> Vec<String>;
+    fn delete_template(&self, ns: &str, name: &str);
     fn describe(&self) -> String;
 }
 
 fn connect(a: &SubmitArgs) -> Box<dyn Cluster> {
-    let server = a
-        .argo_server
-        .clone()
+    connect_to(a.argo_server.clone(), a.insecure)
+}
+
+/// Transport auto-select shared by `submit` and `prune`: an explicit /
+/// `$ARGO_SERVER` URL picks the Argo Server REST API, else the kube API.
+fn connect_to(argo_server: Option<String>, insecure: bool) -> Box<dyn Cluster> {
+    let server = argo_server
         .or_else(|| std::env::var("ARGO_SERVER").ok())
         .filter(|s| !s.trim().is_empty());
     match server {
-        Some(s) => Box::new(ArgoServer::new(&s, a.insecure)),
+        Some(s) => Box::new(ArgoServer::new(&s, insecure)),
         None => Box::new(KubeApi::new()),
     }
 }
@@ -195,6 +203,23 @@ impl Cluster for KubeApi {
             .block_on(api.create(&kube::api::PostParams::default(), &obj))
             .unwrap_or_else(|e| die(&format!("create workflow: {e}")));
         created.metadata.name.unwrap_or_default()
+    }
+
+    fn list_templates(&self, ns: &str, selector: &str) -> Vec<String> {
+        let api = self.api(ns, "WorkflowTemplate", "workflowtemplates");
+        let lp = kube::api::ListParams::default().labels(selector);
+        let list = self
+            .rt
+            .block_on(api.list(&lp))
+            .unwrap_or_else(|e| die(&format!("list workflowtemplates ({selector}): {e}")));
+        list.items.into_iter().filter_map(|o| o.metadata.name).collect()
+    }
+
+    fn delete_template(&self, ns: &str, name: &str) {
+        let api = self.api(ns, "WorkflowTemplate", "workflowtemplates");
+        self.rt
+            .block_on(api.delete(name, &kube::api::DeleteParams::default()))
+            .unwrap_or_else(|e| die(&format!("delete workflowtemplate/{name}: {e}")));
     }
 
     fn describe(&self) -> String {
@@ -311,6 +336,36 @@ impl Cluster for ArgoServer {
             .as_str()
             .unwrap_or_default()
             .to_string()
+    }
+
+    fn list_templates(&self, ns: &str, selector: &str) -> Vec<String> {
+        let v = self.send(
+            self.req(
+                reqwest::Method::GET,
+                &format!("/api/v1/workflow-templates/{ns}"),
+            )
+            .query(&[("listOptions.labelSelector", selector)]),
+            "list workflowtemplates",
+        );
+        v["items"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|i| i["metadata"]["name"].as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn delete_template(&self, ns: &str, name: &str) {
+        self.send(
+            self.req(
+                reqwest::Method::DELETE,
+                &format!("/api/v1/workflow-templates/{ns}/{name}"),
+            ),
+            &format!("delete workflowtemplate/{name}"),
+        );
     }
 
     fn describe(&self) -> String {
@@ -523,4 +578,122 @@ pub fn submit(a: SubmitArgs) {
     eprintln!("\nwatch:  argo get -n {ns} {name}");
     // The created name on stdout — scriptable (`W=$(cargo athena submit …)`).
     println!("{name}");
+}
+
+// ---- prune (delete a version's WorkflowTemplates + S3 binary) --------------
+
+/// `cargo athena prune <tag>` — remove one deployed version of this
+/// binary's template-set: every `WorkflowTemplate` carrying the
+/// `cargo.athena/{pkg,tag}` labels, plus the `{pkg}/<tag>/{bin}.tar.gz`
+/// S3 tarball (unless `--keep-binary`). `pkg`/`bin` come from the probed
+/// binary; the selector always pins both pkg AND tag, so it can never
+/// fan out into an accidental mass-delete.
+#[derive(clap::Args)]
+pub struct PruneArgs {
+    /// Version to remove: a dev slot (`dev-foo`), a release tag
+    /// (`0-6-0`), or a raw semver (`0.6.0`, normalized to `0-6-0`).
+    #[arg(value_name = "TAG")]
+    tag: String,
+    #[command(flatten)]
+    bin: crate::binsrc::BinSel,
+    /// Keep the S3 binary tarball; remove only the WorkflowTemplates.
+    #[arg(long = "keep-binary")]
+    keep_binary: bool,
+    /// Kubernetes namespace. Default: `$ARGO_NAMESPACE` →
+    /// `[defaults].namespace` → `default`.
+    #[arg(short = 'n', long)]
+    namespace: Option<String>,
+    /// Prune via this Argo Server URL instead of the kube API (else
+    /// `$ARGO_SERVER`; absent ⇒ kubeconfig/in-cluster).
+    #[arg(long = "argo-server", value_name = "URL")]
+    argo_server: Option<String>,
+    /// Skip TLS verification talking to the Argo Server.
+    #[arg(long = "insecure-skip-tls-verify")]
+    insecure: bool,
+    /// Assume "yes" for the delete confirmation.
+    #[arg(short = 'y', long)]
+    yes: bool,
+}
+
+pub fn prune(a: PruneArgs) {
+    let src = a.bin.resolve();
+    let info = src.probe();
+    let (pkg, bin) = (info.package, info.bin);
+    // Accept a raw semver ("0.6.0") or a kebab tag ("dev-foo") — normalize
+    // to the exact form the labels + S3 key carry.
+    let tag = api::munge::version_tag(&a.tag);
+    if tag.is_empty() {
+        die(&format!("invalid tag {:?} (normalizes to empty)", a.tag));
+    }
+
+    let ns = a
+        .namespace
+        .clone()
+        .or_else(|| {
+            std::env::var("ARGO_NAMESPACE")
+                .ok()
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| AthenaConfig::load().defaults.namespace.clone())
+        .unwrap_or_else(|| "default".to_string());
+
+    let cluster = connect_to(a.argo_server.clone(), a.insecure);
+    eprintln!("cluster: {} (namespace {ns})", cluster.describe());
+
+    // Every WorkflowTemplate carrying this exact (pkg, tag). Both pinned,
+    // so no broad-selector mass-delete is possible.
+    let selector = format!("cargo.athena/pkg={pkg},cargo.athena/tag={tag}");
+    let names = cluster.list_templates(&ns, &selector);
+
+    // The S3 binary for this tag: repo coords from athena.toml, key from
+    // (pkg, tag, bin) — the same `{pkg}/<tag>/{bin}.tar.gz` the binary
+    // bakes and `publish` uploads.
+    let cfg = AthenaConfig::load();
+    let repo = &cfg.artifact_repository.s3;
+    let s3 = S3Ref {
+        endpoint: repo.endpoint.clone(),
+        bucket: repo.bucket.clone(),
+        region: repo.region.clone(),
+        insecure: repo.insecure,
+        key: format!("{pkg}/{tag}/{bin}.tar.gz"),
+    };
+
+    if names.is_empty() && a.keep_binary {
+        eprintln!("nothing to prune: no WorkflowTemplates match {selector}.");
+        return;
+    }
+
+    eprintln!("\nprune `{pkg}` @ tag `{tag}` from `{ns}`:");
+    if names.is_empty() {
+        eprintln!("  (no matching WorkflowTemplates)");
+    }
+    for n in &names {
+        eprintln!("  WorkflowTemplate  {n}");
+    }
+    if !a.keep_binary {
+        eprintln!("  s3 binary         s3://{}/{}", s3.bucket, s3.key);
+    }
+
+    if !confirm("\nproceed with deletion?", a.yes) {
+        die("aborted (nothing deleted)");
+    }
+
+    for n in &names {
+        let st = crate::feedback::step(format!("Deleting WorkflowTemplate {n}"));
+        cluster.delete_template(&ns, n);
+        st.finish();
+    }
+    if !a.keep_binary {
+        let st = crate::feedback::step(format!("Deleting s3://{}/{}", s3.bucket, s3.key));
+        let deleted = crate::emulate::s3_delete(&s3);
+        st.finish();
+        if !deleted {
+            eprintln!("  (S3 binary was already absent)");
+        }
+    }
+    eprintln!(
+        "pruned {} WorkflowTemplate(s){} for `{pkg}` @ `{tag}`.",
+        names.len(),
+        if a.keep_binary { "" } else { " + the S3 binary" }
+    );
 }

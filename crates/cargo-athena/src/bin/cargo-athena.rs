@@ -97,6 +97,12 @@ enum Cmd {
     /// name. Talks to the Argo Server (`--argo-server`/`$ARGO_SERVER`)
     /// or the kube API (kubeconfig/in-cluster).
     Submit(submit::SubmitArgs),
+    /// Delete one deployed version of this binary's template-set: the
+    /// `WorkflowTemplate`s tagged `cargo.athena/tag=<TAG>` plus the
+    /// `{pkg}/<TAG>/{bin}.tar.gz` S3 binary (`--keep-binary` spares it).
+    /// `<TAG>` is a dev slot (`dev-foo`), a release tag (`0-6-0`), or a
+    /// raw semver (`0.6.0`). For cleaning up dev iterations.
+    Prune(submit::PruneArgs),
     /// Cross-compile + package the tarball locally (no upload); print
     /// the upload key. Use `publish` to build **and** upload in one step.
     Build {
@@ -212,6 +218,7 @@ fn main() {
         Cmd::Describe(args) => emulate::describe(args),
         Cmd::Emulate(args) => emulate::emulate(args),
         Cmd::Submit(args) => submit::submit(args),
+        Cmd::Prune(args) => submit::prune(args),
         Cmd::Build {
             pkg,
             targets,

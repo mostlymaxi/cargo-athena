@@ -787,6 +787,15 @@ pub(crate) fn s3_exists(s3: &S3Ref) -> bool {
     ok
 }
 
+/// Delete the S3 object. Returns `true` if it was deleted, `false` if it
+/// was already absent (idempotent — `prune` re-runs cleanly).
+pub(crate) fn s3_delete(s3: &S3Ref) -> bool {
+    let store = s3_store(s3);
+    let key = object_store::path::Path::from(s3.key.as_str());
+    rt().block_on(async { object_store::ObjectStore::delete(&store, &key).await })
+        .is_ok()
+}
+
 /// Stream the S3 object to `dst` with a byte-progress bar.
 pub(crate) fn s3_get(s3: &S3Ref, dst: &Path) {
     use futures::StreamExt;
