@@ -2354,7 +2354,11 @@ pub fn entrypoint_impl<E: Template>(
         let tag = version_tag
             .map(str::to_string)
             .unwrap_or_else(|| crate::api::munge::version_tag(version));
-        let channel = if tag.starts_with("dev-") { "dev" } else { "release" };
+        let channel = if tag.starts_with("dev-") {
+            "dev"
+        } else {
+            "release"
+        };
         let info = ProbeInfo {
             kind: ATHENA_PROBE_KIND.to_string(),
             athena_protocol: ATHENA_PROTOCOL,
