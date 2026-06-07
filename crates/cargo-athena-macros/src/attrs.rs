@@ -332,6 +332,14 @@ pub(crate) struct ContainerArgs {
     /// running `iptables`, …). The cluster's PodSecurityPolicy /
     /// PodSecurity admission still has the final say.
     pub(crate) privileged: bool,
+    /// `daemon` / `daemon = true` — Argo `Template.daemon: true`. The pod
+    /// runs long-lived: the workflow proceeds to dependent tasks once the
+    /// container reaches readiness (not completion), and Argo terminates it
+    /// when the enclosing dag/steps finishes. Container-only; `#[workflow]`
+    /// has no `daemon` field so `#[workflow(daemon)]` is a deluxe
+    /// unknown-field error by construction. A daemon that exits `Succeeded`
+    /// is marked FAILED, and `retry` only covers startup — see CONTAINER.md.
+    pub(crate) daemon: bool,
     /// `mutexes = [{ name = "x", namespace = "ns" }, …]` — template-level
     /// `Template.synchronization.mutexes`. Holder key
     /// `<ns>/<wf>/<node>`: serialize nodes referencing this template

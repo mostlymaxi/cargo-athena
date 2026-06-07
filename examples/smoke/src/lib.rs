@@ -822,3 +822,26 @@ pub fn pipeline_inject_attr() {
     // the inject args are invisible to the caller (filled by Argo).
     smart_retry("hello".to_string());
 }
+
+// --- #[container(daemon)] long-running pod --------------------------------
+
+/// `daemon` → Argo `Template.daemon: true`: the pod runs long-lived and
+/// the workflow proceeds to dependents once the container reaches
+/// *readiness* (not completion); Argo terminates it when the enclosing
+/// dag/steps finishes. `#[container]`-only - `#[workflow(daemon)]` is an
+/// unknown-field compile error (see `tests/ui/wf_daemon.rs`).
+#[container(daemon)]
+pub fn daemon_server() {
+    println!("daemon_server up");
+}
+
+#[container]
+pub fn daemon_probe() {
+    println!("daemon_probe");
+}
+
+#[workflow]
+pub fn pipeline_daemon() {
+    daemon_server();
+    daemon_probe();
+}
