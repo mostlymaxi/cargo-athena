@@ -4,6 +4,7 @@
 //!
 //! Exit code: 0 on all-pass, 1 if any check failed.
 
+use crate::style;
 use cargo_athena::AthenaConfig;
 use std::process::{Command, Stdio, exit};
 
@@ -17,9 +18,6 @@ pub struct DoctorArgs {
 }
 
 const W: usize = 36;
-const OK: &str = "\u{2713}";
-const X: &str = "\u{2717}";
-const Q: &str = "?";
 
 pub fn doctor(args: DoctorArgs) {
     let mut passed = 0usize;
@@ -162,19 +160,27 @@ pub fn doctor(args: DoctorArgs) {
     eprintln!();
     let total = passed + failed + warned;
     if failed == 0 && warned == 0 {
-        eprintln!("All {total} checks passed.");
+        eprintln!(
+            "{}",
+            style::good()
+                .bold()
+                .apply_to(format!("All {total} checks passed."))
+        );
         exit(0);
     } else if failed == 0 {
         eprintln!("{passed} of {total} passed, {warned} warning(s) - okay, but read above.");
         exit(0);
     } else {
+        let w = if warned > 0 {
+            format!(", {warned} warning(s)")
+        } else {
+            String::new()
+        };
         eprintln!(
-            "{passed} of {total} passed, {failed} failed{w} - fix the above to publish.",
-            w = if warned > 0 {
-                format!(", {warned} warning(s)")
-            } else {
-                String::new()
-            }
+            "{}",
+            style::bad().apply_to(format!(
+                "{passed} of {total} passed, {failed} failed{w} - fix the above to publish."
+            ))
         );
         exit(1);
     }
@@ -183,18 +189,18 @@ pub fn doctor(args: DoctorArgs) {
 // ---- check primitives -----------------------------------------------------
 
 fn check_pass(name: &str, detail: &str) {
-    eprintln!("  {name:.<W$} {OK} {detail}");
+    eprintln!("  {name:.<W$} {ok} {detail}", ok = style::ok());
 }
 
 fn check_fail(name: &str, msg: &str, fix: Option<&str>) {
-    eprintln!("  {name:.<W$} {X} {msg}");
+    eprintln!("  {name:.<W$} {err} {msg}", err = style::err());
     if let Some(fix) = fix {
         eprintln!("  {:>W$}      fix: {fix}", "");
     }
 }
 
 fn check_warn(name: &str, msg: &str) {
-    eprintln!("  {name:.<W$} {Q} {msg}");
+    eprintln!("  {name:.<W$} {warn} {msg}", warn = style::warn());
 }
 
 // ---- implementations ------------------------------------------------------

@@ -4,6 +4,7 @@
 //! cargo: a leading symbol ("→" for action start, "✓" for done,
 //! "✗" for failure), then a description.
 
+use crate::style;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::time::Instant;
 
@@ -12,7 +13,7 @@ use std::time::Instant;
 /// to keep timing accurate without sprinkling `Instant::now()` everywhere.
 pub fn step(msg: impl Into<String>) -> Step {
     let msg = msg.into();
-    eprintln!("→ {msg}");
+    eprintln!("{} {msg}", style::arrow());
     Step {
         msg,
         started: Instant::now(),
@@ -32,7 +33,7 @@ impl Step {
     pub fn finish(mut self) {
         self.finished = true;
         let secs = self.started.elapsed().as_secs_f32();
-        eprintln!("✓ {} ({secs:.1}s)", self.msg);
+        eprintln!("{} {} ({secs:.1}s)", style::ok(), self.msg);
     }
 }
 
@@ -40,7 +41,7 @@ impl Drop for Step {
     fn drop(&mut self) {
         if !self.finished {
             let secs = self.started.elapsed().as_secs_f32();
-            eprintln!("✗ {} ({secs:.1}s)", self.msg);
+            eprintln!("{} {} ({secs:.1}s)", style::err(), self.msg);
         }
     }
 }
