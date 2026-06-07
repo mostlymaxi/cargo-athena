@@ -13,6 +13,13 @@ NS=argo
 PKG=cargo-athena-example-e2e
 BIN=e2e
 export ATHENA_CONFIG="$ROOT/scripts/athena.toml"
+# Templates are always version-tagged (`<base>-<tag>`). Pin a fixed tag
+# via the escape hatch so the whole flow is deterministic AND gate-free
+# (CI runs on a detached HEAD, which would otherwise trip the off-main
+# confirm). The build job (e2e.yml) sets the SAME value so the prebuilt
+# tarball bakes it too. `TAG` drives the versioned WT names + S3 key.
+export ATHENA_VERSION_TAG="${ATHENA_VERSION_TAG:-e2e}"
+TAG="$ATHENA_VERSION_TAG"
 say() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 
 for t in cargo kubectl argo mc jq; do
@@ -251,9 +258,10 @@ tar -xzf "$TARBALL" -C "$STAGE"
 find "$STAGE/bin" -mindepth 1 ! -name 'app-x86_64-unknown-linux-musl' -delete
 SINGLE_TB="$STAGE/single.tar.gz"
 tar -czf "$SINGLE_TB" -C "$STAGE" bin/app-x86_64-unknown-linux-musl
-mc cp "$SINGLE_TB" "athena-e2e/athena-artifacts/athena/bin/e2e/0.1.0/e2e.tar.gz" >/dev/null
+# Overwrite the EXACT key the `cleanup` WT pulls from: {pkg}/<tag>/{bin}.
+mc cp "$SINGLE_TB" "athena-e2e/athena-artifacts/${PKG}/${TAG}/${BIN}.tar.gz" >/dev/null
 PROBE=$(argo submit -n "$NS" --wait -o name \
-  --from "workflowtemplate/cargo-athena-example-e2e-cleanup" | head -1)
+  --from "workflowtemplate/cargo-athena-example-e2e-cleanup-${TAG}" | head -1)
 PROBE_PHASE=$(argo get -n "$NS" "$PROBE" -o json | jq -r '.status.phase')
 [ "$PROBE_PHASE" = "Succeeded" ] || { echo "FAIL: single-arch probe $PROBE phase=$PROBE_PHASE"; exit 1; }
 echo "ok: single-arch probe $PROBE Succeeded"
