@@ -51,6 +51,15 @@ fn seq() {
 }
 
 fn emit<T: Template>() -> String {
+    emit_tagged::<T>(None)
+}
+
+/// Emit with an optional build-time version tag, as `cargo athena build`
+/// would bake via `ATHENA_VERSION_TAG`. `None` = plain build (tag falls
+/// back to `kebab(CARGO_PKG_VERSION)`); `Some("dev-foo")` simulates a dev
+/// build. The substring assertions in the no-tag tests are
+/// version-suffix-tolerant (they match `name: <base>` as a prefix).
+fn emit_tagged<T: Template>(tag: Option<&str>) -> String {
     let mut c = Collector::new();
     <T as Template>::collect(&mut c);
     // These assertions cover the runnable Workflow too, so emit it.
@@ -58,6 +67,9 @@ fn emit<T: Template>() -> String {
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION"),
         env!("CARGO_PKG_NAME"),
+        tag,
+        None,
+        None,
     );
     c.emit::<T>(&ctx, true)
 }
@@ -113,6 +125,58 @@ fn workflow_return_value_bubbles_outputs_result() {
         inner_wt.contains("parameter: '{{tasks.")
             && inner_wt.contains(".outputs.parameters.return}}'"),
         "expected valueFrom.parameter task ref:\n{inner_wt}"
+    );
+}
+
+#[test]
+fn version_tag_overlays_cluster_identity_only() {
+    // A dev build's baked tag (`cargo athena build --dev-tag foo`).
+    let yaml = emit_tagged::<root>(Some("dev-foo"));
+    // Bound to non-colliding names (the `#[container] fn leaf` /
+    // `#[workflow] fn root` unit structs share these idents).
+    let leaf_base = <leaf as Template>::ARGO_NAME;
+    let root_base = <root as Template>::ARGO_NAME;
+
+    // metadata.name + every templateRef.name (the cluster-resource
+    // pointers) carry the tag suffix; the runnable Workflow points at
+    // the versioned root.
+    assert!(
+        yaml.contains(&format!("name: {leaf_base}-dev-foo")),
+        "leaf WT / templateRef.name not versioned:\n{yaml}"
+    );
+    assert!(
+        yaml.contains(&format!("name: {root_base}-dev-foo")),
+        "root WT not versioned"
+    );
+    assert!(yaml.contains("workflowTemplateRef:"));
+
+    // Baked provenance labels.
+    assert!(yaml.contains("cargo.athena/tag: dev-foo"), "missing tag label");
+    assert!(
+        yaml.contains("cargo.athena/channel: dev"),
+        "dev tag must derive the dev channel"
+    );
+
+    // INVARIANT: entrypoint, the inner `templates[].name`, and every
+    // `templateRef.template` stay on the BASE name (the closed
+    // base-name world that keeps in-pod dispatch + Argo's within-WT
+    // lookup working). A trailing `\n` pins the base-only form so the
+    // versioned form can't match as a prefix.
+    assert!(
+        yaml.contains(&format!("entrypoint: {leaf_base}\n")),
+        "entrypoint must stay base:\n{yaml}"
+    );
+    assert!(
+        !yaml.contains(&format!("entrypoint: {leaf_base}-dev-foo")),
+        "entrypoint was wrongly versioned"
+    );
+    assert!(
+        yaml.contains(&format!("template: {leaf_base}\n")),
+        "templateRef.template should be the base name:\n{yaml}"
+    );
+    assert!(
+        !yaml.contains(&format!("template: {leaf_base}-dev-foo")),
+        "templateRef.template must NOT be versioned:\n{yaml}"
     );
 }
 

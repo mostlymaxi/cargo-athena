@@ -1,10 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-decide
+  name: cargo-athena-example-smoke-decide-0-0-0
   labels:
     cargo.athena/bin: smoke-if
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -21,7 +23,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-if.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-if.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -75,10 +77,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-left
+  name: cargo-athena-example-smoke-left-0-0-0
   labels:
     cargo.athena/bin: smoke-if
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -95,7 +99,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-if.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-if.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -149,10 +153,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-make-meta
+  name: cargo-athena-example-smoke-make-meta-0-0-0
   labels:
     cargo.athena/bin: smoke-if
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -167,7 +173,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-if.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-if.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -220,10 +226,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-note
+  name: cargo-athena-example-smoke-note-0-0-0
   labels:
     cargo.athena/bin: smoke-if
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -240,7 +248,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-if.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-if.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -294,10 +302,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-if
+  name: cargo-athena-example-smoke-pipeline-if-0-0-0
   labels:
     cargo.athena/bin: smoke-if
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -312,12 +322,12 @@ spec:
           - name: seed
             value: '"hello"'
         templateRef:
-          name: cargo-athena-example-smoke-decide
+          name: cargo-athena-example-smoke-decide-0-0-0
           template: cargo-athena-example-smoke-decide
       - name: m
         arguments: {}
         templateRef:
-          name: cargo-athena-example-smoke-make-meta
+          name: cargo-athena-example-smoke-make-meta-0-0-0
           template: cargo-athena-example-smoke-make-meta
       - name: chosen
         dependencies:
@@ -327,7 +337,7 @@ spec:
           - name: cnt
             value: '{{tasks.cnt.outputs.parameters.return}}'
         templateRef:
-          name: cargo-athena-example-smoke-pipeline-if-if0
+          name: cargo-athena-example-smoke-pipeline-if-if0-0-0-0
           template: cargo-athena-example-smoke-pipeline-if-if0
       - name: if
         dependencies:
@@ -343,7 +353,7 @@ spec:
           - name: m
             value: '{{tasks.m.outputs.parameters.return}}'
         templateRef:
-          name: cargo-athena-example-smoke-pipeline-if-if1
+          name: cargo-athena-example-smoke-pipeline-if-if1-0-0-0
           template: cargo-athena-example-smoke-pipeline-if-if1
   volumeClaimTemplates:
   - metadata:
@@ -359,10 +369,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-if-if0
+  name: cargo-athena-example-smoke-pipeline-if-if0-0-0-0
   labels:
     cargo.athena/bin: smoke-if
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -385,7 +397,7 @@ spec:
           - name: cnt
             value: '{{inputs.parameters.cnt}}'
         templateRef:
-          name: cargo-athena-example-smoke-pipeline-if-if0-arm0
+          name: cargo-athena-example-smoke-pipeline-if-if0-arm0-0-0-0
           template: cargo-athena-example-smoke-pipeline-if-if0-arm0
         when: ({{inputs.parameters.cnt}} > 3)
       - name: arm1
@@ -394,7 +406,7 @@ spec:
           - name: cnt
             value: '{{inputs.parameters.cnt}}'
         templateRef:
-          name: cargo-athena-example-smoke-pipeline-if-if0-arm1
+          name: cargo-athena-example-smoke-pipeline-if-if0-arm1-0-0-0
           template: cargo-athena-example-smoke-pipeline-if-if0-arm1
         when: '!(({{inputs.parameters.cnt}} > 3))'
   volumeClaimTemplates:
@@ -411,10 +423,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-if-if0-arm0
+  name: cargo-athena-example-smoke-pipeline-if-if0-arm0-0-0-0
   labels:
     cargo.athena/bin: smoke-if
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -437,7 +451,7 @@ spec:
           - name: x
             value: '{{inputs.parameters.cnt}}'
         templateRef:
-          name: cargo-athena-example-smoke-left
+          name: cargo-athena-example-smoke-left-0-0-0
           template: cargo-athena-example-smoke-left
   volumeClaimTemplates:
   - metadata:
@@ -453,10 +467,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-if-if0-arm1
+  name: cargo-athena-example-smoke-pipeline-if-if0-arm1-0-0-0
   labels:
     cargo.athena/bin: smoke-if
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -479,7 +495,7 @@ spec:
           - name: x
             value: '{{inputs.parameters.cnt}}'
         templateRef:
-          name: cargo-athena-example-smoke-right
+          name: cargo-athena-example-smoke-right-0-0-0
           template: cargo-athena-example-smoke-right
   volumeClaimTemplates:
   - metadata:
@@ -495,10 +511,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-if-if1
+  name: cargo-athena-example-smoke-pipeline-if-if1-0-0-0
   labels:
     cargo.athena/bin: smoke-if
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -522,7 +540,7 @@ spec:
           - name: m
             value: '{{inputs.parameters.m}}'
         templateRef:
-          name: cargo-athena-example-smoke-pipeline-if-if1-arm0
+          name: cargo-athena-example-smoke-pipeline-if-if1-arm0-0-0-0
           template: cargo-athena-example-smoke-pipeline-if-if1-arm0
         when: ({{inputs.parameters.cnt}} == 0)
       - name: arm1
@@ -535,7 +553,7 @@ spec:
           - name: m
             value: '{{inputs.parameters.m}}'
         templateRef:
-          name: cargo-athena-example-smoke-pipeline-if-if1-arm1
+          name: cargo-athena-example-smoke-pipeline-if-if1-arm1-0-0-0
           template: cargo-athena-example-smoke-pipeline-if-if1-arm1
         when: (!(({{inputs.parameters.cnt}} == 0)) && (({{=toJSON(fromJSON(inputs.parameters['m'])['id'])}} == "abc") && ({{inputs.parameters.cnt}} > 1)))
       - name: arm2
@@ -548,7 +566,7 @@ spec:
           - name: m
             value: '{{inputs.parameters.m}}'
         templateRef:
-          name: cargo-athena-example-smoke-pipeline-if-if1-arm2
+          name: cargo-athena-example-smoke-pipeline-if-if1-arm2-0-0-0
           template: cargo-athena-example-smoke-pipeline-if-if1-arm2
         when: (!(({{inputs.parameters.cnt}} == 0)) && !((({{=toJSON(fromJSON(inputs.parameters['m'])['id'])}} == "abc") && ({{inputs.parameters.cnt}} > 1))))
   volumeClaimTemplates:
@@ -565,10 +583,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-if-if1-arm0
+  name: cargo-athena-example-smoke-pipeline-if-if1-arm0-0-0-0
   labels:
     cargo.athena/bin: smoke-if
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -588,7 +608,7 @@ spec:
           - name: msg
             value: '"zero"'
         templateRef:
-          name: cargo-athena-example-smoke-note
+          name: cargo-athena-example-smoke-note-0-0-0
           template: cargo-athena-example-smoke-note
   volumeClaimTemplates:
   - metadata:
@@ -604,10 +624,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-if-if1-arm1
+  name: cargo-athena-example-smoke-pipeline-if-if1-arm1-0-0-0
   labels:
     cargo.athena/bin: smoke-if
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -627,7 +649,7 @@ spec:
           - name: msg
             value: '{{inputs.parameters.chosen}}'
         templateRef:
-          name: cargo-athena-example-smoke-note
+          name: cargo-athena-example-smoke-note-0-0-0
           template: cargo-athena-example-smoke-note
   volumeClaimTemplates:
   - metadata:
@@ -643,10 +665,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-if-if1-arm2
+  name: cargo-athena-example-smoke-pipeline-if-if1-arm2-0-0-0
   labels:
     cargo.athena/bin: smoke-if
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -666,7 +690,7 @@ spec:
           - name: msg
             value: '"other"'
         templateRef:
-          name: cargo-athena-example-smoke-note
+          name: cargo-athena-example-smoke-note-0-0-0
           template: cargo-athena-example-smoke-note
   volumeClaimTemplates:
   - metadata:
@@ -682,10 +706,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-right
+  name: cargo-athena-example-smoke-right-0-0-0
   labels:
     cargo.athena/bin: smoke-if
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -702,7 +728,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-if.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-if.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey

@@ -1,10 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-alarm
+  name: cargo-athena-example-smoke-alarm-0-0-0
   labels:
     cargo.athena/bin: smoke-hooks
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -19,7 +21,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-hooks.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-hooks.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -72,10 +74,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-cleanup
+  name: cargo-athena-example-smoke-cleanup-0-0-0
   labels:
     cargo.athena/bin: smoke-hooks
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -90,7 +94,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-hooks.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-hooks.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -143,10 +147,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-fetch
+  name: cargo-athena-example-smoke-fetch-0-0-0
   labels:
     cargo.athena/bin: smoke-hooks
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -163,7 +169,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-hooks.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-hooks.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -222,10 +228,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-hooks
+  name: cargo-athena-example-smoke-pipeline-hooks-0-0-0
   labels:
     cargo.athena/bin: smoke-hooks
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -240,7 +248,7 @@ spec:
           - name: url
             value: '"https://example.com"'
         templateRef:
-          name: cargo-athena-example-smoke-fetch
+          name: cargo-athena-example-smoke-fetch-0-0-0
           template: cargo-athena-example-smoke-fetch
         continueOn:
           error: true
@@ -255,21 +263,21 @@ spec:
           - name: factor
             value: '9'
         templateRef:
-          name: cargo-athena-example-smoke-transform
+          name: cargo-athena-example-smoke-transform-0-0-0
           template: cargo-athena-example-smoke-transform
         hooks:
           exit:
             templateRef:
-              name: cargo-athena-example-smoke-cleanup
+              name: cargo-athena-example-smoke-cleanup-0-0-0
               template: cargo-athena-example-smoke-cleanup
           hook1:
             templateRef:
-              name: cargo-athena-example-smoke-alarm
+              name: cargo-athena-example-smoke-alarm-0-0-0
               template: cargo-athena-example-smoke-alarm
             expression: tasks['transform'].status == "Failed"
           hook2:
             templateRef:
-              name: cargo-athena-example-smoke-alarm
+              name: cargo-athena-example-smoke-alarm-0-0-0
               template: cargo-athena-example-smoke-alarm
             expression: workflow.status == 'Failed'
   volumeClaimTemplates:
@@ -286,10 +294,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-transform
+  name: cargo-athena-example-smoke-transform-0-0-0
   labels:
     cargo.athena/bin: smoke-hooks
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -307,7 +317,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-hooks.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-hooks.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey

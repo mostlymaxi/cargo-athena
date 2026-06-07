@@ -1,10 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-pvc
+  name: cargo-athena-example-smoke-pipeline-pvc-0-0-0
   labels:
     cargo.athena/bin: smoke-pvc
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -16,12 +18,12 @@ spec:
       - name: pvc-writer
         arguments: {}
         templateRef:
-          name: cargo-athena-example-smoke-pvc-writer
+          name: cargo-athena-example-smoke-pvc-writer-0-0-0
           template: cargo-athena-example-smoke-pvc-writer
       - name: pvc-reader
         arguments: {}
         templateRef:
-          name: cargo-athena-example-smoke-pvc-reader
+          name: cargo-athena-example-smoke-pvc-reader-0-0-0
           template: cargo-athena-example-smoke-pvc-reader
   volumeClaimTemplates:
   - metadata:
@@ -37,10 +39,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pvc-reader
+  name: cargo-athena-example-smoke-pvc-reader-0-0-0
   labels:
     cargo.athena/bin: smoke-pvc
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -55,7 +59,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-pvc.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-pvc.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -113,10 +117,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pvc-writer
+  name: cargo-athena-example-smoke-pvc-writer-0-0-0
   labels:
     cargo.athena/bin: smoke-pvc
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -131,7 +137,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-pvc.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-pvc.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey

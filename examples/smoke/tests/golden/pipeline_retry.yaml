@@ -1,10 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-flaky
+  name: cargo-athena-example-smoke-flaky-0-0-0
   labels:
     cargo.athena/bin: smoke-retry
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -19,7 +21,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-retry.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-retry.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -78,10 +80,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-flaky-forever
+  name: cargo-athena-example-smoke-flaky-forever-0-0-0
   labels:
     cargo.athena/bin: smoke-retry
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -96,7 +100,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-retry.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-retry.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -151,10 +155,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-retry
+  name: cargo-athena-example-smoke-pipeline-retry-0-0-0
   labels:
     cargo.athena/bin: smoke-retry
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -166,12 +172,12 @@ spec:
       - name: flaky
         arguments: {}
         templateRef:
-          name: cargo-athena-example-smoke-flaky
+          name: cargo-athena-example-smoke-flaky-0-0-0
           template: cargo-athena-example-smoke-flaky
       - name: flaky-forever
         arguments: {}
         templateRef:
-          name: cargo-athena-example-smoke-flaky-forever
+          name: cargo-athena-example-smoke-flaky-forever-0-0-0
           template: cargo-athena-example-smoke-flaky-forever
     retryStrategy:
       limit: 2
