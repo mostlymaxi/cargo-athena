@@ -67,6 +67,20 @@ main {
   border-bottom-color: var(--athena-orange-strong);
 }
 
+/* --- Lists -------------------------------------------------------------- */
+
+/* mdBook tightens lists to line-height 1.45 with no inter-item margin, so
+   bullets sit flush against each other and the surrounding prose. Add a
+   small amount of vertical breathing room around and between items. */
+.content ul,
+.content ol {
+  margin-block: 1.15em;
+}
+
+.content li + li {
+  margin-top: 0.35em;
+}
+
 /* --- Code -------------------------------------------------------------- */
 
 pre,
