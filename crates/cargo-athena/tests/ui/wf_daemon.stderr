@@ -1,0 +1,5 @@
+error: unknown field `daemon`
+ --> tests/ui/wf_daemon.rs:4:26
+  |
+4 | #[cargo_athena::workflow(daemon)]
+  |                          ^^^^^^

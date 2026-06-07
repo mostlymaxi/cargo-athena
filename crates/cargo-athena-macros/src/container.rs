@@ -570,6 +570,14 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         quote! { ::core::option::Option::None }
     };
+    // `daemon` → Argo `Template.daemon: true`. Off → `None` (skip-serialized,
+    // goldens byte-identical). Container-only: only `#[container]` builds
+    // this literal, so a daemon attr can never reach a dag/steps template.
+    let daemon_tok = if cfg.daemon {
+        quote! { ::core::option::Option::Some(true) }
+    } else {
+        quote! { ::core::option::Option::None }
+    };
     let image_opt = match &image_s {
         Some(s) => quote! { ::core::option::Option::Some(#s) },
         None => quote! { ::core::option::Option::None },
@@ -922,6 +930,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                     tolerations: #tolerations_tok,
                     affinity: #affinity_tok,
                     pod_spec_patch: #pod_spec_patch_tok,
+                    daemon: #daemon_tok,
                     ..::core::default::Default::default()
                 }
             }

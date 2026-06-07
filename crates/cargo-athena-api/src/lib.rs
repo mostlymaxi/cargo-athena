@@ -279,6 +279,17 @@ argo! {
         pub container: Option<Container>,
         pub dag: Option<DagTemplate>,
         pub script: Option<ScriptTemplate>,
+        /// `#[container(daemon)]` → Argo `Template.daemon: true`. The pod
+        /// is treated as long-running: the workflow proceeds to dependents
+        /// as soon as the container reaches READINESS (not completion), and
+        /// Argo terminates the daemon when its boundary node finishes.
+        /// Container/script templates only (no-op on dag/steps). Two Argo
+        /// gotchas the user must know: a daemon pod that exits `Succeeded`
+        /// is marked FAILED (daemons are expected to run indefinitely), and
+        /// `retryStrategy` only covers the startup phase (failures after
+        /// readiness are ignored). athena has no readinessProbe attr — use
+        /// `pod_spec_patch` to add one if Ready timing matters.
+        pub daemon: Option<bool>,
         pub volumes: Vec<Volume>,
         /// Per-template SA override (Argo runs the pod as this).
         pub service_account_name: String,

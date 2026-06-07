@@ -34,6 +34,7 @@ const BIN_INJECT_ATTR: &str = env!("CARGO_BIN_EXE_smoke-inject-attr");
 const BIN_BOUNDARY_SCHEDULING: &str = env!("CARGO_BIN_EXE_smoke-boundary-scheduling");
 const BIN_PARALLELISM: &str = env!("CARGO_BIN_EXE_smoke-parallelism");
 const BIN_PVC: &str = env!("CARGO_BIN_EXE_smoke-pvc");
+const BIN_DAEMON: &str = env!("CARGO_BIN_EXE_smoke-daemon");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -226,6 +227,13 @@ fn emit_pipeline_ttl() {
 #[test]
 fn emit_pipeline_deadline() {
     assert_golden("pipeline_deadline.yaml", &run_bin(BIN_DEADLINE, &[]));
+}
+
+/// `#[container(daemon)]` → `Template.daemon: true` on the daemon
+/// container WT, absent on the plain container + the workflow's dag.
+#[test]
+fn emit_pipeline_daemon() {
+    assert_golden("pipeline_daemon.yaml", &run_bin(BIN_DAEMON, &[]));
 }
 
 /// `CARGO_ATHENA_DESCRIBE`: the binary reports a `ContainerRunMeta`
