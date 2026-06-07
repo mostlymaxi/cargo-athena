@@ -453,9 +453,26 @@ pub fn submit(a: SubmitArgs) {
             (k.to_string(), v.to_string())
         })
         .collect();
-    // Use the resolved full template name (`root.name`); `a.template`
-    // may be the short form the user typed (no package prefix).
-    let tpl_name = &root.name;
+    // The Workflow must reference the VERSIONED root WT resource. The
+    // emitted set (`wts`) carries the build-time-sealed `<base>-<tag>` on
+    // `metadata.name`, but the inner template name == `spec.entrypoint`
+    // stays on the base, so find the root WT by its (base) entrypoint and
+    // use that WT's `metadata.name` verbatim — core's emit transform is
+    // the single source of truth; the CLI never recomputes the tag.
+    let tpl_name = wts
+        .iter()
+        .find(|wt| {
+            wt.spec
+                .as_ref()
+                .is_some_and(|s| s.entrypoint == root.name)
+        })
+        .and_then(|wt| wt.metadata.as_ref().map(|m| m.name.clone()))
+        .unwrap_or_else(|| {
+            die(&format!(
+                "emitted WorkflowTemplate set has no root entrypoint {:?}",
+                root.name
+            ))
+        });
     let wf = api::Workflow {
         api_version: api::API_VERSION.to_string(),
         kind: api::KIND_WORKFLOW.to_string(),
