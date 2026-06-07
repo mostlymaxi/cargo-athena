@@ -50,6 +50,25 @@ pub enum BinarySource {
 }
 
 impl BinSel {
+    /// Honor a consumer command's `--dev-tag` (on `submit`/`emit`): for a
+    /// SOURCE build, seal that slot via `ATHENA_VERSION_TAG` so the build
+    /// bakes it (symmetric with `publish --dev-tag`). A prebuilt `[BINARY]`
+    /// carries its OWN sealed tag, so combining the two is a hard error
+    /// (the flag would be silently ignored otherwise). Call before
+    /// [`resolve`](Self::resolve).
+    pub(crate) fn apply_dev_tag(&self, dev_tag: Option<Option<String>>) {
+        if dev_tag.is_none() {
+            return;
+        }
+        if self.binary.is_some() {
+            die(
+                "--dev-tag only applies when building from source; the prebuilt \
+                 binary carries its own sealed tag (omit the binary, or drop --dev-tag).",
+            );
+        }
+        crate::gitinfo::export_dev_tag(dev_tag);
+    }
+
     pub(crate) fn resolve(&self) -> BinarySource {
         if let Some(b) = &self.binary {
             // Prebuilt binary: read its build-time-sealed tag as-is — do

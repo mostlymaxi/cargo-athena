@@ -84,26 +84,27 @@ cargo athena prune dev-<commit>      # remove that version's WTs + S3 binary
 ```
 
 The slot is the short commit, so it rolls each commit. For ONE **stable**
-slot you overwrite in place (and so `submit` doesn't have to be a source
-build), pin it with `ATHENA_VERSION_TAG` - it's respected by every step
-(`build`/`publish`/`submit`/`emit`) and by a prebuilt binary:
+slot you overwrite in place, name it with `--dev-tag` - it works the same
+on `publish` and `submit`/`emit` (each bakes that slot into its own source
+build), so the names + S3 key line up:
 
 ```bash
-export ATHENA_VERSION_TAG=dev-wip
-cargo athena publish --allow-dirty   # -> ...-dev-wip
-cargo athena submit                  # -> dev-wip
+cargo athena publish --allow-dirty --dev-tag wip   # -> ...-dev-wip
+cargo athena submit  --dev-tag wip                 # -> dev-wip (matches)
 cargo athena prune dev-wip
 ```
 
-`--dev-tag wip` on `build`/`publish` is the one-shot equivalent for a
-single command. `ATHENA_VERSION_TAG` is also the **CI / cross-machine**
-escape hatch: it forces the tag verbatim and skips git, so a build job
-and a separate publish job (or a `publish --tarball`) agree on the key.
+For CI / cross-machine (a build job and a *separate* publish job, or
+`publish --tarball`), use `ATHENA_VERSION_TAG=<tag>` instead - it forces
+the tag verbatim, skips git, and every step (incl. a prebuilt binary)
+honors it.
 
-Note: `submit` follows the **binary's** baked tag. A source build bakes
-the git-aware tag automatically (above); but if you hand `submit` a
-prebuilt `[BINARY]`, it uses *that* binary's tag - so don't submit a
-plain `cargo build` artifact (tagged as a release) expecting a dev tag.
+Note: `submit` follows the **binary's** baked tag. A source build (no
+positional `[BINARY]`) bakes the git-aware tag - the auto `dev-<commit>`,
+or your `--dev-tag` slot. But if you hand `submit` a prebuilt `[BINARY]`,
+it uses *that* binary's sealed tag (and `--dev-tag` is rejected) - so
+don't submit a plain `cargo build` artifact (tagged as a release)
+expecting a dev tag.
 
 ## `init`
 
