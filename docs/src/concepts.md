@@ -5,9 +5,9 @@ A few ideas explain everything cargo-athena does.
 ## 1. Templates are types
 
 Each `#[workflow]` / `#[container]` lowers to a Rust type. Referencing
-that type from another module or crate force-links its definition;
-emission walks the closure of every template you reach from your
-entrypoint.
+that type from another module or crate pulls its definition into the
+build; emitting your entrypoint includes every template it reaches,
+and nothing it doesn't.
 
 There is no registry to keep in sync. Workflows compose across
 modules and crates through normal Rust name resolution.

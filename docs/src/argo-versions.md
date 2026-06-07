@@ -7,7 +7,7 @@ matrix is therefore not a claim - it is a continuously verified result.
 | Argo | Support |
 |---|---|
 | **v4.0.5** | maintained (latest minor) |
-| **v3.7.14** | maintained (n‑1 minor) |
+| **v3.7.14** | maintained (n-1 minor) |
 | **v3.6.19** | minimum supported (EOL, hard-gated) |
 
 Argo Workflows maintains the two most recent minors; cargo-athena tracks
@@ -22,10 +22,9 @@ cargo-athena emits **one `WorkflowTemplate` per template**, wired via
 multi-step workflow fails instantly with
 `failed to resolve {{tasks.a.outputs.…}}`.
 
-This is intrinsic to the one-template-per-function model and was **fixed
-in Argo 3.6** - the emitted YAML is correct and passes 3.6/3.7/4.0
-unchanged. Older versions *may* still work for trivial cases; use at
-your own risk.
+This was **fixed in Argo 3.6**: the emitted YAML is correct and passes
+3.6/3.7/4.0 unchanged. Older versions *may* still work for trivial
+cases; use at your own risk.
 
 ## What's degraded on 3.6
 

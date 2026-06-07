@@ -51,8 +51,8 @@ spec:
   missing struct field, or consuming a step that returns nothing is a
   **compile error** - caught long before a cluster ever sees it.
 - **Composable.** A workflow is a Rust type. Reference it from another
-  crate to force-link it - workflows compose across modules and crates
-  with no registry or hand-run codegen.
+  crate and it comes along automatically: workflows compose across
+  modules and crates with no registry or hand-run codegen.
 - **Real Rust in any image.** Your binary is fetched at runtime, so
   each step runs your Rust *on top of* any image you pick - a vendor's
   `postgres:16`, a CUDA base, your team's tooling image - with no

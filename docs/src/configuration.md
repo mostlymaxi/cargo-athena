@@ -50,9 +50,8 @@ template as an Argo `s3{}` artifact source.
 | `access_key_secret` / `secret_key_secret` | Kubernetes `{ name, key }` secret selectors for credentials. |
 
 The binary tarball's object key is `{crate}/{version}/{bin}.tar.gz`,
-derived from `CARGO_PKG_NAME` / `CARGO_PKG_VERSION` / `CARGO_BIN_NAME`
-at compile time and from `cargo metadata` + `--bin` on the publish
-side. The two paths agree by construction.
+taken from your crate's name, version, and bin. (A `Cargo.toml`
+version bump therefore means a fresh `publish`.)
 
 ## `[bootstrap]`
 

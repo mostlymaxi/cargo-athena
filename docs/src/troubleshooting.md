@@ -160,10 +160,10 @@ read access on configmaps. Add `create` (and `update/patch/delete`
 for resilience) to the controller's Role - `scripts/deploy.sh` does
 this with `Role/RoleBinding athena-argo-configmaps`.
 
-On Argo 3.6 the offload path doesn't exist at all; a substituted
-`c.Args[]` over the kernel exec `ARG_MAX` (~128 KB) fails with
-`exec /var/run/argo/argoexec: argument list too long` and the only
-fix is using `Artifact<T>` for the large value.
+On Argo 3.6 the offload path doesn't exist at all; arguments over the
+kernel exec `ARG_MAX` (~128 KB) fail with `argument list too long`,
+and the only fix is using `Artifact<T>` for the large value (see
+[Pass a large value between steps](cookbook.md#pass-a-large-value-between-steps)).
 
 ### "failed to resolve {{tasks.X.outputs.*}}" on Argo ≤ 3.5
 
@@ -203,10 +203,19 @@ running from outside the workflow crate against a stale binary; pass
 
 `host!("/p")` mounts under `/athena/mounts/<hash>` to avoid clobbering
 the container fs (`host!("/")` would otherwise overlay the host root).
-Two `host!` literals that hash to the same value would produce
-duplicate Volume names, which Kubernetes rejects. The hash is a
-stable FNV-1a 64-bit (16 hex chars), wide enough that collisions are
-not practical.
+The `<hash>` is derived deterministically from the path and is wide
+enough that collisions are not practical, so duplicate Volume names
+(which Kubernetes rejects) are rare; if you hit one, two `host!`
+literals collided.
 
 If you need a specific in-container mount path, use
-`#[container(host_mount = [...])]` instead.
+`#[container(host_mount = [...])]` instead. See
+[`#[container]` macro calls](container.md#macro-calls) for the full
+`host!` rules.
+
+---
+
+Still stuck? The [`#[workflow]`](workflow.md) and
+[`#[container]`](container.md) references cover every attribute and
+shape, and the [Cookbook](cookbook.md) has worked examples for the
+common tasks.

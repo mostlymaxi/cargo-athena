@@ -30,12 +30,12 @@ The typical flow is **`publish`** to ship the binary, then
 [`init`](#init) to scaffold a fresh crate and [`doctor`](#doctor) to
 check that your toolchain is ready.
 
-`-c, --config <FILE>` (global) points at an `athena.toml`. With no flag,
-it is resolved in order: `$ATHENA_CONFIG`, then the nearest `athena.toml`
-walking up from the cwd (like `Cargo.toml`), then a global
-`~/.config/cargo-athena/athena.toml` (honoring `$XDG_CONFIG_HOME`). The
-global fallback lets you run `submit` / `emit` / `ls` / `describe`
-against an already-published workflow with no per-repo config.
+`-c, --config <FILE>` (global) points at an `athena.toml`. With no flag
+it is discovered automatically (`$ATHENA_CONFIG`, the nearest
+`athena.toml` walking up from the cwd, then a global one), so `submit` /
+`emit` / `ls` / `describe` work against an already-published workflow
+with no per-repo config. See [`athena.toml`](configuration.md) for the
+full precedence order.
 
 ## `init`
 
@@ -125,6 +125,8 @@ Flags:
 - `--priority N` - workflow priority (int32); higher = scheduled first
   when the controller hits its parallelism limit.
 - `--argo-server URL` - use Argo Server REST instead of Kubernetes API.
+- `--insecure-skip-tls-verify` - skip TLS verification talking to the
+  Argo Server.
 - `-y` / `--yes` - skip every y/N prompt.
 - `--update` - re-apply all WorkflowTemplates.
 - `--skip-binary-check` - don't verify the tarball is uploaded.

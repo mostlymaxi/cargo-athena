@@ -45,13 +45,13 @@ All are optional.
 | `active_deadline_if_root = <dur>` | Whole-workflow runtime cap. The only timeout that works on a `#[workflow]`. **Root-only.** See [Timeouts](#timeouts). |
 | `mutexes = [{ name, namespace }, …]` | Serialize this template against other holders of the same mutex name (within one run AND across separate Workflow runs). Both fields accept `"lit" + arg + arg.field` injection. See [Mutexes](#mutexes). |
 | `mutexes_if_root = [{ name, namespace }, …]` | Serialize the whole submitted run against other runs holding the same mutex. **Root-only.** |
-| `tolerations_if_root = [{ key, operator, value, effect, ... }, …]` | K8s `Toleration` list applied to every pod in the run. 3rd tier of Argo's `tmpl → boundary → wfSpec` pod-scheduling lookup. Strings accept `"lit" + arg` injection. **Root-only.** |
-| `affinity_if_root = "<json\|yaml>"` | Opaque YAML/JSON string for pod affinity, applied to every pod in the run. Athena does NOT model `apiv1.Affinity`'s deeply-nested schema by design — use `pod_spec_patch_if_root` for patch-style. Hand-write `{{workflow.parameters.X}}` substitutions inside the YAML body as needed. **Root-only.** |
-| `pod_spec_patch_if_root = "<json\|yaml>"` | Strategic-merge patch Argo applies to **every** pod in the submitted run. Universal escape hatch for any podSpec field athena doesn't have a first-class attr for. String accepts `"lit" + arg` injection. **Root-only.** Athena does NOT validate the patch shape; Argo / k8s reject malformed input at submit / admission time. |
+| `tolerations_if_root = [{ key, operator, value, effect, ... }, …]` | K8s `Toleration` list applied to every pod in the run. Strings accept `"lit" + arg` injection. **Root-only.** |
+| `affinity_if_root = "<json\|yaml>"` | Opaque YAML/JSON string for pod affinity, applied to every pod in the run. athena keeps it opaque rather than modelling the deeply-nested Kubernetes `Affinity` schema; use `pod_spec_patch_if_root` for patch-style. Hand-write `{{workflow.parameters.X}}` substitutions inside the YAML body as needed. **Root-only.** |
+| `pod_spec_patch_if_root = "<json\|yaml>"` | Strategic-merge patch Argo applies to **every** pod in the submitted run. Universal escape hatch for any podSpec field athena doesn't have a first-class attr for. String accepts `"lit" + arg` injection. **Root-only.** athena does NOT validate the patch shape; Argo / k8s reject malformed input at submit / admission time. |
 | `image_pull_secrets_if_root = ["regcred", …]` | Root-only `WorkflowSpec.ImagePullSecrets`. Secret names the kubelet uses to pull every pod's image from a private registry. K8s / Argo expose this only at workflow scope; per-container needs go through `pod_spec_patch`. |
 | `parallelism = N` | `Template.parallelism` on this dag/steps. Caps concurrent children scheduled under THIS template invocation only (pods from nested templates don't count). Literal `i64`, `> 0`. |
 | `parallelism_if_root = N` | Root-only `WorkflowSpec.parallelism`. Caps total concurrent pods across the run. Inert when this WT is `templateRef`'d. Literal `i64`, `> 0`. |
-| `boundary_tolerations = [{ key, operator, value, effect, ... }, …]` | K8s `Toleration` list on this dag/steps template, inherited by child pods that don't set their own. Same boundary tier as `boundary_node_selector`. **Literal only** (Argo's boundary-copy makes per-arg injection unsafe at this tier; use `tolerations_if_root` for dynamic values). |
+| `boundary_tolerations = [{ key, operator, value, effect, ... }, …]` | K8s `Toleration` list on this dag/steps template, inherited by child pods that don't set their own. Same boundary tier as `boundary_node_selector`. **Literal only** (use `tolerations_if_root` for values that depend on an argument). |
 | `boundary_affinity = "<json\|yaml>"` | Opaque YAML/JSON string for pod affinity on this dag/steps template, inherited by child pods that don't set their own. **Literal only.** |
 
 A parameter *name* (i.e. a function argument) or a `name = "…"`
@@ -90,13 +90,11 @@ Three knobs at three scopes. Pick by reach:
   (inert when referenced as a sub-workflow). Values support
   `"lit" + arg` injection of the workflow's own arguments.
 
-**`boundary_node_selector` is intentionally literal-only.** If you
-want a value that depends on an argument, use `node_selector_if_root`:
-it's the only `#[workflow]` knob where per-arg injection has clear,
-predictable semantics. Hand-written `{{workflow.parameters.X}}` is
-accepted in a literal as an eyes-open escape hatch, but the natural
-mental model of "this template's arg" doesn't hold for the boundary
-case, so the macro forbids `+ arg` there to avoid silent surprises.
+**`boundary_node_selector` is intentionally literal-only.** For a
+value that depends on an argument, use `node_selector_if_root`, the
+one `#[workflow]` knob where per-arg injection has clear, predictable
+semantics. A hand-written `{{workflow.parameters.X}}` inside a literal
+still works as an eyes-open escape hatch.
 
 ```rust,ignore
 #[workflow(
@@ -294,6 +292,10 @@ Cookbook recipes that exercise these features:
 - [Timeouts](cookbook.md#timeouts)
 - [Whole-workflow cleanup](cookbook.md#whole-workflow-cleanup)
 - [Mutual exclusion across runs](cookbook.md#mutual-exclusion-across-runs)
+- [Throttle pods per workflow / per DAG](cookbook.md#throttle-pods-per-workflow--per-dag)
 - [Pin every step in a workflow to specific nodes](cookbook.md#pin-every-step-in-a-workflow-to-specific-nodes)
+- [Tolerate node taints and steer with affinity](cookbook.md#tolerate-node-taints-and-steer-with-affinity)
+- [Reach a podSpec field athena has no attr for](cookbook.md#reach-a-podspec-field-athena-doesnt-have-an-attr-for)
+- [Pull images from a private registry](cookbook.md#pull-images-from-a-private-registry)
 
 Hitting an error? See [Troubleshooting](troubleshooting.md).

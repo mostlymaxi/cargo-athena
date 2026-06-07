@@ -1,6 +1,6 @@
 # Cookbook
 
-Common patterns, each a few lines. The full rules behind them are on
+Common, copy-pasteable patterns. The full rules behind each are on
 the [`#[workflow]`](workflow.md) and [`#[container]`](container.md)
 pages.
 
@@ -18,6 +18,7 @@ pages.
 
 - [Share data between steps without a dependency](#share-data-between-steps-without-a-dependency)
 - [Share data and keep a strict order](#share-data-and-keep-a-strict-order)
+- [Pass a large value between steps](#pass-a-large-value-between-steps)
 
 **Resilience & lifecycle**
 
@@ -32,8 +33,13 @@ pages.
 
 - [Pin a single pod (image, service account, node)](#pin-a-single-pod-image-service-account-node)
 - [Pin every step in a workflow to specific nodes](#pin-every-step-in-a-workflow-to-specific-nodes)
+- [Tolerate node taints and steer with affinity](#tolerate-node-taints-and-steer-with-affinity)
+- [Reach a podSpec field athena has no attr for](#reach-a-podspec-field-athena-doesnt-have-an-attr-for)
+- [Pull images from a private registry](#pull-images-from-a-private-registry)
+- [Inject an Argo built-in variable as a parameter](#inject-an-argo-built-in-variable-as-a-parameter)
 - [Pull a Kubernetes Secret as an env var](#pull-a-kubernetes-secret-as-an-env-var)
 - [Reuse setup across containers](#reuse-setup-across-containers)
+- [Set up tracing once for every container](#set-up-tracing-or-any-pod-only-init-once-for-every-container)
 - [Async `#[container]` fns](#async-container-fns)
 - [Share a PVC across containers in a workflow](#share-a-pvc-across-containers-in-a-workflow)
 
@@ -289,7 +295,8 @@ fn fetch(url: String) -> String { /* … */ "ok".into() }
 
 `limit` is required (`unlimited` for no cap); `policy` is one of
 `Always`, `OnFailure`, `OnError`, `OnTransientError`; `backoff` is an
-int (seconds) or a humantime string. Works on `#[workflow]` too.
+int (seconds) or a humantime string. Works on `#[workflow]` too. Full
+field reference: [`#[container]`](container.md#attribute-arguments).
 
 ## Timeouts
 
@@ -352,7 +359,7 @@ Two tiers, picked by reach:
 
 Each entry is `{ name = …, namespace = … }`; `namespace` is optional
 (defaults to the workflow's own). Both fields accept `"lit" + arg`
-injection.
+injection. Full details: [`#[workflow]` Mutexes](workflow.md#mutexes).
 
 ## Throttle pods per workflow / per DAG
 
@@ -421,7 +428,7 @@ fn pipeline(env: String) { /* ... */ }
   **Root-only**: inert when this WT is embedded as a sub. Values
   accept `"lit" + arg` / `"lit" + arg.field` injection.
 
-## Tolerate node taints + steer with affinity
+## Tolerate node taints and steer with affinity
 
 Most clusters taint GPU / spot / dedicated nodes; pods need tolerations
 to schedule there:
@@ -467,12 +474,12 @@ The boundary tier covers the case "all pods that live inside this
 specific dag inherit these scheduling constraints" (`boundary_tolerations`
 and `boundary_affinity`, mirroring `boundary_node_selector`). Pods that
 set their own override the inheritance; pods that don't pick up the
-boundary's values. Literal only — Argo's boundary-copy makes
-per-arg injection unsafe at this tier (use `*_if_root` for dynamic).
+boundary's values. Literal only at this tier: use the matching
+`*_if_root` form for values that depend on an argument.
 
 ## Reach a podSpec field athena doesn't have an attr for
 
-`pod_spec_patch = "<json|yaml>"` is the universal escape hatch — Argo
+`pod_spec_patch = "<json|yaml>"` is the universal escape hatch: Argo
 strategic-merges the patch onto the rendered pod just before
 submission. Use it for any K8s field cargo-athena doesn't lift to a
 first-class attr (CPU/memory limits, init containers, sidecars,
@@ -497,10 +504,9 @@ fn pipeline() { heavy("x".to_string()); }
 
 The string accepts the usual `"lit" + arg` injection grammar, e.g.
 `pod_spec_patch = r#"{"containers":[{"name":"main","resources":{"limits":{"cpu":""# + cpu + r#""}}}]}"#`.
-Operands lower to `{{=fromJSON(inputs.parameters[..])}}` at
-template scope, `{{=fromJSON(workflow.parameters[..])}}` at root.
+Injection works at both the container and the root tier.
 
-Athena does NOT validate the patch shape — that's the trade-off for
+athena does NOT validate the patch shape: that is the trade-off for
 "any field." Argo and the K8s API reject malformed input at submit /
 admission time.
 
@@ -540,20 +546,19 @@ fn pipeline() {
 }
 ```
 
-The macro does NOT validate the expression — it's piped to Argo
+The macro does NOT validate the expression: it's piped to Argo
 verbatim. You own:
 
 - The variable's scope. `{{retries}}` only resolves inside a
   `retry(...)` strategy; `{{tasks.X.outputs.Y}}` only resolves inside
   a DAG context.
-- JSON wrapping. The run-side decodes via `serde_json::from_str`, so
-  numeric / `bool` types want bare expressions (`{{retries}}` → `3`),
-  `String` types want explicit quotes
+- JSON wrapping. Numeric / `bool` types want a bare expression
+  (`{{retries}}` → `3`); `String` types want explicit quotes
   (`"\"{{workflow.name}}\""` → `"wf-abc"`).
 
-Wrong wrapping or out-of-scope refs panic the run-side decode with a
-clear "deserialize container input" message — useful as a debugging
-signal that the value didn't substitute.
+Wrong wrapping or out-of-scope refs fail the run with a clear
+"deserialize container input" message: a useful signal that the value
+didn't substitute.
 
 ## Pull a Kubernetes Secret as an env var
 
@@ -590,7 +595,7 @@ connection back to every container that needs one:
 fn open_db() -> DbHandle {
     let user = cargo_athena::secret!("db-creds", "user");
     let pass = cargo_athena::secret!("db-creds", "password");
-    let ca   = cargo_athena::host!("/secrets/db");          // /secrets/db
+    let ca   = cargo_athena::host!("/secrets/db");          // host dir -> &Path
     DbHandle::connect(&user, &pass, &ca)
 }
 
@@ -608,18 +613,19 @@ fn nightly_audit() {
 }
 ```
 
-Each container that calls `open_db()` gets the `/secrets/db` mount
-and the `DB_USER` / `DB_PASSWORD` env entries automatically. The
-calling containers don't have to know what's inside the fragment.
+Every container that calls `open_db()` automatically gets the
+database Secret and the host mount wired into its pod. The values
+come back through `open_db()`'s return, so a caller never names an
+env var or mount path itself, and doesn't have to know what's inside
+the fragment.
 
 ## Set up tracing (or any pod-only init) once for every container
 
-Your workflow binary doubles as the in-pod runner AND the local
-introspector that `cargo athena emit` / `ls` / `describe` / `submit`
-spawn. So putting `tracing_subscriber::fmt().init()` directly in
-`main()` would also fire on every local CLI invocation -- harmless
-for stdout logging, but a real footgun for OTLP exporters, metrics
-push, anything that dials out or costs money.
+Your workflow binary runs in two worlds (see [Core
+Concepts](concepts.md#5-your-workflow-binary-runs-in-two-worlds)), so
+`tracing_subscriber::fmt().init()` in `main()` would fire on every
+local `cargo athena` call too: harmless for stdout logging, but a
+footgun for OTLP exporters or anything that dials out or costs money.
 
 Gate it with `cargo_athena::is_container_run()` so the setup only
 runs in-pod:
@@ -712,7 +718,7 @@ ever mounts it at a time, but a parallel fan-out over RWO will
 fail the second pod's volume attach.
 
 The mount path is opaque (`/athena/pvcs/<hash>`) and stable across
-emit and run — always use the returned `&'static Path` value;
+emit and run; always use the returned `&'static Path` value and
 never hard-code the path.
 
 **v1 caveat**: every `#[ephemeral_pvc]` linked into your binary
@@ -720,7 +726,7 @@ lands on every emitted WorkflowTemplate's `volumeClaimTemplates`.
 Argo creates ALL of them per run, even if the submitted workflow
 doesn't reach them. Keep one workflow per binary and define each
 `#[ephemeral_pvc]` near its consumer to avoid cross-workflow
-PVC churn. See `CONTAINER.md` for details.
+PVC churn. See [the `#[container]` reference](container.md#over-inclusion-caveat-v1) for details.
 
 ## Pitfalls
 
@@ -731,8 +737,10 @@ PVC churn. See `CONTAINER.md` for details.
   expressions are compile errors by design, so a step is never
   silently dropped. `if` / `else` / `else if`, nested calls, and
   the builder / `fan_out` chain *are* supported.
-- **Parameter values are JSON.** Every value athena emits is JSON,
-  so any string is safe (`t("no")` works) and a `String` `"7"`
-  stays a string, not a number.
+- **Any string value is safe.** `t("no")` works and a `String` `"7"`
+  stays a string, not a number, because every parameter value is
+  JSON-encoded. (An argument *name* that reads as a YAML bool is a
+  separate matter and is rejected at compile time; see
+  [Troubleshooting](troubleshooting.md).)
 
 Hitting an actual error? See [Troubleshooting](troubleshooting.md).
