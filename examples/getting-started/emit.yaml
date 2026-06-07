@@ -1,14 +1,14 @@
-   Compiling cargo-athena-api v0.5.1 (/home/maxi/build/cargo-athena/crates/cargo-athena-api)
-   Compiling cargo-athena-macros v0.5.1 (/home/maxi/build/cargo-athena/crates/cargo-athena-macros)
-   Compiling cargo-athena-core v0.5.1 (/home/maxi/build/cargo-athena/crates/cargo-athena-core)
-   Compiling cargo-athena v0.5.1 (/home/maxi/build/cargo-athena/crates/cargo-athena)
-   Compiling cargo-athena-example-getting-started v0.0.0 (/home/maxi/build/cargo-athena/examples/getting-started)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.33s
-     Running `target/debug/cargo-athena-example-getting-started`
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-getting-started-fetch
+  name: cargo-athena-example-getting-started-fetch-0-0-0
+  labels:
+    cargo.athena/bin: cargo-athena-example-getting-started
+    cargo.athena/channel: release
+    cargo.athena/pkg: cargo-athena-example-getting-started
+    cargo.athena/tag: 0-0-0
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-getting-started-fetch
   templates:
@@ -23,7 +23,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-getting-started/0.0.0/cargo-athena-example-getting-started.tar.gz
+          key: cargo-athena-example-getting-started/0-0-0/cargo-athena-example-getting-started.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -50,10 +50,12 @@ spec:
         esac
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
-        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-getting-started-fetch
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.url}}'
       env:
-      - name: ATHENA_PARAM_url
-        value: '{{inputs.parameters.url}}'
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-getting-started-fetch
       volumeMounts:
       - name: athena-work
         mountPath: /athena
@@ -65,7 +67,14 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-getting-started-pipeline
+  name: cargo-athena-example-getting-started-pipeline-0-0-0
+  labels:
+    cargo.athena/bin: cargo-athena-example-getting-started
+    cargo.athena/channel: release
+    cargo.athena/pkg: cargo-athena-example-getting-started
+    cargo.athena/tag: 0-0-0
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-getting-started-pipeline
   templates:
@@ -78,7 +87,7 @@ spec:
           - name: url
             value: '"https://example.com/data"'
         templateRef:
-          name: cargo-athena-example-getting-started-fetch
+          name: cargo-athena-example-getting-started-fetch-0-0-0
           template: cargo-athena-example-getting-started-fetch
       - name: summary
         dependencies:
@@ -90,7 +99,7 @@ spec:
           - name: top_n
             value: '3'
         templateRef:
-          name: cargo-athena-example-getting-started-summarize
+          name: cargo-athena-example-getting-started-summarize-0-0-0
           template: cargo-athena-example-getting-started-summarize
       - name: publish
         dependencies:
@@ -100,13 +109,20 @@ spec:
           - name: report
             value: '{{tasks.summary.outputs.parameters.return}}'
         templateRef:
-          name: cargo-athena-example-getting-started-publish
+          name: cargo-athena-example-getting-started-publish-0-0-0
           template: cargo-athena-example-getting-started-publish
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-getting-started-publish
+  name: cargo-athena-example-getting-started-publish-0-0-0
+  labels:
+    cargo.athena/bin: cargo-athena-example-getting-started
+    cargo.athena/channel: release
+    cargo.athena/pkg: cargo-athena-example-getting-started
+    cargo.athena/tag: 0-0-0
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-getting-started-publish
   templates:
@@ -121,7 +137,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-getting-started/0.0.0/cargo-athena-example-getting-started.tar.gz
+          key: cargo-athena-example-getting-started/0-0-0/cargo-athena-example-getting-started.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -148,10 +164,12 @@ spec:
         esac
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
-        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-getting-started-publish
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.report}}'
       env:
-      - name: ATHENA_PARAM_report
-        value: '{{inputs.parameters.report}}'
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-getting-started-publish
       volumeMounts:
       - name: athena-work
         mountPath: /athena
@@ -163,7 +181,14 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-getting-started-summarize
+  name: cargo-athena-example-getting-started-summarize-0-0-0
+  labels:
+    cargo.athena/bin: cargo-athena-example-getting-started
+    cargo.athena/channel: release
+    cargo.athena/pkg: cargo-athena-example-getting-started
+    cargo.athena/tag: 0-0-0
+    cargo.athena/toolchain: 0.5.2
+    cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-getting-started-summarize
   templates:
@@ -179,7 +204,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-getting-started/0.0.0/cargo-athena-example-getting-started.tar.gz
+          key: cargo-athena-example-getting-started/0-0-0/cargo-athena-example-getting-started.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -206,12 +231,13 @@ spec:
         esac
         chmod +x /athena/bin/app-$__t
         export CARGO_ATHENA_OUTPUT=/athena/result
-        exec /athena/bin/app-$__t --cargo-athena-template cargo-athena-example-getting-started-summarize
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.data}}'
+      - '{{inputs.parameters.top_n}}'
       env:
-      - name: ATHENA_PARAM_data
-        value: '{{inputs.parameters.data}}'
-      - name: ATHENA_PARAM_top_n
-        value: '{{inputs.parameters.top_n}}'
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-getting-started-summarize
       volumeMounts:
       - name: athena-work
         mountPath: /athena

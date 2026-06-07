@@ -1,10 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-caps
+  name: cargo-athena-example-smoke-caps-0-0-0
   labels:
     cargo.athena/bin: smoke-fanout
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -22,7 +24,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-fanout.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-fanout.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -77,10 +79,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-make-list
+  name: cargo-athena-example-smoke-make-list-0-0-0
   labels:
     cargo.athena/bin: smoke-fanout
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -95,7 +99,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-fanout.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-fanout.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -148,10 +152,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-fanout
+  name: cargo-athena-example-smoke-pipeline-fanout-0-0-0
   labels:
     cargo.athena/bin: smoke-fanout
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -163,7 +169,7 @@ spec:
       - name: a
         arguments: {}
         templateRef:
-          name: cargo-athena-example-smoke-make-list
+          name: cargo-athena-example-smoke-make-list-0-0-0
           template: cargo-athena-example-smoke-make-list
       - name: b
         dependencies:
@@ -175,7 +181,7 @@ spec:
           - name: suffix
             value: '"!"'
         templateRef:
-          name: cargo-athena-example-smoke-caps
+          name: cargo-athena-example-smoke-caps-0-0-0
           template: cargo-athena-example-smoke-caps
         withParam: '{{tasks.a.outputs.parameters.return}}'
       - name: summarize
@@ -186,7 +192,7 @@ spec:
           - name: items
             value: '{{=toJSON(map(fromJSON(tasks[''b''].outputs.parameters[''return'']), { type(#) == "string" ? fromJSON(#) : # }))}}'
         templateRef:
-          name: cargo-athena-example-smoke-summarize
+          name: cargo-athena-example-smoke-summarize-0-0-0
           template: cargo-athena-example-smoke-summarize
   volumeClaimTemplates:
   - metadata:
@@ -202,10 +208,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-summarize
+  name: cargo-athena-example-smoke-summarize-0-0-0
   labels:
     cargo.athena/bin: smoke-fanout
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -222,7 +230,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-fanout.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-fanout.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey

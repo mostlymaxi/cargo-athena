@@ -1,10 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-limited
+  name: cargo-athena-example-smoke-limited-0-0-0
   labels:
     cargo.athena/bin: smoke-pod-spec-patch
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -21,7 +23,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-pod-spec-patch.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-pod-spec-patch.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -76,10 +78,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-pod-spec-patch
+  name: cargo-athena-example-smoke-pipeline-pod-spec-patch-0-0-0
   labels:
     cargo.athena/bin: smoke-pod-spec-patch
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -97,7 +101,7 @@ spec:
           - name: cpu_limit
             value: '{{inputs.parameters.grace}}'
         templateRef:
-          name: cargo-athena-example-smoke-limited
+          name: cargo-athena-example-smoke-limited-0-0-0
           template: cargo-athena-example-smoke-limited
   podSpecPatch: '{"terminationGracePeriodSeconds":{{=fromJSON(workflow.parameters[''grace''])}}}'
   volumeClaimTemplates:

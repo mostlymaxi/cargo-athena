@@ -1,10 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-make-meta-artifact
+  name: cargo-athena-example-smoke-make-meta-artifact-0-0-0
   labels:
     cargo.athena/bin: smoke-artifact-wf
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -19,7 +21,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-artifact-wf.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-artifact-wf.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -82,10 +84,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-artifact-wf
+  name: cargo-athena-example-smoke-pipeline-artifact-wf-0-0-0
   labels:
     cargo.athena/bin: smoke-artifact-wf
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -97,7 +101,7 @@ spec:
       - name: m
         arguments: {}
         templateRef:
-          name: cargo-athena-example-smoke-sub-returning-artifact
+          name: cargo-athena-example-smoke-sub-returning-artifact-0-0-0
           template: cargo-athena-example-smoke-sub-returning-artifact
       - name: sub-consuming-artifact
         dependencies:
@@ -107,7 +111,7 @@ spec:
           - name: m
             from: '{{tasks.m.outputs.artifacts.return}}'
         templateRef:
-          name: cargo-athena-example-smoke-sub-consuming-artifact
+          name: cargo-athena-example-smoke-sub-consuming-artifact-0-0-0
           template: cargo-athena-example-smoke-sub-consuming-artifact
   volumeClaimTemplates:
   - metadata:
@@ -123,10 +127,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-sub-consuming-artifact
+  name: cargo-athena-example-smoke-sub-consuming-artifact-0-0-0
   labels:
     cargo.athena/bin: smoke-artifact-wf
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -144,7 +150,7 @@ spec:
           - name: m
             from: '{{inputs.artifacts.m}}'
         templateRef:
-          name: cargo-athena-example-smoke-use-meta-artifact
+          name: cargo-athena-example-smoke-use-meta-artifact-0-0-0
           template: cargo-athena-example-smoke-use-meta-artifact
   volumeClaimTemplates:
   - metadata:
@@ -160,10 +166,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-sub-returning-artifact
+  name: cargo-athena-example-smoke-sub-returning-artifact-0-0-0
   labels:
     cargo.athena/bin: smoke-artifact-wf
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -179,7 +187,7 @@ spec:
       - name: make-meta-artifact
         arguments: {}
         templateRef:
-          name: cargo-athena-example-smoke-make-meta-artifact
+          name: cargo-athena-example-smoke-make-meta-artifact-0-0-0
           template: cargo-athena-example-smoke-make-meta-artifact
   volumeClaimTemplates:
   - metadata:
@@ -195,10 +203,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-use-meta-artifact
+  name: cargo-athena-example-smoke-use-meta-artifact-0-0-0
   labels:
     cargo.athena/bin: smoke-artifact-wf
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -213,7 +223,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-artifact-wf.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-artifact-wf.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey

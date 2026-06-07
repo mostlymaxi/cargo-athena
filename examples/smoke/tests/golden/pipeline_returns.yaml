@@ -1,10 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-fetch
+  name: cargo-athena-example-smoke-fetch-0-0-0
   labels:
     cargo.athena/bin: smoke-returns
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -21,7 +23,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-returns.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-returns.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -80,10 +82,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-returns
+  name: cargo-athena-example-smoke-pipeline-returns-0-0-0
   labels:
     cargo.athena/bin: smoke-returns
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -98,7 +102,7 @@ spec:
           - name: seed
             value: '"seed"'
         templateRef:
-          name: cargo-athena-example-smoke-sub-pipeline
+          name: cargo-athena-example-smoke-sub-pipeline-0-0-0
           template: cargo-athena-example-smoke-sub-pipeline
       - name: publish
         dependencies:
@@ -108,7 +112,7 @@ spec:
           - name: report
             value: '{{tasks.r.outputs.parameters.return}}'
         templateRef:
-          name: cargo-athena-example-smoke-publish
+          name: cargo-athena-example-smoke-publish-0-0-0
           template: cargo-athena-example-smoke-publish
   volumeClaimTemplates:
   - metadata:
@@ -124,10 +128,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-publish
+  name: cargo-athena-example-smoke-publish-0-0-0
   labels:
     cargo.athena/bin: smoke-returns
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -144,7 +150,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-returns.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-returns.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -229,10 +235,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-sub-pipeline
+  name: cargo-athena-example-smoke-sub-pipeline-0-0-0
   labels:
     cargo.athena/bin: smoke-returns
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -255,7 +263,7 @@ spec:
           - name: url
             value: '{{inputs.parameters.seed}}'
         templateRef:
-          name: cargo-athena-example-smoke-fetch
+          name: cargo-athena-example-smoke-fetch-0-0-0
           template: cargo-athena-example-smoke-fetch
       - name: transform
         dependencies:
@@ -267,7 +275,7 @@ spec:
           - name: factor
             value: '7'
         templateRef:
-          name: cargo-athena-example-smoke-transform
+          name: cargo-athena-example-smoke-transform-0-0-0
           template: cargo-athena-example-smoke-transform
   volumeClaimTemplates:
   - metadata:
@@ -283,10 +291,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-transform
+  name: cargo-athena-example-smoke-transform-0-0-0
   labels:
     cargo.athena/bin: smoke-returns
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -304,7 +314,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-returns.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-returns.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey

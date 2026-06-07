@@ -1,10 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-delay
+  name: cargo-athena-example-smoke-delay-0-0-0
   labels:
     cargo.athena/bin: smoke-async
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -21,7 +23,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-async.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-async.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -75,10 +77,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-async
+  name: cargo-athena-example-smoke-pipeline-async-0-0-0
   labels:
     cargo.athena/bin: smoke-async
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -93,7 +97,7 @@ spec:
           - name: label
             value: '"hello"'
         templateRef:
-          name: cargo-athena-example-smoke-delay
+          name: cargo-athena-example-smoke-delay-0-0-0
           template: cargo-athena-example-smoke-delay
   volumeClaimTemplates:
   - metadata:

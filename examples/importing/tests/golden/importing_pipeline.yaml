@@ -1,10 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-importing-consumer-step
+  name: cargo-athena-example-importing-consumer-step-0-0-0
   labels:
     cargo.athena/bin: importing
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -21,7 +23,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
+          key: cargo-athena-example-importing/0-0-0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -75,10 +77,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-importing-finalize
+  name: cargo-athena-example-importing-finalize-0-0-0
   labels:
     cargo.athena/bin: importing
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -95,7 +99,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
+          key: cargo-athena-example-importing/0-0-0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -149,10 +153,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-importing-importing-pipeline
+  name: cargo-athena-example-importing-importing-pipeline-0-0-0
   labels:
     cargo.athena/bin: importing
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -167,22 +173,22 @@ spec:
           - name: note
             value: '"hello"'
         templateRef:
-          name: cargo-athena-example-importing-consumer-step
+          name: cargo-athena-example-importing-consumer-step-0-0-0
           template: cargo-athena-example-importing-consumer-step
       - name: pipeline
         arguments: {}
         templateRef:
-          name: cargo-athena-example-smoke-pipeline
+          name: cargo-athena-example-smoke-pipeline-0-0-0
           template: cargo-athena-example-smoke-pipeline
       - name: pipeline-2
         arguments: {}
         templateRef:
-          name: cargo-athena-example-smoke-pipeline
+          name: cargo-athena-example-smoke-pipeline-0-0-0
           template: cargo-athena-example-smoke-pipeline
       - name: module-pipeline
         arguments: {}
         templateRef:
-          name: cargo-athena-example-importing-module-pipeline
+          name: cargo-athena-example-importing-module-pipeline-0-0-0
           template: cargo-athena-example-importing-module-pipeline
       - name: finalize
         dependencies:
@@ -192,7 +198,7 @@ spec:
           - name: x
             value: '{{tasks.n.outputs.parameters.return}}'
         templateRef:
-          name: cargo-athena-example-importing-finalize
+          name: cargo-athena-example-importing-finalize-0-0-0
           template: cargo-athena-example-importing-finalize
   volumeClaimTemplates:
   - metadata:
@@ -208,10 +214,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-importing-local-step
+  name: cargo-athena-example-importing-local-step-0-0-0
   labels:
     cargo.athena/bin: importing
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -228,7 +236,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
+          key: cargo-athena-example-importing/0-0-0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -282,10 +290,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-importing-module-pipeline
+  name: cargo-athena-example-importing-module-pipeline-0-0-0
   labels:
     cargo.athena/bin: importing
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -300,7 +310,7 @@ spec:
           - name: tag
             value: '"m"'
         templateRef:
-          name: cargo-athena-example-importing-local-step
+          name: cargo-athena-example-importing-local-step-0-0-0
           template: cargo-athena-example-importing-local-step
       - name: finalize
         dependencies:
@@ -310,7 +320,7 @@ spec:
           - name: x
             value: '{{tasks.s.outputs.parameters.return}}'
         templateRef:
-          name: cargo-athena-example-importing-finalize
+          name: cargo-athena-example-importing-finalize-0-0-0
           template: cargo-athena-example-importing-finalize
   volumeClaimTemplates:
   - metadata:
@@ -326,10 +336,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-branchy
+  name: cargo-athena-example-smoke-branchy-0-0-0
   labels:
     cargo.athena/bin: importing
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -346,7 +358,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
+          key: cargo-athena-example-importing/0-0-0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -430,10 +442,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-combine
+  name: cargo-athena-example-smoke-combine-0-0-0
   labels:
     cargo.athena/bin: importing
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -451,7 +465,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
+          key: cargo-athena-example-importing/0-0-0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -509,10 +523,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-fetch
+  name: cargo-athena-example-smoke-fetch-0-0-0
   labels:
     cargo.athena/bin: importing
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -529,7 +545,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
+          key: cargo-athena-example-importing/0-0-0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -588,10 +604,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-ingest
+  name: cargo-athena-example-smoke-ingest-0-0-0
   labels:
     cargo.athena/bin: importing
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -614,7 +632,7 @@ spec:
           - name: url
             value: '{{inputs.parameters.source}}'
         templateRef:
-          name: cargo-athena-example-smoke-fetch
+          name: cargo-athena-example-smoke-fetch-0-0-0
           template: cargo-athena-example-smoke-fetch
       - name: clean
         dependencies:
@@ -626,7 +644,7 @@ spec:
           - name: factor
             value: '2'
         templateRef:
-          name: cargo-athena-example-smoke-transform
+          name: cargo-athena-example-smoke-transform-0-0-0
           template: cargo-athena-example-smoke-transform
       - name: publish
         dependencies:
@@ -636,7 +654,7 @@ spec:
           - name: report
             value: '{{tasks.clean.outputs.parameters.return}}'
         templateRef:
-          name: cargo-athena-example-smoke-publish
+          name: cargo-athena-example-smoke-publish-0-0-0
           template: cargo-athena-example-smoke-publish
   volumeClaimTemplates:
   - metadata:
@@ -652,10 +670,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline
+  name: cargo-athena-example-smoke-pipeline-0-0-0
   labels:
     cargo.athena/bin: importing
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -670,7 +690,7 @@ spec:
           - name: source
             value: '"https://example.com/data"'
         templateRef:
-          name: cargo-athena-example-smoke-ingest
+          name: cargo-athena-example-smoke-ingest-0-0-0
           template: cargo-athena-example-smoke-ingest
       - name: branchy
         arguments:
@@ -678,7 +698,7 @@ spec:
           - name: mode
             value: '"fast"'
         templateRef:
-          name: cargo-athena-example-smoke-branchy
+          name: cargo-athena-example-smoke-branchy-0-0-0
           template: cargo-athena-example-smoke-branchy
       - name: t
         arguments:
@@ -688,7 +708,7 @@ spec:
           - name: factor
             value: '3'
         templateRef:
-          name: cargo-athena-example-smoke-transform
+          name: cargo-athena-example-smoke-transform-0-0-0
           template: cargo-athena-example-smoke-transform
       - name: combine
         dependencies:
@@ -701,7 +721,7 @@ spec:
           - name: rhs
             value: '{{tasks.t.outputs.parameters.return}}'
         templateRef:
-          name: cargo-athena-example-smoke-combine
+          name: cargo-athena-example-smoke-combine-0-0-0
           template: cargo-athena-example-smoke-combine
   volumeClaimTemplates:
   - metadata:
@@ -717,10 +737,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-publish
+  name: cargo-athena-example-smoke-publish-0-0-0
   labels:
     cargo.athena/bin: importing
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -737,7 +759,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
+          key: cargo-athena-example-importing/0-0-0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -822,10 +844,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-transform
+  name: cargo-athena-example-smoke-transform-0-0-0
   labels:
     cargo.athena/bin: importing
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -843,7 +867,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-importing/0.0.0/importing.tar.gz
+          key: cargo-athena-example-importing/0-0-0/importing.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey

@@ -1,10 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-decide
+  name: cargo-athena-example-smoke-decide-0-0-0
   labels:
     cargo.athena/bin: smoke-nested
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -21,7 +23,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-nested.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-nested.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -75,10 +77,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-left
+  name: cargo-athena-example-smoke-left-0-0-0
   labels:
     cargo.athena/bin: smoke-nested
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -95,7 +99,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-nested.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-nested.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -149,10 +153,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-note
+  name: cargo-athena-example-smoke-note-0-0-0
   labels:
     cargo.athena/bin: smoke-nested
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -169,7 +175,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-nested.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-nested.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -223,10 +229,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-nested
+  name: cargo-athena-example-smoke-pipeline-nested-0-0-0
   labels:
     cargo.athena/bin: smoke-nested
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -241,7 +249,7 @@ spec:
           - name: seed
             value: '"xx"'
         templateRef:
-          name: cargo-athena-example-smoke-decide
+          name: cargo-athena-example-smoke-decide-0-0-0
           template: cargo-athena-example-smoke-decide
       - name: left
         dependencies:
@@ -251,7 +259,7 @@ spec:
           - name: x
             value: '{{tasks.decide.outputs.parameters.return}}'
         templateRef:
-          name: cargo-athena-example-smoke-left
+          name: cargo-athena-example-smoke-left-0-0-0
           template: cargo-athena-example-smoke-left
       - name: note
         dependencies:
@@ -261,7 +269,7 @@ spec:
           - name: msg
             value: '{{tasks.left.outputs.parameters.return}}'
         templateRef:
-          name: cargo-athena-example-smoke-note
+          name: cargo-athena-example-smoke-note-0-0-0
           template: cargo-athena-example-smoke-note
       - name: decide-2
         arguments:
@@ -269,7 +277,7 @@ spec:
           - name: seed
             value: '"yy"'
         templateRef:
-          name: cargo-athena-example-smoke-decide
+          name: cargo-athena-example-smoke-decide-0-0-0
           template: cargo-athena-example-smoke-decide
       - name: if
         dependencies:
@@ -279,7 +287,7 @@ spec:
           - name: __athena_cond_0
             value: '{{tasks.decide-2.outputs.parameters.return}}'
         templateRef:
-          name: cargo-athena-example-smoke-pipeline-nested-if0
+          name: cargo-athena-example-smoke-pipeline-nested-if0-0-0-0
           template: cargo-athena-example-smoke-pipeline-nested-if0
   volumeClaimTemplates:
   - metadata:
@@ -295,10 +303,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-nested-if0
+  name: cargo-athena-example-smoke-pipeline-nested-if0-0-0-0
   labels:
     cargo.athena/bin: smoke-nested
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -316,7 +326,7 @@ spec:
           - name: __athena_cond_0
             value: '{{inputs.parameters.__athena_cond_0}}'
         templateRef:
-          name: cargo-athena-example-smoke-pipeline-nested-if0-arm0
+          name: cargo-athena-example-smoke-pipeline-nested-if0-arm0-0-0-0
           template: cargo-athena-example-smoke-pipeline-nested-if0-arm0
         when: ({{inputs.parameters.__athena_cond_0}} > 1)
       - name: arm1
@@ -325,7 +335,7 @@ spec:
           - name: __athena_cond_0
             value: '{{inputs.parameters.__athena_cond_0}}'
         templateRef:
-          name: cargo-athena-example-smoke-pipeline-nested-if0-arm1
+          name: cargo-athena-example-smoke-pipeline-nested-if0-arm1-0-0-0
           template: cargo-athena-example-smoke-pipeline-nested-if0-arm1
         when: '!(({{inputs.parameters.__athena_cond_0}} > 1))'
   volumeClaimTemplates:
@@ -342,10 +352,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-nested-if0-arm0
+  name: cargo-athena-example-smoke-pipeline-nested-if0-arm0-0-0-0
   labels:
     cargo.athena/bin: smoke-nested
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -363,7 +375,7 @@ spec:
           - name: msg
             value: '"big"'
         templateRef:
-          name: cargo-athena-example-smoke-note
+          name: cargo-athena-example-smoke-note-0-0-0
           template: cargo-athena-example-smoke-note
   volumeClaimTemplates:
   - metadata:
@@ -379,10 +391,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-nested-if0-arm1
+  name: cargo-athena-example-smoke-pipeline-nested-if0-arm1-0-0-0
   labels:
     cargo.athena/bin: smoke-nested
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -400,7 +414,7 @@ spec:
           - name: msg
             value: '"small"'
         templateRef:
-          name: cargo-athena-example-smoke-note
+          name: cargo-athena-example-smoke-note-0-0-0
           template: cargo-athena-example-smoke-note
   volumeClaimTemplates:
   - metadata:

@@ -981,10 +981,20 @@ pub struct ProbeInfo {
     pub default_template: String,
     /// User crate name (`CARGO_PKG_NAME`).
     pub package: String,
-    /// User crate version (`CARGO_PKG_VERSION`); part of the S3 key.
+    /// User crate version (`CARGO_PKG_VERSION`); the release-channel
+    /// fallback for `version_tag`.
     pub version: String,
     /// User binary name (`CARGO_BIN_NAME`).
     pub bin: String,
+    /// The build-time-sealed version tag that names this binary's
+    /// `WorkflowTemplate`s and its S3 key (`{pkg}/<tag>/{bin}.tar.gz`):
+    /// the baked `ATHENA_VERSION_TAG`, else `kebab` of `version`. The CLI
+    /// uses it for the `publish` upload key and the resolved-tag feedback
+    /// line — never recomputed from local Cargo.toml/git.
+    pub version_tag: String,
+    /// `release` (clean + on the release branch at build) or `dev`
+    /// (off-road build), derived from `version_tag`.
+    pub channel: String,
 }
 
 /// Drop the spaces `quote!` puts around `<` / `>` / `,` so a type
@@ -1265,13 +1275,16 @@ pub struct BuildCtx {
     pvcs: HashMap<&'static str, &'static PvcReg>,
     config: AthenaConfig,
     /// Fully-resolved S3 object key for this binary's tarball
-    /// (`{crate}/{version}/{bin}.tar.gz`). Built once by
-    /// [`entrypoint_impl`] from the user binary's own
-    /// `CARGO_PKG_*` / `CARGO_BIN_NAME` env
-    /// vars (captured at the bin's compile time by the `entrypoint!`
-    /// macro). `cargo athena publish` derives the same key from
-    /// `cargo metadata`, so the upload and the emitted YAML always
-    /// agree by construction.
+    /// (`{crate}/<tag>/{bin}.tar.gz`, where `<tag>` is [`version_tag`]).
+    /// Built once by [`entrypoint_impl`] from the user binary's own
+    /// `CARGO_PKG_*` / `CARGO_BIN_NAME` env vars (captured at the bin's
+    /// compile time by the `entrypoint!` macro) plus the baked tag.
+    /// `cargo athena publish` uploads to the same key (read off the
+    /// freshly-built binary), so the upload and the emitted YAML always
+    /// agree by construction — and a dev binary never overwrites a
+    /// release tarball.
+    ///
+    /// [`version_tag`]: BuildCtx::version_tag
     artifact_key: String,
     /// User crate name (`CARGO_PKG_NAME`). Stamped as
     /// `cargo.athena/pkg`.
@@ -1282,12 +1295,34 @@ pub struct BuildCtx {
     version: String,
     /// User binary name (`CARGO_BIN_NAME`). Stamped as `cargo.athena/bin`.
     bin: String,
+    /// The resolved, build-time-sealed version tag (the baked
+    /// `ATHENA_VERSION_TAG`, else `kebab` of `version`). The single
+    /// coordinate appended to every WT name, used as the S3 key segment,
+    /// and stamped as `cargo.athena/tag`. NOT recomputed from local
+    /// Cargo.toml/git — it is whatever was compiled into the binary.
+    version_tag: String,
+    /// Baked git short-sha (`ATHENA_GIT_COMMIT`), `None` for a plain
+    /// `cargo build`. Stamped as `cargo.athena/commit`.
+    commit: Option<String>,
+    /// Baked dirty-tree flag (`ATHENA_GIT_DIRTY`), `None` for a plain
+    /// `cargo build`. Stamped as `cargo.athena/dirty`.
+    dirty: Option<bool>,
 }
 
 impl BuildCtx {
     /// Emit-only: gathers fragments AND loads `athena.toml`. Never called
-    /// in run-mode, so the in-pod binary needs no `athena.toml`.
-    pub fn collect(krate: &str, version: &str, bin: &str) -> Self {
+    /// in run-mode, so the in-pod binary needs no `athena.toml`. The
+    /// `version_tag`/`commit`/`dirty` come from the build-time-baked
+    /// `option_env!` consts threaded through `entrypoint!` (all `None`
+    /// for a plain `cargo build` → release tag = `kebab(version)`).
+    pub fn collect(
+        krate: &str,
+        version: &str,
+        bin: &str,
+        version_tag: Option<&str>,
+        commit: Option<&str>,
+        dirty: Option<&str>,
+    ) -> Self {
         let mut fragments = HashMap::new();
         for f in inventory::iter::<FragmentReg> {
             fragments.insert(f.rust_name, f);
@@ -1296,14 +1331,20 @@ impl BuildCtx {
         for p in inventory::iter::<PvcReg> {
             pvcs.insert(p.argo_name, p);
         }
+        let version_tag = version_tag
+            .map(str::to_string)
+            .unwrap_or_else(|| crate::api::munge::version_tag(version));
         Self {
             fragments,
             pvcs,
             config: AthenaConfig::load(),
-            artifact_key: format!("{krate}/{version}/{bin}.tar.gz"),
+            artifact_key: format!("{krate}/{version_tag}/{bin}.tar.gz"),
             krate: krate.to_string(),
             version: version.to_string(),
             bin: bin.to_string(),
+            version_tag,
+            commit: commit.map(str::to_string),
+            dirty: dirty.map(|s| s == "true" || s == "1"),
         }
     }
 
@@ -1311,10 +1352,47 @@ impl BuildCtx {
         &self.config
     }
 
-    /// The S3 object key of this binary's tarball, hardcoded as
-    /// `{crate}/{version}/{bin}.tar.gz`.
+    /// The S3 object key of this binary's tarball,
+    /// `{crate}/<version_tag>/{bin}.tar.gz`.
     pub fn artifact_key(&self) -> &str {
         &self.artifact_key
+    }
+
+    /// The resolved, build-time-sealed version tag (kebab). Appended to
+    /// every emitted `WorkflowTemplate` name, the S3 key segment, and the
+    /// `cargo.athena/tag` label. Sealed in the binary — `emit`/`submit`
+    /// read it, never recompute it from the local Cargo.toml/git.
+    pub fn version_tag(&self) -> &str {
+        &self.version_tag
+    }
+
+    /// `<base>-<tag>` cluster-resource name. The tag overlay is purely a
+    /// cluster-identity concern: in-pod dispatch + every
+    /// `templateRef.template` stay on `base` (the versioning invariant).
+    /// Fails loud at emit if the result would exceed DNS-1123's 63-char
+    /// limit — the user shortens the base with `#[…(name = "…")]`.
+    pub fn versioned_name(&self, base: &str) -> String {
+        let n = format!("{base}-{}", self.version_tag);
+        assert!(
+            n.len() <= 63,
+            "versioned WorkflowTemplate name {n:?} is {} chars, over the \
+             DNS-1123 63-char limit (base {base:?} + tag {:?}); shorten the \
+             template name with #[workflow(name = \"…\")] / \
+             #[container(name = \"…\")]",
+            n.len(),
+            self.version_tag,
+        );
+        n
+    }
+
+    /// `release` (clean build on the release branch) or `dev` (off-road),
+    /// derived from the tag — the CLI prefixes every dev tag with `dev-`.
+    fn channel(&self) -> &'static str {
+        if self.version_tag.starts_with("dev-") {
+            "dev"
+        } else {
+            "release"
+        }
     }
 
     /// Baseline provenance labels stamped onto every emitted
@@ -1343,6 +1421,23 @@ impl BuildCtx {
             "cargo.athena/toolchain".to_string(),
             env!("CARGO_PKG_VERSION").to_string(),
         );
+        // Build-time-sealed version coordinate + provenance. `tag` and
+        // `channel` are always present (the tag falls back to
+        // `kebab(version)` for a plain build); `commit`/`dirty` only when
+        // `cargo athena build`/`publish` baked them. `tag` makes `cargo
+        // athena prune` a pure label-selector delete; the rest describe
+        // the *artifact*, not the deploy environment.
+        m.insert("cargo.athena/tag".to_string(), self.version_tag.clone());
+        m.insert(
+            "cargo.athena/channel".to_string(),
+            self.channel().to_string(),
+        );
+        if let Some(c) = &self.commit {
+            m.insert("cargo.athena/commit".to_string(), c.clone());
+        }
+        if let Some(d) = self.dirty {
+            m.insert("cargo.athena/dirty".to_string(), d.to_string());
+        }
         m
     }
 
@@ -1803,6 +1898,18 @@ impl Collector {
             let name = name_of(t);
             if let Some(spec) = t.spec.as_mut() {
                 self.stamp_spec(&name, spec, ctx);
+                // Version overlay, applied AFTER stamp_spec so its
+                // base-name keying above is untouched: append the
+                // build-time tag to this WT's resource identity — every
+                // `templateRef.name`. The `metadata.name` rename below
+                // completes the pair. `entrypoint` / inner
+                // `templates[].name` / `templateRef.template` stay base
+                // (the versioning invariant), so in-pod dispatch and
+                // Argo's within-WT template lookup are unaffected.
+                version_spec_refs(spec, ctx);
+            }
+            if let Some(meta) = t.metadata.as_mut() {
+                meta.name = ctx.versioned_name(&meta.name);
             }
         }
         tpls
@@ -1950,13 +2057,18 @@ impl Collector {
         // `*_if_root` attribute is added.
         let mut spec = api::WorkflowSpec {
             workflow_template_ref: Some(api::WorkflowTemplateRef {
-                name: E::ARGO_NAME.to_string(),
+                // Points at the versioned root WT resource.
+                name: ctx.versioned_name(E::ARGO_NAME),
                 cluster_scope: false,
             }),
             service_account_name: ctx.config().defaults.service_account.clone(),
             ..Default::default()
         };
+        // stamp_spec keys on the BASE name (the `_if_root` maps) and may
+        // add an exit-hook templateRef; version_spec_refs then bumps that
+        // ref to the versioned handler WT. Same order as build_templates.
         self.stamp_spec(E::ARGO_NAME, &mut spec, ctx);
+        version_spec_refs(&mut spec, ctx);
         let wf = api::Workflow {
             api_version: api::API_VERSION.to_string(),
             kind: api::KIND_WORKFLOW.to_string(),
@@ -1993,6 +2105,46 @@ fn name_of(t: &api::WorkflowTemplate) -> String {
         .as_ref()
         .map(|m| m.name.clone())
         .unwrap_or_default()
+}
+
+/// Append the build-time version tag to every cluster-resource name
+/// REFERENCE in `spec`: each `templateRef.name` on DAG tasks (and their
+/// hooks), step tasks (and their hooks), and the workflow-scoped
+/// `spec.hooks` (e.g. the `on_exit_if_root` handler). Deliberately NOT
+/// `templateRef.template` — that's the callee's inner template name,
+/// which stays on the base (Argo resolves it within the target WT, whose
+/// single template keeps the base name). The tag is uniform (the one
+/// root-binary version), so all refs get the same suffix and cross-WT
+/// links stay consistent. The versioning analog of `Collector::stamp_spec`,
+/// run per WT in `build_templates` and once for the `--with-workflow`
+/// Workflow in `emit`.
+fn version_spec_refs(spec: &mut api::WorkflowSpec, ctx: &BuildCtx) {
+    fn bump(tr: &mut Option<api::TemplateRef>, ctx: &BuildCtx) {
+        if let Some(r) = tr.as_mut() {
+            r.name = ctx.versioned_name(&r.name);
+        }
+    }
+    for t in spec.templates.iter_mut() {
+        if let Some(dag) = t.dag.as_mut() {
+            for task in dag.tasks.iter_mut() {
+                bump(&mut task.template_ref, ctx);
+                for h in task.hooks.values_mut() {
+                    bump(&mut h.template_ref, ctx);
+                }
+            }
+        }
+        for group in t.steps.iter_mut() {
+            for step in group.iter_mut() {
+                bump(&mut step.template_ref, ctx);
+                for h in step.hooks.values_mut() {
+                    bump(&mut h.template_ref, ctx);
+                }
+            }
+        }
+    }
+    for h in spec.hooks.values_mut() {
+        bump(&mut h.template_ref, ctx);
+    }
 }
 
 /// Wrap one inner Argo `template` as a standalone `WorkflowTemplate` whose
@@ -2158,7 +2310,14 @@ fn deref_offloaded_arg(raw: String) -> String {
 /// so `cargo athena publish` (which derives the same key from
 /// `cargo metadata` + `--bin`) and the emitted YAML always agree by
 /// construction, with no `[artifact]` config field needed.
-pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
+pub fn entrypoint_impl<E: Template>(
+    krate: &str,
+    version: &str,
+    bin: &str,
+    version_tag: Option<&str>,
+    commit: Option<&str>,
+    dirty: Option<&str>,
+) {
     let mut collector = Collector::new();
     E::collect(&mut collector);
 
@@ -2190,6 +2349,12 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
     // works source-free, and it reports the root template the consumer
     // command defaults to when none is named.
     if std::env::var_os("CARGO_ATHENA_PROBE").is_some() {
+        // Resolve the sealed tag without a BuildCtx (probe is config-free):
+        // baked `ATHENA_VERSION_TAG`, else `kebab(version)`.
+        let tag = version_tag
+            .map(str::to_string)
+            .unwrap_or_else(|| crate::api::munge::version_tag(version));
+        let channel = if tag.starts_with("dev-") { "dev" } else { "release" };
         let info = ProbeInfo {
             kind: ATHENA_PROBE_KIND.to_string(),
             athena_protocol: ATHENA_PROTOCOL,
@@ -2198,6 +2363,8 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
             package: krate.to_string(),
             version: version.to_string(),
             bin: bin.to_string(),
+            version_tag: tag,
+            channel: channel.to_string(),
         };
         println!(
             "{}",
@@ -2210,7 +2377,7 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
     // template's metadata as a JSON array (same per-template derivation
     // as describe — so names/params shown are exactly what runs).
     if std::env::var_os("CARGO_ATHENA_LIST").is_some() {
-        let ctx = BuildCtx::collect(krate, version, bin);
+        let ctx = BuildCtx::collect(krate, version, bin, version_tag, commit, dirty);
         let all: Vec<ContainerRunMeta> = collector
             .builders
             .iter()
@@ -2236,7 +2403,7 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
     // makes the local run identical to Argo by construction — same
     // image, bootstrap, env, volumes, and artifacts as `emit`.
     if let Ok(name) = std::env::var("CARGO_ATHENA_DESCRIBE") {
-        let ctx = BuildCtx::collect(krate, version, bin);
+        let ctx = BuildCtx::collect(krate, version, bin, version_tag, commit, dirty);
         // The default emitted name is `<crate>-<fn>`; the CLI already
         // shows package + short name as separate columns, so accept
         // either the full name or the short form (and fall back to the
@@ -2265,7 +2432,7 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
     // register-if-missing / drift-detect / apply checks), instead of
     // re-parsing the YAML `emit` prints.
     if std::env::var_os("CARGO_ATHENA_EMIT_JSON").is_some() {
-        let ctx = BuildCtx::collect(krate, version, bin);
+        let ctx = BuildCtx::collect(krate, version, bin, version_tag, commit, dirty);
         println!(
             "{}",
             serde_json::to_string(&collector.build_templates(&ctx))
@@ -2278,7 +2445,7 @@ pub fn entrypoint_impl<E: Template>(krate: &str, version: &str, bin: &str) {
     // convenience runnable Workflow is appended (default: templates
     // only — deterministic, `kubectl apply`-able, GitOps-clean).
     let with_workflow = std::env::var_os("CARGO_ATHENA_WITH_WORKFLOW").is_some_and(|v| v == "1");
-    let ctx = BuildCtx::collect(krate, version, bin);
+    let ctx = BuildCtx::collect(krate, version, bin, version_tag, commit, dirty);
     print!("{}", collector.emit::<E>(&ctx, with_workflow));
 }
 

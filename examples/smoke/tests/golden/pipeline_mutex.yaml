@@ -1,10 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-mutex
+  name: cargo-athena-example-smoke-pipeline-mutex-0-0-0
   labels:
     cargo.athena/bin: smoke-mutex
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -22,7 +24,7 @@ spec:
           - name: shard
             value: '{{inputs.parameters.env}}'
         templateRef:
-          name: cargo-athena-example-smoke-shard-writer
+          name: cargo-athena-example-smoke-shard-writer-0-0-0
           template: cargo-athena-example-smoke-shard-writer
     synchronization:
       mutexes:
@@ -45,10 +47,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-shard-writer
+  name: cargo-athena-example-smoke-shard-writer-0-0-0
   labels:
     cargo.athena/bin: smoke-mutex
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -65,7 +69,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-mutex.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-mutex.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey

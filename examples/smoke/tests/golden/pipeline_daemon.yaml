@@ -1,10 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-daemon-probe
+  name: cargo-athena-example-smoke-daemon-probe-0-0-0
   labels:
     cargo.athena/bin: smoke-daemon
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -19,7 +21,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-daemon.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-daemon.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -72,10 +74,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-daemon-server
+  name: cargo-athena-example-smoke-daemon-server-0-0-0
   labels:
     cargo.athena/bin: smoke-daemon
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -90,7 +94,7 @@ spec:
           endpoint: s3.amazonaws.com
           bucket: athena-artifacts
           region: us-east-1
-          key: cargo-athena-example-smoke/0.0.0/smoke-daemon.tar.gz
+          key: cargo-athena-example-smoke/0-0-0/smoke-daemon.tar.gz
           accessKeySecret:
             name: athena-s3
             key: accessKey
@@ -144,10 +148,12 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: cargo-athena-example-smoke-pipeline-daemon
+  name: cargo-athena-example-smoke-pipeline-daemon-0-0-0
   labels:
     cargo.athena/bin: smoke-daemon
+    cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
     cargo.athena/toolchain: 0.5.2
     cargo.athena/version: 0.0.0
 spec:
@@ -159,12 +165,12 @@ spec:
       - name: daemon-server
         arguments: {}
         templateRef:
-          name: cargo-athena-example-smoke-daemon-server
+          name: cargo-athena-example-smoke-daemon-server-0-0-0
           template: cargo-athena-example-smoke-daemon-server
       - name: daemon-probe
         arguments: {}
         templateRef:
-          name: cargo-athena-example-smoke-daemon-probe
+          name: cargo-athena-example-smoke-daemon-probe-0-0-0
           template: cargo-athena-example-smoke-daemon-probe
   volumeClaimTemplates:
   - metadata:

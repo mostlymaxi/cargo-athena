@@ -45,9 +45,19 @@ pub use cargo_athena_macros::{container, ephemeral_pvc, external_pvc, fragment, 
 /// User-facing entrypoint. Captures the calling binary's identity
 /// (`CARGO_PKG_NAME`/`CARGO_PKG_VERSION`/`CARGO_BIN_NAME`) at the user
 /// binary's compile time and threads it into [`entrypoint_impl`] so the
-/// emitted S3 artifact key (`{crate}/{version}/{bin}.tar.gz`) matches
-/// what `cargo athena publish` uploads. Use as
+/// emitted S3 artifact key (`{crate}/<tag>/{bin}.tar.gz`) matches what
+/// `cargo athena publish` uploads. Use as
 /// `cargo_athena::entrypoint!(MyRootWorkflow)`.
+///
+/// It also bakes the build-time version/provenance that names the
+/// deployed `WorkflowTemplate`s. `cargo athena build`/`publish` set
+/// `ATHENA_VERSION_TAG`/`ATHENA_GIT_*` in the environment before invoking
+/// the compile; these are read with `option_env!` (NOT `env!`) so the
+/// version identity is *sealed into the binary* yet a plain
+/// `cargo install`/`cargo build` (no athena wrapper) still compiles —
+/// the vars resolve to `None` and the binary falls back to its baked
+/// `CARGO_PKG_VERSION`. `cargo athena build` is the enrichment path,
+/// never a requirement for a working binary.
 #[macro_export]
 macro_rules! entrypoint {
     ($root:ty) => {
@@ -55,6 +65,9 @@ macro_rules! entrypoint {
             ::core::env!("CARGO_PKG_NAME"),
             ::core::env!("CARGO_PKG_VERSION"),
             ::core::env!("CARGO_BIN_NAME"),
+            ::core::option_env!("ATHENA_VERSION_TAG"),
+            ::core::option_env!("ATHENA_GIT_COMMIT"),
+            ::core::option_env!("ATHENA_GIT_DIRTY"),
         )
     };
 }
