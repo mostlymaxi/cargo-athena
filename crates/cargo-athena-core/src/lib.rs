@@ -950,7 +950,11 @@ pub struct ContainerRunMeta {
 /// DESCRIBE / EMIT_JSON). The `cargo athena` CLI checks this on PROBE
 /// before trusting the other modes. Bump ONLY on a breaking change to
 /// those JSON shapes, NOT on every release, so an older CLI keeps
-/// working with a newer binary at the same protocol.
+/// working with a newer binary at the same protocol. Within one release
+/// line, a `ProbeInfo` struct mismatch at a matching protocol means the
+/// workflow binary's library and the CLI were built from different
+/// cargo-athena versions (a dev path-dependency skew) — `BinarySource::probe`
+/// names that precisely rather than failing an opaque deserialize.
 pub const ATHENA_PROTOCOL: u32 = 1;
 
 /// Fixed marker in a [`ProbeInfo`] response (the `kind` field). Lets a
