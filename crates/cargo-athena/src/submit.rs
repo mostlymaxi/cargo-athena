@@ -212,7 +212,10 @@ impl Cluster for KubeApi {
             .rt
             .block_on(api.list(&lp))
             .unwrap_or_else(|e| die(&format!("list workflowtemplates ({selector}): {e}")));
-        list.items.into_iter().filter_map(|o| o.metadata.name).collect()
+        list.items
+            .into_iter()
+            .filter_map(|o| o.metadata.name)
+            .collect()
     }
 
     fn delete_template(&self, ns: &str, name: &str) {
@@ -526,11 +529,7 @@ pub fn submit(a: SubmitArgs) {
     // the single source of truth; the CLI never recomputes the tag.
     let tpl_name = wts
         .iter()
-        .find(|wt| {
-            wt.spec
-                .as_ref()
-                .is_some_and(|s| s.entrypoint == root.name)
-        })
+        .find(|wt| wt.spec.as_ref().is_some_and(|s| s.entrypoint == root.name))
         .and_then(|wt| wt.metadata.as_ref().map(|m| m.name.clone()))
         .unwrap_or_else(|| {
             die(&format!(
@@ -694,6 +693,10 @@ pub fn prune(a: PruneArgs) {
     eprintln!(
         "pruned {} WorkflowTemplate(s){} for `{pkg}` @ `{tag}`.",
         names.len(),
-        if a.keep_binary { "" } else { " + the S3 binary" }
+        if a.keep_binary {
+            ""
+        } else {
+            " + the S3 binary"
+        }
     );
 }

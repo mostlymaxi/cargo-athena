@@ -151,7 +151,10 @@ fn version_tag_overlays_cluster_identity_only() {
     assert!(yaml.contains("workflowTemplateRef:"));
 
     // Baked provenance labels.
-    assert!(yaml.contains("cargo.athena/tag: dev-foo"), "missing tag label");
+    assert!(
+        yaml.contains("cargo.athena/tag: dev-foo"),
+        "missing tag label"
+    );
     assert!(
         yaml.contains("cargo.athena/channel: dev"),
         "dev tag must derive the dev channel"

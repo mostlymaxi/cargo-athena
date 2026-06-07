@@ -267,12 +267,7 @@ mod tests {
 
     #[test]
     fn version_tag_is_dns_1123_safe() {
-        for raw in [
-            "1.2.3",
-            "1.0.0-rc.1+build.5",
-            "dev-Foo_Bar",
-            "  weird +.+ ",
-        ] {
+        for raw in ["1.2.3", "1.0.0-rc.1+build.5", "dev-Foo_Bar", "  weird +.+ "] {
             let t = version_tag(raw);
             assert!(!t.is_empty(), "{raw:?} -> empty tag");
             assert!(
