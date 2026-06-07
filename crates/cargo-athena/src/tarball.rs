@@ -25,7 +25,7 @@
 //! resolves correctly for *both* single- and multi-arch tarballs.
 //!
 //! The [`extract_argo_compat`] function mirrors Argo's exact unpack
-//! semantics on the host so `cargo athena container emulate` stays
+//! semantics on the host so `cargo athena emulate` stays
 //! zero-drift with the real in-pod path.
 
 use std::fs::File;
@@ -72,7 +72,7 @@ pub fn create(out: &Path, entries: &[(&Path, &str)]) -> io::Result<()> {
 /// directory depending on the tarball's top-level layout, exactly as
 /// Argo's executor init container would do.
 ///
-/// Used by `cargo athena container emulate` to pre-stage `/athena/bin`
+/// Used by `cargo athena emulate` to pre-stage `/athena/bin`
 /// on the host bind-mount — zero-drift with the in-pod path.
 pub fn extract_argo_compat(src: &Path, dst: &Path) -> io::Result<()> {
     if let Some(parent) = dst.parent() {

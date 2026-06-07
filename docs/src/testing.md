@@ -24,16 +24,16 @@ fn summarize_picks_top_n() {
 No harness, no infrastructure. This is the right test for "does my
 business logic do the right thing on these inputs?".
 
-## 2. Run the step like Argo would (`container emulate`)
+## 2. Run the step like Argo would (`emulate`)
 
 For "does the step run correctly *in its container*?",
-`cargo athena container emulate` is the fast inner loop. It runs one
+`cargo athena emulate` is the fast inner loop. It runs one
 `#[container]` under docker or podman with the same image, the same
 injected bootstrap, the same parameter env, the `/athena` scratch
 dir, `host!` binds, and S3 artifact ports.
 
 ```sh
-cargo athena container emulate my-crate-transform -a data=hi -a factor=2
+cargo athena emulate ./my-workflow -w transform -a data=hi -a factor=2
 ```
 
 By default it **pulls the deployed binary from S3**, so what you
@@ -47,7 +47,7 @@ message instead of a serde panic inside the pod.
 **Not emulated:** anything Kubernetes-specific.
 `#[container(service_account=…)]`, RBAC, `nodeSelector`,
 podSpecPatch all need the real Argo path. See
-[the CLI page](cli.md#container-emulate) for full details and flags.
+[the CLI page](cli.md#emulate) for full details and flags.
 
 ## 3. Snapshot the emitted YAML
 

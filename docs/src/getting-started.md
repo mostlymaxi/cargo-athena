@@ -139,7 +139,7 @@ and `--argo-server` flags.
 > runs them. Names are stable and deterministic.
 
 Want to try one step locally before deploying?
-[`cargo athena container emulate`](cli.md#container-emulate) runs a
-single `#[container]` under docker / podman exactly as Argo would.
+[`cargo athena emulate`](cli.md#emulate) runs a single `#[container]`
+under docker / podman exactly as Argo would.
 
 Next: [Core Concepts](concepts.md).

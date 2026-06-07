@@ -1,23 +1,28 @@
 # The `cargo athena` CLI
 
 After `cargo install cargo-athena` you have the `cargo athena`
-subcommand. It drives your workflow crate's binary.
+subcommand. The consumer commands (`emit`, `ls`, `describe`, `emulate`,
+`submit`) act on a **workflow binary**: pass one as `[BINARY]` (a path,
+or a name on `$PATH` from `cargo install`) and they need no source.
+Omit it to build from the current crate instead (the developer loop), or
+point at another crate with `--manifest-path`. `build` and `publish`
+always build from source.
 
 ```text
 cargo athena [-c F] init [PATH] [--name N] [--bucket B] [--endpoint E] [--region R] [-y]
 cargo athena [-c F] doctor [--check-s3]
-cargo athena [-c F] emit  [-p PKG] [--bin B] [--out F] [--with-workflow]
-cargo athena [-c F] container ls       [-p PKG] [--bin B]
-cargo athena [-c F] container emulate  <name> [-a k=v].. [--input-file F] [-p PKG] [--bin B]
-                                       [--build|--tarball F] [--runtime R] [--skip-artifacts]
-cargo athena [-c F] container describe <name> [-p PKG] [--bin B] [--json]
-cargo athena [-c F] workflow  ls       [-p PKG] [--bin B] [--include-synthetic]
-cargo athena [-c F] workflow  describe <name> [-p PKG] [--bin B] [--json]
-cargo athena [-c F] submit <name> [-a k=v].. [-n NS] [--service-account SA]
-                          [--node-selector k=v].. [--priority N]
-                          [--argo-server URL] [-y] [--update]
-cargo athena [-c F] build [-p PKG] [--bin B] [--target T].. [--print]
+cargo athena [-c F] emit     [BINARY] [--out F] [--with-workflow]
+cargo athena [-c F] ls       [BINARY] [--kind container|workflow] [--include-synthetic]
+cargo athena [-c F] describe [BINARY] [-w TEMPLATE] [--json]
+cargo athena [-c F] emulate  [BINARY] [-w TEMPLATE] [-a k=v].. [--input-file F]
+                             [--build|--tarball F] [--runtime R] [--skip-artifacts]
+cargo athena [-c F] submit   [BINARY] [-w TEMPLATE] [-a k=v].. [-n NS] [--service-account SA]
+                             [--node-selector k=v].. [--priority N] [--argo-server URL] [-y] [--update]
+cargo athena [-c F] build   [-p PKG] [--bin B] [--target T].. [--print]
 cargo athena [-c F] publish [-p PKG] [--bin B] [--target T].. [--tarball F] [--print]
+
+  [BINARY]   a cargo-athena binary (path or $PATH name). Omit to build from
+             source instead: --manifest-path DIR / -p PKG / --bin B (default: the cwd crate).
 ```
 
 The typical flow is **`publish`** to ship the binary, then
@@ -75,9 +80,9 @@ Exit code is 0 on all-pass, 1 if anything failed.
 Prints the multi-document `WorkflowTemplate` YAML to stdout.
 
 ```sh
-cargo athena emit --package my-crate
-cargo athena emit --package my-crate --out wf.yaml
-cargo athena emit --package my-crate | kubectl apply -f -
+cargo athena emit ./my-workflow                  # a built or installed binary
+cargo athena emit ./my-workflow --out wf.yaml
+cargo athena emit --package my-crate | kubectl apply -f -   # build from source
 ```
 
 Names are deterministic (`<crate>-<fn>` kebab) so the output is
@@ -94,8 +99,9 @@ Flags:
 Run a `#[workflow]` (or a single `#[container]`) on a real cluster.
 
 ```sh
-cargo athena submit pipeline -a seed=hello
-W=$(cargo athena submit pipeline -a seed=hello -y)   # scriptable
+cargo athena submit ./my-workflow -w pipeline -a seed=hello
+W=$(cargo athena submit ./my-workflow -w pipeline -a seed=hello -y)   # scriptable
+cargo athena submit ./my-workflow -a seed=hello   # -w omitted: the binary's root
 ```
 
 Before anything is created, `submit`:
@@ -110,6 +116,8 @@ uses the Argo Server REST API (`$ARGO_TOKEN` for auth); otherwise it
 uses your kubeconfig (EKS / GKE / AKS exec plugins all work).
 
 Flags:
+- `-w TEMPLATE` / `--workflow` - which template to submit (default: the
+  binary's root). `<crate>-<fn>` kebab or the short `<fn>` form.
 - `-a name=value` (repeatable) / `--input-file F` - workflow arguments.
 - `-n NS` / `--namespace` - target namespace.
 - `--service-account SA` - override `[defaults].service_account`.
@@ -159,68 +167,72 @@ cargo athena build --package my-crate --print    # just resolve + print the key
 
 Same flags as `publish` minus `--tarball` and the upload step.
 
-## `container emulate`
+## `emulate`
 
-Runs one `#[container]` locally under docker or podman.
+Runs one `#[container]` locally under docker or podman. `-w` picks the
+container (default: the binary's root template).
 
 ```sh
-cargo athena container emulate transform -a data=hello -a factor=4
-cargo athena container emulate fetch --input-file args.json
-cargo athena container emulate fetch --build
+cargo athena emulate ./my-workflow -w transform -a data=hello -a factor=4
+cargo athena emulate ./my-workflow -w fetch --input-file args.json
+cargo athena emulate --build -w fetch        # build from source for the run
 ```
 
-By default it pulls the deployed tarball from S3 so you smoke-test
-what's actually live. Arguments are type-checked against the real
-function signature; missing or wrong-type values fail fast.
+The metadata comes from the `[BINARY]` you name; the run payload is the
+deployed tarball pulled from S3 by default, so you smoke-test what's
+actually live. Arguments are type-checked against the real function
+signature; missing or wrong-type values fail fast.
 
 **Not emulated:** anything Kubernetes-specific. `docker run` has no
 ServiceAccount, no RBAC, no `nodeSelector`. For those, use `submit`
 on a real cluster.
 
 Flags:
+- `-w TEMPLATE` / `--workflow` - the container to emulate (default: root).
 - `-a name=value` (repeatable) / `--input-file F` - function arguments.
-- `--build` - use a fresh local host-arch musl build instead of the
-  deployed tarball.
+- `--build` - build a fresh local host-arch musl binary for the run
+  instead of pulling the deployed tarball (source-only; omit `[BINARY]`).
 - `--tarball F` - use `F` verbatim.
 - `--runtime docker|podman` - autodetect by default (prefer docker).
 - `--skip-artifacts` - bypass S3 `load`/`save_artifact!` sync.
 
-## `container describe` / `workflow describe`
+## `describe`
 
 Shows what one template expects: its signature, image, mounts, and a
-copy-pasteable `submit` line.
+copy-pasteable `submit` line. Works for either a `#[container]` or a
+`#[workflow]`.
 
 ```sh
-cargo athena container describe transform
-cargo athena workflow  describe pipeline
+cargo athena describe ./my-workflow              # the root template
+cargo athena describe ./my-workflow -w transform
+cargo athena describe ./my-workflow --json       # raw metadata, for scripts
 ```
 
-`container describe` is for `#[container]`s only; `workflow describe`
-takes either kind.
-
-`--json` prints the raw metadata instead (for scripting).
-
-## `container ls` / `workflow ls`
+## `ls`
 
 Lists the templates your workflow binary exposes.
 
 ```sh
-cargo athena container ls    # #[container]s only
-cargo athena workflow ls     # both #[container]s and #[workflow]s
-cargo athena workflow ls --include-synthetic   # + if/else internals
+cargo athena ls ./my-workflow                       # every template
+cargo athena ls ./my-workflow --kind container      # #[container]s only
+cargo athena ls ./my-workflow --kind workflow       # #[workflow]s only
+cargo athena ls ./my-workflow --include-synthetic   # + if/else internals
 ```
 
-## Package selection
+## Selecting the binary
 
-Which workflow binary `cargo athena` drives, in order:
+The consumer commands (`emit`, `ls`, `describe`, `emulate`, `submit`)
+resolve their program in this order:
 
-1. `-p` / `--package` and `--bin` flags (same meaning as `cargo`).
-2. `[defaults].package` / `.bin` in `athena.toml`.
-3. cargo's single-package / default-bin autodetect.
+1. the `[BINARY]` positional - a path, or a bare name on `$PATH` (e.g.
+   one installed with `cargo install`). No source needed.
+2. otherwise a **source build**: `--manifest-path DIR` (or the current
+   crate), narrowed by `-p` / `--package` and `--bin` (which fall back to
+   `[defaults].package` / `.bin` in `athena.toml`).
 
-So in a configured workspace, no target flags are needed on any
-command. `container emulate` and `submit` use `-a` / `--arg` for
-function arguments (since `-p` is already package).
+`-w` / `--workflow` names the template to act on and defaults to the
+binary's root (`entrypoint!(Root)`). `build` and `publish` always build
+from source and take `-p` / `--bin` (never `[BINARY]`).
 
 > Working in this repo instead of an installed binary? Any
 > `cargo athena <cmd>` above becomes
