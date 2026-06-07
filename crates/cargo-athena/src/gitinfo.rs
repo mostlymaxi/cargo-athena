@@ -64,6 +64,47 @@ fn channel_of(tag: &str) -> &'static str {
     }
 }
 
+/// For a consumer command's SOURCE build (`emit`/`submit`/… run with no
+/// prebuilt `[BINARY]`): bake the SAME version tag `build`/`publish` would,
+/// so a dev tree's emitted names + S3 key match a prior `publish` —
+/// WITHOUT the user having to export `ATHENA_VERSION_TAG`. The CLI is
+/// building the binary here, so it seals the tag (exactly like `build`)
+/// rather than letting the plain-`cargo build` fallback stamp the release
+/// form. Mirrors `resolve`'s dev outcome (`dev-<commit>` + provenance).
+///
+/// No-op when `ATHENA_VERSION_TAG` is already set (the binary bakes it),
+/// or on a release tree (clean + on a release branch) — there the binary's
+/// own `kebab(CARGO_PKG_VERSION)` fallback already equals the release tag.
+/// NOT gated: `emit`/`submit` never hard-fail on a dirty tree or prompt
+/// off-main (those gates guard the *distributed artifact*, i.e.
+/// `build`/`publish`).
+pub fn export_source_build_tag() {
+    if std::env::var_os("ATHENA_VERSION_TAG").is_some_and(|v| !v.is_empty()) {
+        return;
+    }
+    let Some(st) = git_state() else { return };
+    let off_road = st.dirty || !RELEASE_BRANCHES.contains(&st.branch.as_str());
+    if !off_road {
+        return;
+    }
+    let slot = if st.commit.is_empty() {
+        "local".to_string()
+    } else {
+        st.commit.clone()
+    };
+    let tag = format!("dev-{}", munge::version_tag(&slot));
+    // SAFETY: single-threaded, set before any cargo child is spawned.
+    unsafe {
+        std::env::set_var("ATHENA_VERSION_TAG", &tag);
+        if !st.commit.is_empty() {
+            std::env::set_var("ATHENA_GIT_COMMIT", &st.commit);
+        }
+        if st.dirty {
+            std::env::set_var("ATHENA_GIT_DIRTY", "true");
+        }
+    }
+}
+
 /// Resolve the build tag, applying the two **separate** release gates:
 ///   - `--allow-dirty` (HARD): a dirty tree would bake uncommitted code
 ///     into the binary, so building one without the flag is a hard error.

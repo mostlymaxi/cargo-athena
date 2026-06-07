@@ -52,11 +52,19 @@ pub enum BinarySource {
 impl BinSel {
     pub(crate) fn resolve(&self) -> BinarySource {
         if let Some(b) = &self.binary {
+            // Prebuilt binary: read its build-time-sealed tag as-is — do
+            // NOT inject one (the binary is the source of truth).
             return BinarySource::Exe(b.clone());
         }
-        // Source build. Package/bin fall back to `[defaults]` in
-        // athena.toml (parity with the old PkgSel); only consulted on
-        // this path, never in the source-free Exe path above.
+        // Source build: the CLI is about to compile the binary, so seal the
+        // SAME version tag `build`/`publish` would (a dev tree -> dev-<commit>),
+        // so emit/submit names + the S3 key match a prior `publish` without
+        // the user exporting ATHENA_VERSION_TAG. Done before any `cargo run`
+        // below so the compile bakes it.
+        crate::gitinfo::export_source_build_tag();
+        // Package/bin fall back to `[defaults]` in athena.toml (parity with
+        // the old PkgSel); only consulted on this path, never in the
+        // source-free Exe path above.
         let d = AthenaConfig::load().defaults;
         BinarySource::Cargo {
             manifest_path: self.manifest_path.clone(),
