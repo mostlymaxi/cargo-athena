@@ -49,9 +49,11 @@ template as an Argo `s3{}` artifact source.
 | `insecure` | `true` for plain HTTP (e.g. local MinIO). |
 | `access_key_secret` / `secret_key_secret` | Kubernetes `{ name, key }` secret selectors for credentials. |
 
-The binary tarball's object key is `{crate}/{version}/{bin}.tar.gz`,
-taken from your crate's name, version, and bin. (A `Cargo.toml`
-version bump therefore means a fresh `publish`.)
+The binary tarball's object key is `{crate}/<tag>/{bin}.tar.gz`, where
+`<tag>` is the build-time [version tag](cli.md#versioning) - the kebab of
+your crate's semver on a clean release build (`1.2.3` -> `1-2-3`), or
+`dev-<slot>` for a dev build. So a new release (or a new dev slot) lands
+under its own key and never clobbers another version's binary.
 
 ## `[bootstrap]`
 

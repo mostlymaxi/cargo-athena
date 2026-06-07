@@ -587,7 +587,7 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  generateName: cargo-athena-example-smoke-pipeline-
+  generateName: cargo-athena-example-smoke-pipeline-0-0-0-
   labels:
     cargo.athena/bin: smoke
     cargo.athena/channel: release

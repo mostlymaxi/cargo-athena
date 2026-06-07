@@ -1331,8 +1331,15 @@ impl BuildCtx {
         for p in inventory::iter::<PvcReg> {
             pvcs.insert(p.argo_name, p);
         }
+        // Normalize the baked tag the SAME way the None fallback is, so a
+        // raw/dotted/empty `ATHENA_VERSION_TAG` baked by a plain `cargo
+        // build` (bypassing the CLI's gitinfo munge) can't emit a
+        // non-DNS-1123 name or a `{pkg}//{bin}` key. munge is idempotent,
+        // so the wrapper path (already-kebab tag) is unaffected; an
+        // empty-after-munge value falls back to the semver.
         let version_tag = version_tag
-            .map(str::to_string)
+            .map(crate::api::munge::version_tag)
+            .filter(|t| !t.is_empty())
             .unwrap_or_else(|| crate::api::munge::version_tag(version));
         Self {
             fragments,
@@ -1380,6 +1387,19 @@ impl BuildCtx {
              template name with #[workflow(name = \"…\")] / \
              #[container(name = \"…\")]",
             n.len(),
+            self.version_tag,
+        );
+        // Fail loud at emit (not at cluster apply) if the tag ever carried
+        // a non-DNS-1123 char. The tag is munged at every entry point
+        // (BuildCtx::collect, gitinfo), so this is belt-and-suspenders.
+        assert!(
+            !n.is_empty()
+                && !n.starts_with('-')
+                && !n.ends_with('-')
+                && n.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+            "versioned WorkflowTemplate name {n:?} is not DNS-1123-safe \
+             (base {base:?} + tag {:?})",
             self.version_tag,
         );
         n
@@ -2073,7 +2093,10 @@ impl Collector {
             api_version: api::API_VERSION.to_string(),
             kind: api::KIND_WORKFLOW.to_string(),
             metadata: Some(api::ObjectMeta {
-                generate_name: format!("{}-", E::ARGO_NAME),
+                // Versioned, to match the workflow_template_ref above and
+                // `cargo athena submit`'s generateName (both use the
+                // versioned root) — the two run-creation paths stay in step.
+                generate_name: format!("{}-", ctx.versioned_name(E::ARGO_NAME)),
                 labels: ctx.athena_labels(),
                 ..Default::default()
             }),
@@ -2350,9 +2373,11 @@ pub fn entrypoint_impl<E: Template>(
     // command defaults to when none is named.
     if std::env::var_os("CARGO_ATHENA_PROBE").is_some() {
         // Resolve the sealed tag without a BuildCtx (probe is config-free):
-        // baked `ATHENA_VERSION_TAG`, else `kebab(version)`.
+        // baked `ATHENA_VERSION_TAG`, else `kebab(version)`. Normalize the
+        // baked value too (matches BuildCtx::collect).
         let tag = version_tag
-            .map(str::to_string)
+            .map(crate::api::munge::version_tag)
+            .filter(|t| !t.is_empty())
             .unwrap_or_else(|| crate::api::munge::version_tag(version));
         let channel = if tag.starts_with("dev-") {
             "dev"

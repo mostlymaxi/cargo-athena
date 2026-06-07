@@ -72,19 +72,24 @@ Provenance rides in labels on every WT - `cargo.athena/tag`,
 `kubectl get wt -l cargo.athena/tag=<tag>` finds a version and
 [`prune`](#prune) removes it.
 
-**Fast-iteration loop** - keep one slot, redeploy in place, clean up
-when done:
+**Fast-iteration loop** - keep one slot, redeploy in place, clean up when
+done. `submit` has no tag flag - it reads the tag baked into the binary
+it runs - so export `ATHENA_VERSION_TAG` once and every step (build,
+publish, the source build `submit` drives) agrees on the slot:
 
 ```bash
-cargo athena publish --allow-dirty --dev-tag wip   # -> ...-dev-wip
-cargo athena submit  ./app --dev-tag wip           # deploy that slot
-# ... iterate: publish + submit again overwrite the same slot ...
-cargo athena prune dev-wip ./app                   # remove the WTs + S3 binary
+export ATHENA_VERSION_TAG=dev-wip   # one stable slot for this loop
+cargo athena publish --allow-dirty  # build + upload under dev-wip
+cargo athena submit                 # deploy dev-wip (same baked tag)
+# ... iterate: re-run publish + submit; the slot is overwritten in place
+cargo athena prune dev-wip          # remove the dev-wip WTs + S3 binary
 ```
 
-**CI / explicit tag** - set `ATHENA_VERSION_TAG=<tag>` to force the tag
-verbatim and skip git entirely (the universal escape hatch; useful when
-the build and the publish happen on different machines).
+`--dev-tag wip` on `build`/`publish` is the one-shot equivalent of the
+export (it names the slot for that single command). `ATHENA_VERSION_TAG`
+is also the **CI / cross-machine** escape hatch: it forces the tag
+verbatim and skips git, so a build job and a separate publish job (or a
+`publish --tarball`) agree on the key.
 
 ## `init`
 

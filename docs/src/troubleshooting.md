@@ -68,9 +68,13 @@ on the current version, or the upload was cleaned up. Either:
 - Pass `--skip-binary-check` if you're sure (e.g. testing against a
   fixture upload).
 
-The S3 object key embeds the package version
-(`{crate}/{version}/{bin}.tar.gz`), so a `Cargo.toml` version bump
-needs a fresh `publish`.
+The S3 object key embeds the build-time [version tag](cli.md#versioning)
+(`{crate}/<tag>/{bin}.tar.gz`) - the kebab of the semver on a release
+build (`1.2.3` -> `1-2-3`), or `dev-<slot>` on a dev build. If a pod
+can't pull its binary, confirm `publish` and `submit` resolved the same
+tag: a source-build `submit` with no `ATHENA_VERSION_TAG` re-derives the
+tag from git, which won't match a binary you published with `--dev-tag`.
+Export `ATHENA_VERSION_TAG` (or submit the prebuilt binary) so both agree.
 
 ### "could not list templates" / "could not get template metadata"
 

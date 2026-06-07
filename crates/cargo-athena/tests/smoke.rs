@@ -184,6 +184,23 @@ fn version_tag_overlays_cluster_identity_only() {
 }
 
 #[test]
+fn baked_tag_is_normalized_dns_safe() {
+    // A raw/dotted ATHENA_VERSION_TAG baked by a plain `cargo build`
+    // (bypassing the CLI's gitinfo munge) must still be kebabed at the
+    // consume side, never emitted verbatim into a (dot-illegal) name.
+    let yaml = emit_tagged::<root>(Some("1.2.3"));
+    let base = <root as Template>::ARGO_NAME;
+    assert!(
+        yaml.contains(&format!("name: {base}-1-2-3")),
+        "dotted tag not kebabed:\n{yaml}"
+    );
+    assert!(
+        !yaml.contains(&format!("{base}-1.2.3")),
+        "a dotted (non-DNS-1123) tag leaked into a resource name"
+    );
+}
+
+#[test]
 fn steps_mode_emits_sequential_steps_not_dag() {
     let yaml = emit::<seq>();
     let wt = yaml

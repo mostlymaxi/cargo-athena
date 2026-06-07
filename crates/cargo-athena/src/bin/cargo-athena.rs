@@ -519,10 +519,26 @@ fn publish(
         let bin = bin.map(str::to_string).unwrap_or(default_bin);
         // A prebuilt tarball already has its tag baked in; resolve the
         // SAME tag here for the upload key. No gating (the build, not the
-        // upload, is where the dirty/branch gates belong) — set
-        // `ATHENA_VERSION_TAG=<tag>` to force the exact tag when the
-        // current repo state doesn't match the build's (the CI path).
+        // upload, is where the dirty/branch gates belong).
+        let dev_tag_given = gate.dev_tag.is_some();
         let bt = gitinfo::resolve(&version, gate.dev_tag, gate.allow_dirty, gate.yes, false);
+        // The one case where the resolved tag is a GUESS that can diverge
+        // from the tarball's baked tag is a bare dev build: the slot then
+        // defaults to the CURRENT commit, which need not match the build's.
+        // Refuse rather than upload to a key the binary won't reference.
+        // (A release tag, an explicit --dev-tag, or ATHENA_VERSION_TAG are
+        // all deterministic and fine.)
+        let explicit_tag = std::env::var_os("ATHENA_VERSION_TAG").is_some_and(|v| !v.is_empty());
+        if bt.channel == "dev" && !dev_tag_given && !explicit_tag {
+            eprintln!(
+                "error: `publish --tarball` can't infer the prebuilt binary's \
+                 dev tag from the current tree (it would guess `{}` from the \
+                 working commit).\n  Pass the tag the tarball was built with: \
+                 `--dev-tag <slot>`, or set `ATHENA_VERSION_TAG=<tag>`.",
+                bt.tag
+            );
+            exit(2);
+        }
         let (s3, dest) = artifact_s3(&cfg, &krate, &bt.tag, &bin);
         let p = std::path::Path::new(path);
         if !p.exists() {
