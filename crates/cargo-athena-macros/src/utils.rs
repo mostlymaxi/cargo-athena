@@ -276,10 +276,27 @@ impl<'ast> Visit<'ast> for BodyScan {
     }
 
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+        // Record the callee's *function name* (the last path segment) as a
+        // candidate `#[fragment]` callee. A fragment is keyed by its own
+        // ident in `FragmentReg`, so the last segment is what matches: this
+        // catches a bare `frag()` AND a qualified `path::to::frag()` (the
+        // old `len() == 1` form silently dropped the latter, losing its
+        // `host!` / `secret!` / artifact propagation).
+        //
+        // Matching is by bare name because a proc macro can't resolve
+        // paths/types. Two consequences, both inherent (not introduced by
+        // accepting qualified paths) and accepted by design:
+        //   - a non-fragment call sharing a fragment's name over-propagates
+        //     (harmless extra mounts; the `FragmentReg` map is keyed by
+        //     ident, so same-named fragments already collide regardless);
+        //   - an aliased call (`use frag as f; f()`) records the alias,
+        //     which won't match the fragment's real ident, so it stays
+        //     unpropagated. Closures / fn-pointers / method calls aren't
+        //     path-calls, so they're never recorded (no false match).
         if let Expr::Path(p) = &*call.func
-            && p.path.segments.len() == 1
+            && let Some(last) = p.path.segments.last()
         {
-            self.callees.push(p.path.segments[0].ident.to_string());
+            self.callees.push(last.ident.to_string());
         }
         syn::visit::visit_expr_call(self, call);
     }
@@ -589,3 +606,38 @@ pub(crate) fn unwrap_expr(e: &Expr) -> &Expr {
 // `cargo_athena_api::munge` (their single source of truth). No
 // proc-macro-side pin tests needed: drift is impossible by
 // construction now that both sides import the same fns.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_records_fragment_callees_qualified_or_bare() {
+        // A `#[fragment]` is keyed by its bare ident, so a call must be
+        // recorded under the fragment's function name regardless of path
+        // qualification. Regression: qualified calls used to be dropped
+        // (the `len() == 1` gate), losing the fragment's host! / secret! /
+        // artifact propagation onto the calling container.
+        let f: syn::ItemFn = syn::parse_quote! {
+            fn c() {
+                bare();
+                crate::frags::qualified();
+                a::b::c::deep();
+                obj.method();
+            }
+        };
+        let s = scan_body(&f);
+        assert!(s.callees.contains(&"bare".to_string()));
+        assert!(
+            s.callees.contains(&"qualified".to_string()),
+            "qualified callee dropped"
+        );
+        assert!(
+            s.callees.contains(&"deep".to_string()),
+            "deep-qualified callee dropped"
+        );
+        // A method call is not a path-call, so it is never recorded
+        // (fragments are free functions; this avoids a false match).
+        assert!(!s.callees.contains(&"method".to_string()));
+    }
+}
