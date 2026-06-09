@@ -7,7 +7,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.0
+    cargo.athena/toolchain: 0.6.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-branchy
@@ -113,7 +113,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.0
+    cargo.athena/toolchain: 0.6.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-combine
@@ -194,7 +194,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.0
+    cargo.athena/toolchain: 0.6.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-fetch
@@ -275,7 +275,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.0
+    cargo.athena/toolchain: 0.6.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-ingest
@@ -341,7 +341,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.0
+    cargo.athena/toolchain: 0.6.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline
@@ -408,7 +408,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.0
+    cargo.athena/toolchain: 0.6.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-publish
@@ -515,7 +515,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.0
+    cargo.athena/toolchain: 0.6.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-transform

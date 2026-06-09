@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: mostlymaxi/cargo-athena/.github/actions/athena-publish@v0.6.0
+      - uses: mostlymaxi/cargo-athena/.github/actions/athena-publish@v0.6.1
         with:
           command: ${{ github.event_name == 'pull_request' && 'build' || 'publish' }}
           package: my-workflow
@@ -38,7 +38,7 @@ jobs:
           # endpoint: https://<account>.r2.cloudflarestorage.com  # only to override athena.toml
 ```
 
-Pin the action to a release tag (`@v0.6.0`). The tag fixes the `cargo athena`
+Pin the action to a release tag (`@v0.6.1`). The tag fixes the `cargo athena`
 CLI version too, so there is nothing else to keep in sync.
 
 ## Credentials
