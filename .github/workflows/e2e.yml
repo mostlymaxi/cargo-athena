@@ -23,6 +23,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The lean CI nix store (~1.7G) + restored cargo cache + the build
+      # can exceed ubuntu-latest's ~14G free disk and crash the runner
+      # with "No space left on device" (hit on the v0.6.0 main run).
+      # Reclaim ~20G of preinstalled tooling we never use, before the nix
+      # store + caches populate.
+      - name: Free up runner disk
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+                      /usr/share/dotnet /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: DeterminateSystems/nix-installer-action@v16
         with:
           # Trust the cachix substituter at the *system* nix.conf level
@@ -93,6 +103,16 @@ jobs:
       BADGE_ENABLED: ${{ secrets.BADGE_GIST_ID != '' && secrets.GIST_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
+      # The lean CI nix store (~1.7G) + restored cargo cache + the build
+      # can exceed ubuntu-latest's ~14G free disk and crash the runner
+      # with "No space left on device" (hit on the v0.6.0 main run).
+      # Reclaim ~20G of preinstalled tooling we never use, before the nix
+      # store + caches populate.
+      - name: Free up runner disk
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+                      /usr/share/dotnet /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: DeterminateSystems/nix-installer-action@v16
         with:
           # Trust the cachix substituter at the *system* nix.conf level
