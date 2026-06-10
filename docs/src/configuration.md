@@ -47,7 +47,14 @@ template as an Argo `s3{}` artifact source.
 | `bucket` | Bucket name. |
 | `region` | S3 region. |
 | `insecure` | `true` for plain HTTP (e.g. local MinIO). |
+| `virtual_host` | `true` for virtual-hosted-style addressing (`https://<bucket>.<endpoint>/<key>`). Default `false` = path-style (`https://<endpoint>/<bucket>/<key>`), which MinIO and most S3-compatible stores want. See note below. |
 | `access_key_secret` / `secret_key_secret` | Kubernetes `{ name, key }` secret selectors for credentials. |
+
+> `virtual_host` currently steers the **`cargo athena` CLI's** S3 client
+> only (`publish` / `submit` / `emulate`). In-pod, Argo's executor
+> auto-detects the addressing style, so set it on a provider that needs
+> virtual-hosted and confirm your cluster's Argo reaches the bucket the
+> same way. Leave it unset (path-style) for MinIO and the common case.
 
 The binary tarball's object key is `{crate}/<tag>/{bin}.tar.gz`, where
 `<tag>` is the build-time [version tag](cli.md#versioning) - the kebab of

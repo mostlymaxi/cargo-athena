@@ -680,6 +680,13 @@ pub struct S3Repo {
     pub region: String,
     #[serde(default)]
     pub insecure: bool,
+    /// `true` for virtual-hosted-style addressing (`https://<bucket>.<endpoint>/<key>`)
+    /// instead of the default path-style (`https://<endpoint>/<bucket>/<key>`).
+    /// Default false (path-style): what MinIO and most S3-compatible stores
+    /// want. CLI-side only for now; the in-pod Argo executor auto-detects
+    /// until upstream Argo exposes the toggle on its S3 artifact.
+    #[serde(default)]
+    pub virtual_host: bool,
     pub access_key_secret: SecretRef,
     pub secret_key_secret: SecretRef,
 }
@@ -884,6 +891,13 @@ pub struct S3Ref {
     pub region: String,
     pub insecure: bool,
     pub key: String,
+    /// Virtual-hosted-style addressing (else path-style). A provider-wide
+    /// property of the configured repo, carried here so the CLI's S3
+    /// client uses one addressing style for the binary tarball and for
+    /// `load`/`save_artifact!` objects alike. `#[serde(default)]`: absent
+    /// in metadata from an older binary reads as false (path-style).
+    #[serde(default)]
+    pub virtual_host: bool,
 }
 
 impl S3Ref {
@@ -899,6 +913,7 @@ impl S3Ref {
             region: repo.region.clone(),
             insecure: repo.insecure,
             key,
+            virtual_host: repo.virtual_host,
         }
     }
 }
@@ -1057,7 +1072,7 @@ impl ContainerRunMeta {
     /// Derive the runner metadata from one built Argo template.
     /// `input_types` is parallel to the template's input parameters
     /// (same order); empty when unknown.
-    fn from_template(t: &api::Template, input_types: &[&str]) -> Self {
+    fn from_template(t: &api::Template, input_types: &[&str], virtual_host: bool) -> Self {
         let kind = if t.container.is_some() {
             "container"
         } else if t.dag.is_some() || !t.steps.is_empty() {
@@ -1082,6 +1097,10 @@ impl ContainerRunMeta {
                     region: s.region.clone(),
                     insecure: s.insecure,
                     key: s.key.clone(),
+                    // The emitted Argo artifact doesn't carry an addressing
+                    // style; the configured repo's setting (threaded in)
+                    // applies to every object in that repo.
+                    virtual_host,
                 },
                 path: a.path.clone(),
             })
@@ -2418,7 +2437,11 @@ pub fn entrypoint_impl<E: Template>(
             .map(|b| {
                 let t = b(&ctx);
                 let it = collector.types.get(&t.name).copied().unwrap_or(&[]);
-                let mut m = ContainerRunMeta::from_template(&t, it);
+                let mut m = ContainerRunMeta::from_template(
+                    &t,
+                    it,
+                    ctx.config().artifact_repository.s3.virtual_host,
+                );
                 m.package = krate.to_string();
                 m.synthetic = collector.synthetic.contains(&t.name);
                 m
@@ -2451,7 +2474,11 @@ pub fn entrypoint_impl<E: Template>(
             .unwrap_or_else(|| panic!("no template named {name:?} (or {full:?})"));
         let resolved = tpl.name.clone();
         let input_types = collector.types.get(&resolved).copied().unwrap_or(&[]);
-        let mut meta = ContainerRunMeta::from_template(&tpl, input_types);
+        let mut meta = ContainerRunMeta::from_template(
+            &tpl,
+            input_types,
+            ctx.config().artifact_repository.s3.virtual_host,
+        );
         meta.package = krate.to_string();
         meta.synthetic = collector.synthetic.contains(&resolved);
         println!(
