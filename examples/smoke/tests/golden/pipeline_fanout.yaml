@@ -190,7 +190,7 @@ spec:
         arguments:
           parameters:
           - name: items
-            value: '{{=toJSON(map(fromJSON(tasks[''b''].outputs.parameters[''return'']), { type(#) == "string" ? fromJSON(#) : # }))}}'
+            value: '{{=toJSON(map(fromJSON((tasks[''b''].outputs.parameters[''return''] == nil || tasks[''b''].outputs.parameters[''return''] == "" || tasks[''b''].outputs.parameters[''return''] == "null") ? "[]" : tasks[''b''].outputs.parameters[''return'']), { type(#) == "string" ? fromJSON(#) : # }))}}'
         templateRef:
           name: cargo-athena-example-smoke-summarize-0-0-0
           template: cargo-athena-example-smoke-summarize
