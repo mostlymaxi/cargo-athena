@@ -682,9 +682,10 @@ pub struct S3Repo {
     pub insecure: bool,
     /// `true` for virtual-hosted-style addressing (`https://<bucket>.<endpoint>/<key>`)
     /// instead of the default path-style (`https://<endpoint>/<bucket>/<key>`).
-    /// Default false (path-style): what MinIO and most S3-compatible stores
-    /// want. CLI-side only for now; the in-pod Argo executor auto-detects
-    /// until upstream Argo exposes the toggle on its S3 artifact.
+    /// Default false: auto-detect, what MinIO and most S3-compatible stores
+    /// want. Applies end to end: the `cargo athena` S3 client and the emitted
+    /// artifact's Argo `addressingStyle` (honored by executors built with
+    /// upstream PR #15734; silently ignored, hence harmless, on older Argo).
     #[serde(default)]
     pub virtual_host: bool,
     pub access_key_secret: SecretRef,
@@ -1072,7 +1073,7 @@ impl ContainerRunMeta {
     /// Derive the runner metadata from one built Argo template.
     /// `input_types` is parallel to the template's input parameters
     /// (same order); empty when unknown.
-    fn from_template(t: &api::Template, input_types: &[&str], virtual_host: bool) -> Self {
+    fn from_template(t: &api::Template, input_types: &[&str]) -> Self {
         let kind = if t.container.is_some() {
             "container"
         } else if t.dag.is_some() || !t.steps.is_empty() {
@@ -1097,10 +1098,11 @@ impl ContainerRunMeta {
                     region: s.region.clone(),
                     insecure: s.insecure,
                     key: s.key.clone(),
-                    // The emitted Argo artifact doesn't carry an addressing
-                    // style; the configured repo's setting (threaded in)
-                    // applies to every object in that repo.
-                    virtual_host,
+                    // Read the addressing style straight off the emitted
+                    // artifact (the CLI object_store client is a bool: only
+                    // `virtual-hosted` maps to true; `""`/`"path"` are
+                    // path-style to it).
+                    virtual_host: s.addressing_style == "virtual-hosted",
                 },
                 path: a.path.clone(),
             })
@@ -1657,6 +1659,16 @@ pub fn s3_loc(s3: &S3Repo, key: &str) -> api::S3Artifact {
             key: s3.secret_key_secret.key.clone(),
             ..Default::default()
         }),
+        // The config toggle is a bool; map it onto Argo's tri-state
+        // `addressingStyle`. `false` -> `""` (auto-detect) keeps today's
+        // behavior and, being empty, is skip-serialized: no golden churn
+        // and no spurious drift against WTs from a pre-`virtual_host`
+        // binary. Only `true` forces `virtual-hosted`.
+        addressing_style: if s3.virtual_host {
+            "virtual-hosted".to_string()
+        } else {
+            String::new()
+        },
     }
 }
 
@@ -2437,11 +2449,7 @@ pub fn entrypoint_impl<E: Template>(
             .map(|b| {
                 let t = b(&ctx);
                 let it = collector.types.get(&t.name).copied().unwrap_or(&[]);
-                let mut m = ContainerRunMeta::from_template(
-                    &t,
-                    it,
-                    ctx.config().artifact_repository.s3.virtual_host,
-                );
+                let mut m = ContainerRunMeta::from_template(&t, it);
                 m.package = krate.to_string();
                 m.synthetic = collector.synthetic.contains(&t.name);
                 m
@@ -2474,11 +2482,7 @@ pub fn entrypoint_impl<E: Template>(
             .unwrap_or_else(|| panic!("no template named {name:?} (or {full:?})"));
         let resolved = tpl.name.clone();
         let input_types = collector.types.get(&resolved).copied().unwrap_or(&[]);
-        let mut meta = ContainerRunMeta::from_template(
-            &tpl,
-            input_types,
-            ctx.config().artifact_repository.s3.virtual_host,
-        );
+        let mut meta = ContainerRunMeta::from_template(&tpl, input_types);
         meta.package = krate.to_string();
         meta.synthetic = collector.synthetic.contains(&resolved);
         println!(
@@ -2615,5 +2619,46 @@ mod tests {
         );
         assert_eq!(got, None);
         let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    fn repo(virtual_host: bool) -> super::S3Repo {
+        super::S3Repo {
+            endpoint: "s3.example.com".into(),
+            bucket: "b".into(),
+            region: "us-east-1".into(),
+            insecure: false,
+            virtual_host,
+            access_key_secret: super::SecretRef {
+                name: "cred".into(),
+                key: "accessKey".into(),
+            },
+            secret_key_secret: super::SecretRef {
+                name: "cred".into(),
+                key: "secretKey".into(),
+            },
+        }
+    }
+
+    // `virtual_host` must reach the emitted Argo artifact as Argo's tri-state
+    // `addressingStyle` (PR #15734): `true` -> `virtual-hosted`, `false` ->
+    // `""`. Empty is skip-serialized, so an unset repo emits no key (goldens
+    // stay byte-identical and older Argo executors never see the field).
+    #[test]
+    fn s3_loc_maps_virtual_host_to_addressing_style() {
+        let on = super::s3_loc(&repo(true), "k");
+        assert_eq!(on.addressing_style, "virtual-hosted");
+        let yaml = serde_norway::to_string(&on).unwrap();
+        assert!(
+            yaml.contains("addressingStyle: virtual-hosted"),
+            "expected addressingStyle in emitted YAML:\n{yaml}"
+        );
+
+        let off = super::s3_loc(&repo(false), "k");
+        assert_eq!(off.addressing_style, "");
+        let yaml = serde_norway::to_string(&off).unwrap();
+        assert!(
+            !yaml.contains("addressingStyle"),
+            "path-style repo must omit addressingStyle entirely:\n{yaml}"
+        );
     }
 }
