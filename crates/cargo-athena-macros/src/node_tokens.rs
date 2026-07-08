@@ -97,14 +97,29 @@ pub(crate) fn arg_value(arg: &Arg, steps: bool) -> (String, Option<String>) {
         // string, else pass the parsed object/array through; then
         // re-`toJSON` the array. (`type`/`map`/`fromJSON`/`toJSON` are
         // expr-lang v1.17 builtins.)
-        Arg::FanAgg(t) => (
-            format!(
-                "{{{{=toJSON(map(fromJSON({task_scope}['{t}']\
-                 .outputs.parameters['return']), \
-                 {{ type(#) == \"string\" ? fromJSON(#) : # }}))}}}}"
-            ),
-            dep(t),
-        ),
+        //
+        // Empty-fan-out guard. A `withParam` over `[]` is SKIPPED by Argo
+        // (dag.go: `NodeTypeSkipped`, "empty params"), NOT aggregated, so
+        // the `[…]` list is never built. Argo then fills this param with
+        // `""` for the skipped node (v4.0.5 skipped-scope population) — or
+        // leaves it null/absent on older versions. `fromJSON("")` /
+        // `fromJSON(nil)` both hard-error ("unexpected end of JSON input"),
+        // failing the consuming task rather than yielding an empty list.
+        // So normalize nil/`""`/`"null"` to `"[]"` before the re-norm. A
+        // real non-empty aggregate is always a JSON array string, so the
+        // guard only ever fires on the empty/skipped case.
+        Arg::FanAgg(t) => {
+            let src = format!("{task_scope}['{t}'].outputs.parameters['return']");
+            (
+                format!(
+                    "{{{{=toJSON(map(fromJSON(\
+                     ({src} == nil || {src} == \"\" || {src} == \"null\") \
+                     ? \"[]\" : {src}), \
+                     {{ type(#) == \"string\" ? fromJSON(#) : # }}))}}}}"
+                ),
+                dep(t),
+            )
+        }
     }
 }
 
@@ -457,9 +472,16 @@ mod tests {
     #[test]
     fn fanagg_emits_kind_aware_renorm() {
         let (v, d) = arg_value(&Arg::FanAgg("caps".to_string()), false);
+        // Source is guarded to `"[]"` when nil/`""`/`"null"` so an EMPTY
+        // fan-out (Argo skips the withParam node, fills the param with `""`)
+        // aggregates to `[]` instead of hard-erroring on `fromJSON("")`.
         assert_eq!(
             v,
-            "{{=toJSON(map(fromJSON(tasks['caps'].outputs.parameters['return']), \
+            "{{=toJSON(map(fromJSON(\
+             (tasks['caps'].outputs.parameters['return'] == nil \
+             || tasks['caps'].outputs.parameters['return'] == \"\" \
+             || tasks['caps'].outputs.parameters['return'] == \"null\") \
+             ? \"[]\" : tasks['caps'].outputs.parameters['return']), \
              { type(#) == \"string\" ? fromJSON(#) : # }))}}"
         );
         assert_eq!(d, Some("caps".to_string()));

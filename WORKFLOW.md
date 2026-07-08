@@ -242,6 +242,8 @@ downstream like any output.
   a list.
 - The closure body must be a single template call.
 - Element / closure / result types are type-checked.
+- An empty source list aggregates to an empty `Vec`: the per-element
+  step just doesn't run, and downstream consumers receive `[]`.
 
 ## `if` / `else` / `else if`
 

@@ -120,6 +120,26 @@ pub fn summarize(items: Vec<String>) {
     println!("OK summarize {items:?}");
 }
 
+/// Empty-source fan_out. `make_empty` yields `[]`, so Argo SKIPS the
+/// `withParam` node (never aggregates) and fills the aggregate param
+/// with `""`. Without the guard in the aggregate expr the pod would
+/// hard-error on `fromJSON("")`; the fix must instead deliver an empty
+/// list so `expect_empty` sees `vec![]`. Regression for the empty
+/// fan_out bug.
+#[container]
+pub fn make_empty() -> Vec<String> {
+    Vec::new()
+}
+
+#[container]
+pub fn expect_empty(items: Vec<String>) {
+    assert!(
+        items.is_empty(),
+        "empty fan_out must aggregate to [], got {items:?}"
+    );
+    println!("OK expect_empty {items:?}");
+}
+
 /// Nested element type — a struct holding a `Vec<i64>` ("a list of
 /// json") to prove the `fan_out` aggregate re-normalization works
 /// beyond flat `String` (Regime B writes exactly one layer per element
@@ -383,6 +403,10 @@ pub fn pipeline(input_blob: String) {
     let items = make_list();
     let caps = items.fan_out(|x| upper(x)); // Vec<String>  (scalar row)
     summarize(caps);
+
+    let empty = make_empty();
+    let none = empty.fan_out(|x| upper(x)); // empty source -> [] aggregate
+    expect_empty(none);
 
     let raw = make_list();
     let bags = raw.fan_out(|x| pack(x)); // Vec<Bag>  (struct row)
