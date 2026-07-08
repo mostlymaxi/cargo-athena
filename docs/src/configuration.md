@@ -50,13 +50,18 @@ template as an Argo `s3{}` artifact source.
 | `virtual_host` | `true` for virtual-hosted-style addressing (`https://<bucket>.<endpoint>/<key>`). Default `false` auto-detects (path-style for MinIO and most S3-compatible stores). See note below. |
 | `access_key_secret` / `secret_key_secret` | Kubernetes `{ name, key }` secret selectors for credentials. |
 
-> `virtual_host` applies end to end: it steers the `cargo athena` CLI's S3
-> client (`publish` / `submit` / `emulate`) and is emitted onto every
-> in-pod artifact so the Argo executor uses the same addressing style.
-> Set it for a provider that only accepts virtual-hosted requests; leave
-> it unset for MinIO and the common case. The in-pod half needs an Argo
-> build that supports the `addressingStyle` field (upstream PR #15734);
-> older executors ignore it, so the value is safe to set regardless.
+> `virtual_host` steers the `cargo athena` CLI's S3 client (`publish` /
+> `submit` / `emulate`), and is also emitted onto every in-pod artifact
+> as Argo's `addressingStyle`. Set it for a provider that only accepts
+> virtual-hosted requests; leave it unset for MinIO and the common case.
+>
+> The in-pod half takes effect only on an Argo that ships `addressingStyle`
+> ([upstream PR #15734](https://github.com/argoproj/argo-workflows/pull/15734)),
+> which is newer than every [supported version](argo-versions.md): v4.0.5,
+> v3.7.14, and v3.6.19 all predate it and silently ignore the key. Setting
+> it is harmless there, but the in-pod addressing style is only truly
+> controlled once your cluster runs an Argo with PR #15734. Until then the
+> CLI side is the only half that takes effect.
 
 The binary tarball's object key is `{crate}/<tag>/{bin}.tar.gz`, where
 `<tag>` is the build-time [version tag](cli.md#versioning) - the kebab of

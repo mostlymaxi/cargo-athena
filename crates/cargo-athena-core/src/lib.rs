@@ -683,9 +683,10 @@ pub struct S3Repo {
     /// `true` for virtual-hosted-style addressing (`https://<bucket>.<endpoint>/<key>`)
     /// instead of the default path-style (`https://<endpoint>/<bucket>/<key>`).
     /// Default false: auto-detect, what MinIO and most S3-compatible stores
-    /// want. Applies end to end: the `cargo athena` S3 client and the emitted
-    /// artifact's Argo `addressingStyle` (honored by executors built with
-    /// upstream PR #15734; silently ignored, hence harmless, on older Argo).
+    /// want. Steers the `cargo athena` S3 client, and is emitted as the
+    /// artifact's Argo `addressingStyle` (honored only by executors that ship
+    /// upstream PR #15734, newer than any supported Argo; ignored, hence
+    /// harmless, on the rest).
     #[serde(default)]
     pub virtual_host: bool,
     pub access_key_secret: SecretRef,
