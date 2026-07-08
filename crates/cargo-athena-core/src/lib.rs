@@ -698,12 +698,8 @@ pub struct S3Repo {
     pub region: String,
     #[serde(default)]
     pub insecure: bool,
-    /// `true` for virtual-hosted-style addressing (`https://<bucket>.<endpoint>/<key>`)
-    /// instead of the default path-style (`https://<endpoint>/<bucket>/<key>`).
-    /// Default false: auto-detect, what MinIO and most S3-compatible stores
-    /// want. Applies end to end: the `cargo athena` S3 client and the emitted
-    /// artifact's Argo `addressingStyle` (honored by executors built with
-    /// upstream PR #15734; silently ignored, hence harmless, on older Argo).
+    /// Virtual-hosted-style addressing for the CLI S3 client and, as Argo
+    /// `addressingStyle`, in-pod (Argo 4.1+). False: CLI path-style, Argo auto.
     #[serde(default)]
     pub virtual_host: bool,
     pub access_key_secret: SecretRef,
