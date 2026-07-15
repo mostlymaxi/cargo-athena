@@ -1002,17 +1002,55 @@ pub(crate) fn analyze_workflow(
             e
         }
     })?;
-    // A downstream task consuming a `fan_out` binding gets Argo's
-    // `withParam` aggregate, whose elements are each per-item task's
-    // already-JSON-encoded `return` — a plain `Ref` double-encodes.
-    // Re-tag those refs so emit uses the array-renormalizing expr.
+    let fan_tasks = retag_fan_aggs(&mut nodes);
+    // A fan binding can be CONSUMED by a task (re-tagged above), but not
+    // RETURNED as the workflow's value: the `outputs.parameters.return`
+    // bubble is a plain `valueFrom.parameter` copy of the raw aggregate,
+    // whose elements are still individually JSON-encoded — the parent
+    // would read a double-encoded array. (Arm bodies get the same check
+    // in `synth_if`.)
+    if let Some(t) = &output_task
+        && fan_tasks.contains(t)
+    {
+        return Err(syn::Error::new_spanned(
+            &func.sig.output,
+            FAN_RETURN_UNSUPPORTED,
+        ));
+    }
+    Ok((nodes, output_task, ctx.synth))
+}
+
+pub(crate) const FAN_RETURN_UNSUPPORTED: &str = "a `fan_out` binding cannot be returned as the workflow's value (the raw \
+Argo aggregate's elements are individually JSON-encoded, so the parent would \
+read a double-encoded array). Pass the binding to a consuming template inside \
+this workflow and return that instead.";
+
+/// Re-tag `Arg::Ref`s to `fan_out` tasks as [`Arg::FanAgg`] within ONE
+/// scope's node list (task args and hook args alike), returning the
+/// scope's fan task set so callers can also reject a fan task as the
+/// scope's terminal output.
+///
+/// A downstream task consuming a `fan_out` binding gets Argo's
+/// `withParam` aggregate, whose elements are each per-item task's
+/// already-JSON-encoded `return` — a plain `Ref` double-encodes, so
+/// emit must use the array-renormalizing expr instead. Scope-local by
+/// construction: a `Ref` can only name a task in its own node list
+/// (outer bindings enter an `if` arm as captured *inputs*, never refs),
+/// so the caller must run this once per scope — the top-level body AND
+/// every synthesized `if`-arm body (missing the latter was a real bug:
+/// fan-out inside an arm silently emitted the double-encoded form).
+pub(crate) fn retag_fan_aggs(nodes: &mut [Node]) -> std::collections::HashSet<String> {
     let fan_tasks: std::collections::HashSet<String> = nodes
         .iter()
         .filter(|n| n.fan.is_some())
         .map(|n| n.task.clone())
         .collect();
-    for n in &mut nodes {
-        for a in &mut n.args {
+    for n in nodes.iter_mut() {
+        let args = n
+            .args
+            .iter_mut()
+            .chain(n.hooks.iter_mut().flat_map(|h| h.args.iter_mut()));
+        for a in args {
             if let Arg::Ref(t) = a
                 && fan_tasks.contains(t)
             {
@@ -1020,5 +1058,5 @@ pub(crate) fn analyze_workflow(
             }
         }
     }
-    Ok((nodes, output_task, ctx.synth))
+    fan_tasks
 }

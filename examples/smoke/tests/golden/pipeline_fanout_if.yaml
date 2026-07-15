@@ -1,0 +1,571 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-caps-0-0-0
+  labels:
+    cargo.athena/bin: smoke-fanout-if
+    cargo.athena/channel: release
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
+    cargo.athena/toolchain: 0.6.2
+    cargo.athena/version: 0.0.0
+spec:
+  entrypoint: cargo-athena-example-smoke-caps
+  templates:
+  - name: cargo-athena-example-smoke-caps
+    inputs:
+      parameters:
+      - name: s
+      - name: suffix
+      artifacts:
+      - name: athena-dist
+        path: /athena/bin
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: cargo-athena-example-smoke/0-0-0/smoke-fanout-if.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          path: /athena/result
+    container:
+      image: busybox:1.36-musl
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.s}}'
+      - '{{inputs.parameters.suffix}}'
+      env:
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-caps
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-decide-0-0-0
+  labels:
+    cargo.athena/bin: smoke-fanout-if
+    cargo.athena/channel: release
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
+    cargo.athena/toolchain: 0.6.2
+    cargo.athena/version: 0.0.0
+spec:
+  entrypoint: cargo-athena-example-smoke-decide
+  templates:
+  - name: cargo-athena-example-smoke-decide
+    inputs:
+      parameters:
+      - name: seed
+      artifacts:
+      - name: athena-dist
+        path: /athena/bin
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: cargo-athena-example-smoke/0-0-0/smoke-fanout-if.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          path: /athena/result
+    container:
+      image: busybox:1.36-musl
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.seed}}'
+      env:
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-decide
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-make-list-0-0-0
+  labels:
+    cargo.athena/bin: smoke-fanout-if
+    cargo.athena/channel: release
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
+    cargo.athena/toolchain: 0.6.2
+    cargo.athena/version: 0.0.0
+spec:
+  entrypoint: cargo-athena-example-smoke-make-list
+  templates:
+  - name: cargo-athena-example-smoke-make-list
+    inputs:
+      artifacts:
+      - name: athena-dist
+        path: /athena/bin
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: cargo-athena-example-smoke/0-0-0/smoke-fanout-if.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          path: /athena/result
+    container:
+      image: busybox:1.36-musl
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t "$@"
+      - --
+      env:
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-make-list
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-note-0-0-0
+  labels:
+    cargo.athena/bin: smoke-fanout-if
+    cargo.athena/channel: release
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
+    cargo.athena/toolchain: 0.6.2
+    cargo.athena/version: 0.0.0
+spec:
+  entrypoint: cargo-athena-example-smoke-note
+  templates:
+  - name: cargo-athena-example-smoke-note
+    inputs:
+      parameters:
+      - name: msg
+      artifacts:
+      - name: athena-dist
+        path: /athena/bin
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: cargo-athena-example-smoke/0-0-0/smoke-fanout-if.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          path: /athena/result
+    container:
+      image: busybox:1.36-musl
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.msg}}'
+      env:
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-note
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-pipeline-fanout-if-0-0-0
+  labels:
+    cargo.athena/bin: smoke-fanout-if
+    cargo.athena/channel: release
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
+    cargo.athena/toolchain: 0.6.2
+    cargo.athena/version: 0.0.0
+spec:
+  entrypoint: cargo-athena-example-smoke-pipeline-fanout-if
+  templates:
+  - name: cargo-athena-example-smoke-pipeline-fanout-if
+    dag:
+      tasks:
+      - name: cnt
+        arguments:
+          parameters:
+          - name: seed
+            value: '"hello"'
+        templateRef:
+          name: cargo-athena-example-smoke-decide-0-0-0
+          template: cargo-athena-example-smoke-decide
+      - name: if
+        dependencies:
+        - cnt
+        arguments:
+          parameters:
+          - name: cnt
+            value: '{{tasks.cnt.outputs.parameters.return}}'
+        templateRef:
+          name: cargo-athena-example-smoke-pipeline-fanout-if-if0-0-0-0
+          template: cargo-athena-example-smoke-pipeline-fanout-if-if0
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-pipeline-fanout-if-if0-0-0-0
+  labels:
+    cargo.athena/bin: smoke-fanout-if
+    cargo.athena/channel: release
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
+    cargo.athena/toolchain: 0.6.2
+    cargo.athena/version: 0.0.0
+spec:
+  entrypoint: cargo-athena-example-smoke-pipeline-fanout-if-if0
+  templates:
+  - name: cargo-athena-example-smoke-pipeline-fanout-if-if0
+    inputs:
+      parameters:
+      - name: cnt
+    dag:
+      tasks:
+      - name: arm0
+        arguments:
+          parameters:
+          - name: cnt
+            value: '{{inputs.parameters.cnt}}'
+        templateRef:
+          name: cargo-athena-example-smoke-pipeline-fanout-if-if0-arm0-0-0-0
+          template: cargo-athena-example-smoke-pipeline-fanout-if-if0-arm0
+        when: ({{inputs.parameters.cnt}} > 3)
+      - name: arm1
+        arguments:
+          parameters:
+          - name: cnt
+            value: '{{inputs.parameters.cnt}}'
+        templateRef:
+          name: cargo-athena-example-smoke-pipeline-fanout-if-if0-arm1-0-0-0
+          template: cargo-athena-example-smoke-pipeline-fanout-if-if0-arm1
+        when: '!(({{inputs.parameters.cnt}} > 3))'
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-pipeline-fanout-if-if0-arm0-0-0-0
+  labels:
+    cargo.athena/bin: smoke-fanout-if
+    cargo.athena/channel: release
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
+    cargo.athena/toolchain: 0.6.2
+    cargo.athena/version: 0.0.0
+spec:
+  entrypoint: cargo-athena-example-smoke-pipeline-fanout-if-if0-arm0
+  templates:
+  - name: cargo-athena-example-smoke-pipeline-fanout-if-if0-arm0
+    inputs:
+      parameters:
+      - name: cnt
+    dag:
+      tasks:
+      - name: a
+        arguments: {}
+        templateRef:
+          name: cargo-athena-example-smoke-make-list-0-0-0
+          template: cargo-athena-example-smoke-make-list
+      - name: b
+        dependencies:
+        - a
+        arguments:
+          parameters:
+          - name: s
+            value: '{{item}}'
+          - name: suffix
+            value: '"!"'
+        templateRef:
+          name: cargo-athena-example-smoke-caps-0-0-0
+          template: cargo-athena-example-smoke-caps
+        withParam: '{{tasks.a.outputs.parameters.return}}'
+      - name: summarize
+        dependencies:
+        - b
+        arguments:
+          parameters:
+          - name: items
+            value: '{{=let s = tasks[''b''].outputs?.parameters?.[''return''] ?? "[]"; toJSON(map(fromJSON(s == "" || s == "null" ? "[]" : s), { type(#) == "string" ? fromJSON(#) : # }))}}'
+        templateRef:
+          name: cargo-athena-example-smoke-summarize-0-0-0
+          template: cargo-athena-example-smoke-summarize
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-pipeline-fanout-if-if0-arm1-0-0-0
+  labels:
+    cargo.athena/bin: smoke-fanout-if
+    cargo.athena/channel: release
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
+    cargo.athena/toolchain: 0.6.2
+    cargo.athena/version: 0.0.0
+spec:
+  entrypoint: cargo-athena-example-smoke-pipeline-fanout-if-if0-arm1
+  templates:
+  - name: cargo-athena-example-smoke-pipeline-fanout-if-if0-arm1
+    inputs:
+      parameters:
+      - name: cnt
+    dag:
+      tasks:
+      - name: note
+        arguments:
+          parameters:
+          - name: msg
+            value: '"skipped"'
+        templateRef:
+          name: cargo-athena-example-smoke-note-0-0-0
+          template: cargo-athena-example-smoke-note
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-summarize-0-0-0
+  labels:
+    cargo.athena/bin: smoke-fanout-if
+    cargo.athena/channel: release
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
+    cargo.athena/toolchain: 0.6.2
+    cargo.athena/version: 0.0.0
+spec:
+  entrypoint: cargo-athena-example-smoke-summarize
+  templates:
+  - name: cargo-athena-example-smoke-summarize
+    inputs:
+      parameters:
+      - name: items
+      artifacts:
+      - name: athena-dist
+        path: /athena/bin
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: cargo-athena-example-smoke/0-0-0/smoke-fanout-if.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          path: /athena/result
+    container:
+      image: busybox:1.36-musl
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.items}}'
+      env:
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-summarize
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
