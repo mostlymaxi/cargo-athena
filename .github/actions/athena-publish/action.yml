@@ -126,7 +126,7 @@ runs:
         workspaces: ${{ inputs.working-directory }}
 
     - name: Install Zig
-      uses: mlugg/setup-zig@v1
+      uses: mlugg/setup-zig@v2
 
     - name: Install cargo-zigbuild
       uses: taiki-e/install-action@v2

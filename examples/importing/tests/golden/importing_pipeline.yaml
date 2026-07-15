@@ -7,7 +7,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.1
+    cargo.athena/toolchain: 0.6.2
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-importing-consumer-step
@@ -83,7 +83,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.1
+    cargo.athena/toolchain: 0.6.2
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-importing-finalize
@@ -159,7 +159,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.1
+    cargo.athena/toolchain: 0.6.2
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-importing-importing-pipeline
@@ -220,7 +220,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.1
+    cargo.athena/toolchain: 0.6.2
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-importing-local-step
@@ -296,7 +296,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.1
+    cargo.athena/toolchain: 0.6.2
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-importing-module-pipeline
@@ -342,7 +342,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.1
+    cargo.athena/toolchain: 0.6.2
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-branchy
@@ -448,7 +448,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.1
+    cargo.athena/toolchain: 0.6.2
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-combine
@@ -529,7 +529,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.1
+    cargo.athena/toolchain: 0.6.2
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-fetch
@@ -610,7 +610,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.1
+    cargo.athena/toolchain: 0.6.2
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-ingest
@@ -676,7 +676,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.1
+    cargo.athena/toolchain: 0.6.2
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline
@@ -743,7 +743,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.1
+    cargo.athena/toolchain: 0.6.2
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-publish
@@ -850,7 +850,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-importing
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.1
+    cargo.athena/toolchain: 0.6.2
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-transform
