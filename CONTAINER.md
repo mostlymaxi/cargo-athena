@@ -131,7 +131,10 @@ to the type:
   (`"\"{{pod.name}}\""` → `"podname"`)
 
 Workflow bodies call the template without passing inject args: they're
-invisible to the caller. Allowed anywhere in the signature.
+invisible to the caller. They must be TRAILING — every `#[inject]` arg
+after every normal parameter (caller args are wired to declared inputs
+positionally, so the macro rejects a normal parameter following an
+inject arg).
 
 This is **dangerous by design**: athena trusts the expression. Argo's
 admission rejects unknown variables at submit; out-of-scope refs

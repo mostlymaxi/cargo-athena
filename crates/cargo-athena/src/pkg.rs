@@ -25,10 +25,17 @@ pub struct PkgSel {
 
 impl PkgSel {
     pub(crate) fn resolve(&self) -> (Option<String>, Option<String>) {
-        let d = AthenaConfig::load().defaults;
+        let d = AthenaConfig::try_load()
+            .unwrap_or_else(|e| die(&e))
+            .defaults;
         (
             self.package.clone().or(d.package),
             self.bin.clone().or(d.bin),
         )
     }
+}
+
+fn die(m: &str) -> ! {
+    eprintln!("cargo athena: {m}");
+    std::process::exit(2);
 }

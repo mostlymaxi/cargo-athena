@@ -468,12 +468,35 @@ pub fn submit(a: SubmitArgs) {
                 .ok()
                 .filter(|s| !s.is_empty())
         })
-        .or_else(|| AthenaConfig::load().defaults.namespace.clone())
+        .or_else(|| {
+            AthenaConfig::try_load()
+                .unwrap_or_else(|e| die(&e))
+                .defaults
+                .namespace
+                .clone()
+        })
         .unwrap_or_else(|| "default".to_string());
-    let sa = a
-        .service_account
-        .clone()
-        .unwrap_or_else(|| AthenaConfig::load().defaults.service_account.clone());
+    let sa = a.service_account.clone().unwrap_or_else(|| {
+        AthenaConfig::try_load()
+            .unwrap_or_else(|e| die(&e))
+            .defaults
+            .service_account
+            .clone()
+    });
+
+    // Validate every remaining input BEFORE the apply phase below —
+    // dying after templates were applied would leave the cluster
+    // mutated with no Workflow created.
+    let node_selector = a
+        .node_selector
+        .iter()
+        .map(|kv| {
+            let (k, v) = kv
+                .split_once('=')
+                .unwrap_or_else(|| die(&format!("--node-selector expects k=v, got {kv:?}")));
+            (k.to_string(), v.to_string())
+        })
+        .collect();
 
     let cluster = connect(&a);
     eprintln!("cluster: {} (namespace {ns})", cluster.describe());
@@ -489,10 +512,24 @@ pub fn submit(a: SubmitArgs) {
         match cluster.get_template(&ns, name) {
             None => to_apply.push((wt, "create")),
             Some(live) => {
+                // A live spec that fails to parse into our modeled
+                // subset still reads as "drift" (fail-safe: re-apply),
+                // but say so — silently treating a parse error as an
+                // empty spec would mask what actually happened.
                 let live_spec: api::WorkflowSpec =
-                    serde_json::from_value(live.get("spec").cloned().unwrap_or_default())
-                        .unwrap_or_default();
-                if a.update || Some(&live_spec) != wt.spec.as_ref() {
+                    match serde_json::from_value(live.get("spec").cloned().unwrap_or_default()) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!(
+                                "warning: could not parse live spec of {name} ({e}); \
+                                 treating as drifted"
+                            );
+                            Default::default()
+                        }
+                    };
+                if a.update {
+                    to_apply.push((wt, "forced"));
+                } else if Some(&live_spec) != wt.spec.as_ref() {
                     to_apply.push((wt, "drift"));
                 }
             }
@@ -527,16 +564,6 @@ pub fn submit(a: SubmitArgs) {
             name: k.clone(),
             value: Some(serde_json::to_string(v).expect("JSON-encodable")),
             ..Default::default()
-        })
-        .collect();
-    let node_selector = a
-        .node_selector
-        .iter()
-        .map(|kv| {
-            let (k, v) = kv
-                .split_once('=')
-                .unwrap_or_else(|| die(&format!("--node-selector expects k=v, got {kv:?}")));
-            (k.to_string(), v.to_string())
         })
         .collect();
     // The Workflow must reference the VERSIONED root WT resource. The
@@ -654,7 +681,13 @@ pub fn prune(a: PruneArgs) {
                 .ok()
                 .filter(|s| !s.is_empty())
         })
-        .or_else(|| AthenaConfig::load().defaults.namespace.clone())
+        .or_else(|| {
+            AthenaConfig::try_load()
+                .unwrap_or_else(|e| die(&e))
+                .defaults
+                .namespace
+                .clone()
+        })
         .unwrap_or_else(|| "default".to_string());
 
     let cluster = connect_to(a.argo_server.clone(), a.insecure);
@@ -676,7 +709,7 @@ pub fn prune(a: PruneArgs) {
     // The S3 binary for this tag: repo coords from athena.toml, key from
     // (pkg, tag, bin) — the same `{pkg}/<tag>/{bin}.tar.gz` the binary
     // bakes and `publish` uploads, via the shared `binary_key`.
-    let cfg = AthenaConfig::load();
+    let cfg = AthenaConfig::try_load().unwrap_or_else(|e| die(&e));
     let s3 = S3Ref::from_repo(
         &cfg.artifact_repository.s3,
         api::munge::binary_key(&pkg, &tag, &bin),

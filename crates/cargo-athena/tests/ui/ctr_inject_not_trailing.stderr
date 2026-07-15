@@ -1,0 +1,5 @@
+error: normal parameters may not follow an `#[inject(..)]` arg — move every `#[inject]` arg to the end of the signature
+ --> tests/ui/ctr_inject_not_trailing.rs:6:45
+  |
+6 | fn c(#[inject("{{retries}}")] attempt: i64, payload: String) -> String {
+  |                                             ^^^^^^^^^^^^^^^

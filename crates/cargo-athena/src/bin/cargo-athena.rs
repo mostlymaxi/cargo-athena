@@ -309,13 +309,15 @@ fn emit(src: &binsrc::BinarySource, out: Option<&str>, with_workflow: bool) {
     // stdout = the YAML we want to capture; stderr = cargo's
     // "Compiling..." progress, streams to the user.
     cmd.stdout(Stdio::piped()).stderr(Stdio::inherit());
-    let o = cmd.output().expect("failed to run user binary");
+    let o = cmd
+        .output()
+        .unwrap_or_else(|e| die(&format!("failed to run the workflow binary: {e}")));
     if !o.status.success() {
         exit(o.status.code().unwrap_or(1));
     }
     match out {
         Some(path) => {
-            std::fs::write(path, &o.stdout).expect("write --out file");
+            std::fs::write(path, &o.stdout).unwrap_or_else(|e| die(&format!("write {path}: {e}")));
             eprintln!("wrote {path}");
         }
         None => std::io::Write::write_all(&mut std::io::stdout(), &o.stdout).expect("write stdout"),
@@ -329,21 +331,33 @@ fn package_meta(pkg: Option<&str>) -> (String, String, String) {
     let out = Command::new("cargo")
         .args(["metadata", "--format-version", "1", "--no-deps"])
         .output()
-        .expect("cargo metadata failed");
-    let meta: serde_json::Value =
-        serde_json::from_slice(&out.stdout).expect("parse cargo metadata");
+        .unwrap_or_else(|e| die(&format!("failed to run `cargo metadata`: {e}")));
+    if !out.status.success() {
+        // cargo's own stderr says what's wrong (most commonly: not
+        // inside a cargo package) — pass it through instead of
+        // panicking on the empty stdout that follows.
+        eprint!("{}", String::from_utf8_lossy(&out.stderr));
+        die("`cargo metadata` failed — run from inside the workflow crate");
+    }
+    let meta: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|e| die(&format!("parse `cargo metadata` output: {e}")));
     let packages = meta["packages"].as_array().cloned().unwrap_or_default();
     let p = match pkg {
         Some(name) => packages
             .iter()
             .find(|p| p["name"] == serde_json::json!(name))
-            .unwrap_or_else(|| panic!("package {name:?} not found")),
+            .unwrap_or_else(|| die(&format!("package {name:?} not found in this workspace"))),
         None if packages.len() == 1 => &packages[0],
-        None => panic!("multiple packages; pass --package"),
+        None => die("multiple packages in this workspace; pass --package <name>"),
     };
     let name = p["name"].as_str().unwrap().to_string();
     let version = p["version"].as_str().unwrap().to_string();
     (name.clone(), version, name)
+}
+
+fn die(m: &str) -> ! {
+    eprintln!("cargo athena: {m}");
+    exit(2);
 }
 
 /// `cmd args…` exits 0 (tool is present + runnable).
@@ -439,7 +453,7 @@ fn build_tarball(
     gate: GateArgs,
     print: bool,
 ) -> Option<(String, S3Ref, String)> {
-    let cfg = AthenaConfig::load();
+    let cfg = AthenaConfig::try_load().unwrap_or_else(|e| die(&e));
     let (krate, version, default_bin) = package_meta(package);
     let bin = bin.map(str::to_string).unwrap_or(default_bin);
 
@@ -554,7 +568,7 @@ fn publish(
     print: bool,
 ) {
     if let Some(path) = tarball_in {
-        let cfg = AthenaConfig::load();
+        let cfg = AthenaConfig::try_load().unwrap_or_else(|e| die(&e));
         let (krate, version, default_bin) = package_meta(package);
         let bin = bin.map(str::to_string).unwrap_or(default_bin);
         // A prebuilt tarball already has its tag baked in; resolve the
