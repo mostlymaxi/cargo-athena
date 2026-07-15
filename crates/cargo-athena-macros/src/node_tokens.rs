@@ -100,21 +100,26 @@ pub(crate) fn arg_value(arg: &Arg, steps: bool) -> (String, Option<String>) {
         //
         // Empty-fan-out guard. A `withParam` over `[]` is SKIPPED by Argo
         // (dag.go: `NodeTypeSkipped`, "empty params"), NOT aggregated, so
-        // the `[…]` list is never built. Argo then fills this param with
-        // `""` for the skipped node (v4.0.5 skipped-scope population) — or
-        // leaves it null/absent on older versions. `fromJSON("")` /
-        // `fromJSON(nil)` both hard-error ("unexpected end of JSON input"),
-        // failing the consuming task rather than yielding an empty list.
-        // So normalize nil/`""`/`"null"` to `"[]"` before the re-norm. A
-        // real non-empty aggregate is always a JSON array string, so the
-        // guard only ever fires on the empty/skipped case.
+        // the `[…]` list is never built. What the skipped node leaves in
+        // the consumer's scope differs by version:
+        //   - v3.7 / v4.0.5: the declared output param is filled with `""`
+        //     (skipped-scope population), so the source resolves to `""`.
+        //   - v3.6: `buildLocalScope` adds only `id`/`status`/… for the
+        //     skipped node — NO `outputs` subtree at all. A plain member
+        //     chain then fetches `.parameters` off nil, which ERRORS, and
+        //     `template.Replace(allowUnresolved=true)` hands the consumer
+        //     the raw unresolved `{{=…}}` tag as its argument.
+        // So the lookup itself must be nil-safe (`?.` + `??`, expr-lang
+        // v1.17 — verified against v3.6.19's vendored version) before the
+        // `""`/`"null"` normalization. A real non-empty aggregate is always
+        // a JSON array string, so the guard only fires on empty/skipped.
         Arg::FanAgg(t) => {
-            let src = format!("{task_scope}['{t}'].outputs.parameters['return']");
+            let src = format!("{task_scope}['{t}'].outputs?.parameters?.['return']");
             (
                 format!(
-                    "{{{{=toJSON(map(fromJSON(\
-                     ({src} == nil || {src} == \"\" || {src} == \"null\") \
-                     ? \"[]\" : {src}), \
+                    "{{{{=let s = {src} ?? \"[]\"; \
+                     toJSON(map(fromJSON(\
+                     s == \"\" || s == \"null\" ? \"[]\" : s), \
                      {{ type(#) == \"string\" ? fromJSON(#) : # }}))}}}}"
                 ),
                 dep(t),
@@ -472,16 +477,16 @@ mod tests {
     #[test]
     fn fanagg_emits_kind_aware_renorm() {
         let (v, d) = arg_value(&Arg::FanAgg("caps".to_string()), false);
-        // Source is guarded to `"[]"` when nil/`""`/`"null"` so an EMPTY
-        // fan-out (Argo skips the withParam node, fills the param with `""`)
-        // aggregates to `[]` instead of hard-erroring on `fromJSON("")`.
+        // The lookup is nil-safe (`?.` + `?? "[]"`) because a skipped
+        // empty fan-out has NO `outputs` subtree in scope on Argo v3.6
+        // (a plain member chain errors and the tag is passed through
+        // unresolved); the `""`/`"null"` normalization covers v3.7/v4,
+        // which fill the skipped param with `""`.
         assert_eq!(
             v,
-            "{{=toJSON(map(fromJSON(\
-             (tasks['caps'].outputs.parameters['return'] == nil \
-             || tasks['caps'].outputs.parameters['return'] == \"\" \
-             || tasks['caps'].outputs.parameters['return'] == \"null\") \
-             ? \"[]\" : tasks['caps'].outputs.parameters['return']), \
+            "{{=let s = tasks['caps'].outputs?.parameters?.['return'] ?? \"[]\"; \
+             toJSON(map(fromJSON(\
+             s == \"\" || s == \"null\" ? \"[]\" : s), \
              { type(#) == \"string\" ? fromJSON(#) : # }))}}"
         );
         assert_eq!(d, Some("caps".to_string()));
