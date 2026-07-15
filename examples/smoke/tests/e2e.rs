@@ -12,6 +12,7 @@ const BIN_HOOKS: &str = env!("CARGO_BIN_EXE_smoke-hooks");
 const BIN_ONEXIT: &str = env!("CARGO_BIN_EXE_smoke-onexit");
 const BIN_FIELDS: &str = env!("CARGO_BIN_EXE_smoke-fields");
 const BIN_FANOUT: &str = env!("CARGO_BIN_EXE_smoke-fanout");
+const BIN_FANOUT_IF: &str = env!("CARGO_BIN_EXE_smoke-fanout-if");
 const BIN_IF: &str = env!("CARGO_BIN_EXE_smoke-if");
 const BIN_NESTED: &str = env!("CARGO_BIN_EXE_smoke-nested");
 const BIN_INJECT: &str = env!("CARGO_BIN_EXE_smoke-inject");
@@ -170,6 +171,15 @@ fn emit_pipeline_fields() {
 #[test]
 fn emit_pipeline_fanout() {
     assert_golden("pipeline_fanout.yaml", &run_bin(BIN_FANOUT, &[]));
+}
+
+/// `.fan_out` INSIDE an `if` arm: pins that the arm sub-workflow's
+/// aggregate consumer carries the same kind-aware `FanAgg` re-norm expr
+/// as a top-level consumer (the re-tag pass used to skip arm scopes,
+/// silently emitting the plain double-encoding parameter ref).
+#[test]
+fn emit_pipeline_fanout_if() {
+    assert_golden("pipeline_fanout_if.yaml", &run_bin(BIN_FANOUT_IF, &[]));
 }
 
 /// `if`/`else`/`else if` lowering: synthesized `when`-gated wrapper

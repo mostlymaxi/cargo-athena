@@ -23,8 +23,8 @@ use quote::{format_ident, quote};
 use syn::{Expr, Path, Stmt};
 
 use crate::analyze::{
-    Arg, JsonSrc, Node, NodeOpts, analyze_stmts, call_parts, callee_paths, expr_to_arg,
-    local_binding, path_leaf, push_call, uniq_task,
+    Arg, FAN_RETURN_UNSUPPORTED, JsonSrc, Node, NodeOpts, analyze_stmts, call_parts, callee_paths,
+    expr_to_arg, local_binding, path_leaf, push_call, retag_fan_aggs, uniq_task,
 };
 use crate::node_tokens::node_tokens;
 use crate::utils::{str_slice, unwrap_expr, yaml_ambiguous};
@@ -514,7 +514,7 @@ pub(crate) fn synth_if(
     for (j, (_, body)) in arms.iter().enumerate() {
         let arm_ident = format_ident!("__athena_{}_if{}_arm{}", ctx.parent_rust, k, j);
         let arm_argo = format!("{wrap_argo}-arm{j}");
-        let (anodes, aout) = analyze_stmts(
+        let (mut anodes, aout) = analyze_stmts(
             &body.stmts,
             &cap_inputs,
             value,
@@ -522,6 +522,18 @@ pub(crate) fn synth_if(
             &format!("{}_if{}_arm{}", ctx.parent_rust, k, j),
             ctx,
         )?;
+        // Each arm body is its own scope: re-tag its fan-aggregate
+        // consumers (exactly like the top-level pass in
+        // `analyze_workflow`) and reject a fan binding as the arm's
+        // value — the arm workflow's `return` bubble would hand the
+        // parent the raw double-encoded aggregate.
+        let arm_fan_tasks = retag_fan_aggs(&mut anodes);
+        if let Some(t) = &aout
+            && value
+            && arm_fan_tasks.contains(t)
+        {
+            return Err(syn::Error::new_spanned(body, FAN_RETURN_UNSUPPORTED));
+        }
         let acallees = callee_paths(&anodes, &[]);
         ctx.synth.push(SynthWf {
             ident: arm_ident.clone(),

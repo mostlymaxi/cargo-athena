@@ -227,6 +227,24 @@ pub fn pipeline_fanout() {
     summarize(b);
 }
 
+/// `fan_out` INSIDE an `if` arm: the arm body is its own synthesized
+/// sub-workflow (a separate analysis scope), so the aggregate consumer
+/// (`summarize(b)`) must get the same kind-aware `FanAgg` re-norm as a
+/// top-level consumer. Regression guard: the re-tag pass used to run
+/// only over the top-level body, so an in-arm consumer silently got the
+/// plain (double-encoding) ref.
+#[workflow]
+pub fn pipeline_fanout_if() {
+    let cnt = decide("hello".to_string());
+    if cnt > 3 {
+        let a = make_list();
+        let b = a.fan_out(|x| caps(x, "!".to_string()));
+        summarize(b);
+    } else {
+        note("skipped".to_string());
+    }
+}
+
 // --- conditionals (`if`/`else`/`else if` -> Argo `when` wrappers) -----------
 
 #[container]

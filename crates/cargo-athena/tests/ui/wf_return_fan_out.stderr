@@ -1,0 +1,5 @@
+error: a `fan_out` binding cannot be returned as the workflow's value (the raw Argo aggregate's elements are individually JSON-encoded, so the parent would read a double-encoded array). Pass the binding to a consuming template inside this workflow and return that instead.
+  --> tests/ui/wf_return_fan_out.rs:16:9
+   |
+16 | fn wf() -> Vec<String> {
+   |         ^^^^^^^^^^^^^^
