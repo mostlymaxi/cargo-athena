@@ -363,7 +363,17 @@ pub fn emulate(a: EmulateArgs) {
         .status()
         .unwrap_or_else(|e| die(&format!("failed to start {runtime}: {e}")));
 
-    // 6. Output artifact ports → S3.
+    // 6. Output artifact ports → S3 — only from a SUCCESSFUL run. The
+    // S3 keys are the same ones deployed workflows read (`art.s3.key`),
+    // so uploading a crashed container's partial outputs would clobber
+    // live data. Argo itself only ships outputs of succeeded steps.
+    if !status.success() {
+        if !a.skip_artifacts && !meta.output_artifacts.is_empty() {
+            eprintln!("(container failed — skipping output artifact upload)");
+        }
+        let _ = std::fs::remove_dir_all(&work);
+        exit(status.code().unwrap_or(1));
+    }
     if !a.skip_artifacts && !meta.output_artifacts.is_empty() {
         let mut count = 0;
         for art in &meta.output_artifacts {
@@ -689,10 +699,11 @@ fn json_kind(v: &serde_json::Value) -> &'static str {
 
 fn preview(v: &serde_json::Value) -> String {
     let s = v.to_string();
-    if s.len() > 40 {
-        format!("{}…", &s[..40])
-    } else {
-        s
+    // Truncate on a char boundary — a byte slice would panic mid-error-
+    // report when a multi-byte char straddles the cut.
+    match s.char_indices().nth(40) {
+        Some((i, _)) => format!("{}…", &s[..i]),
+        None => s,
     }
 }
 
