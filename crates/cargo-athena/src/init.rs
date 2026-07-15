@@ -101,7 +101,7 @@ pub fn init(args: InitArgs) {
     eprintln!("Next:");
     eprintln!("  {here}cargo athena emit            # inspect the YAML");
     eprintln!("  {here}cargo athena publish         # cross-compile + upload the binary");
-    eprintln!("  {here}cargo athena submit {name}-pipeline -y");
+    eprintln!("  {here}cargo athena submit -y      # run it (source build, root template)");
     eprintln!();
     eprintln!("Need the publish toolchain? Run `cargo athena doctor` to check.");
 }

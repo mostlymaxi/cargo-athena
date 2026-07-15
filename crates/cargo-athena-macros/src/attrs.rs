@@ -591,8 +591,10 @@ pub(crate) fn retry_strategy_tokens(
             lit: syn::Lit::Int(i),
             ..
         })) => {
-            let n: u32 = i.base10_parse()?;
-            let n = n as i32;
+            // Parse straight to the wire type (Argo's limit is an i32):
+            // an out-of-range literal is a spanned error, not a silent
+            // wrap to a negative limit.
+            let n: i32 = i.base10_parse()?;
             quote! { ::core::option::Option::Some(#n) }
         }
         Some(Expr::Path(p)) if p.path.is_ident("unlimited") => {

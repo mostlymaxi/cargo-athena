@@ -1,0 +1,5 @@
+error: `return` must be the last statement of a #[workflow] body — later statements would still run as DAG tasks in Argo (nothing is unreachable in a compiled workflow)
+  --> tests/ui/wf_return_mid_body.rs:12:5
+   |
+12 |     return step("a".to_string());
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^

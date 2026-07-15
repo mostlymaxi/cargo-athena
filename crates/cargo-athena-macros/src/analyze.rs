@@ -149,10 +149,21 @@ pub(crate) fn expr_to_arg(
             syn::Lit::Int(i) => Arg::Lit(i.base10_digits().to_string()),
             syn::Lit::Float(f) => Arg::Lit(f.base10_digits().to_string()),
             syn::Lit::Bool(b) => Arg::Lit(b.value.to_string()),
-            other => Arg::Lit(
-                serde_json::to_string(&quote!(#other).to_string())
-                    .expect("token text is JSON-serializable"),
+            // A char param is JSON-encoded as its one-char string (the
+            // run side `from_str::<char>`s it back). The old catch-all
+            // stringified the *token* — `step('a')` shipped `"'a'"`,
+            // quotes included, and failed deserialization in-pod.
+            syn::Lit::Char(c) => Arg::Lit(
+                serde_json::to_string(&c.value().to_string()).expect("char is JSON-serializable"),
             ),
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    e,
+                    "unsupported literal kind for a template argument \
+                     (byte / byte-string / C-string literals have no JSON \
+                     parameter encoding)",
+                ));
+            }
         }),
         // Owned-value conversions, emitted identically to the receiver:
         //  * `.clone()`/`.to_owned()` are type-preserving → allowed on
@@ -849,6 +860,19 @@ pub(crate) fn analyze_stmts(
                         output_task = Some(task);
                     }
                 } else if let Expr::Return(r) = unwrap_expr(expr) {
+                    // A workflow lowers to a DAG, not control flow:
+                    // statements after a `return` would still be lowered
+                    // as tasks that RUN in Argo, and a later `return`
+                    // would win (the opposite of Rust). Only the final
+                    // statement may be a `return`.
+                    if !is_last {
+                        return Err(syn::Error::new_spanned(
+                            expr,
+                            "`return` must be the last statement of a #[workflow] \
+                             body — later statements would still run as DAG tasks \
+                             in Argo (nothing is unreachable in a compiled workflow)",
+                        ));
+                    }
                     let target = r.expr.as_deref().ok_or_else(|| {
                         syn::Error::new_spanned(
                             expr,
