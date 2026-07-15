@@ -1,0 +1,47 @@
+name: publish-action
+
+# Self-test the consumer-facing `athena-publish` composite action end-to-end
+# (Zig install + cargo-zigbuild cross-compile). Build-only: no S3, no creds.
+# Nothing else in CI exercises this action, so it can silently rot — that is
+# how the `mlugg/setup-zig` v1 -> v2 breakage went unnoticed. Runs when the
+# action or this workflow changes; trigger manually anytime.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/actions/athena-publish/**
+      - .github/workflows/publish-action.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-action-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    env:
+      # Gate-free tag on CI's detached HEAD / PR branch (mirrors e2e-test.sh);
+      # inherited by the composite action's build step.
+      ATHENA_VERSION_TAG: selftest
+    steps:
+      - uses: actions/checkout@v4
+      # Pin the toolchain rather than depend on the runner image's default.
+      - uses: dtolnay/rust-toolchain@stable
+      # Put the *workspace* cargo-athena on PATH so the action detects it and
+      # skips installing the pinned version from crates.io (which is not yet
+      # published on a release-bump PR). --debug: this is a smoke test, no
+      # need for an optimized build.
+      - name: Install workspace cargo-athena
+        run: cargo install --path crates/cargo-athena --debug --locked
+      - name: Build via athena-publish action
+        uses: ./.github/actions/athena-publish
+        with:
+          command: build                     # package only; no upload, no creds
+          package: cargo-athena-example-e2e
+          bin: e2e
+          config: scripts/athena.toml
+          doctor: "false"                    # doctor probes the (unreachable) in-cluster S3 endpoint
