@@ -184,8 +184,11 @@ pub(crate) fn decl_public_name(mac: &syn::Macro) -> Option<&'static str> {
         .map(|(public, ..)| *public)
 }
 
-/// First string-literal argument of a decl macro (`host!("p")`,
-/// `save_artifact!("n", expr)` → `"n"`). Literal-only by contract.
+/// First string-literal argument of a decl macro, ignoring the rest
+/// (`save_artifact!("n", expr)` → `"n"`). For the two-arg `save_*`
+/// forms the BodyScan only needs the name — arity is enforced by
+/// [`save_args`] on the rewrite side (a bad shape leaves the macro
+/// unrewritten so the public `compile_error!` gate fires).
 pub(crate) fn first_str_lit(mac: &syn::Macro) -> Option<String> {
     let args = mac
         .parse_body_with(syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated)
@@ -199,9 +202,32 @@ pub(crate) fn first_str_lit(mac: &syn::Macro) -> Option<String> {
     }
 }
 
-/// `secret!`/`secret_opt!` take two string literals
+/// The SOLE string-literal argument of a single-arg decl macro
+/// (`host!("p")`, `load_artifact!("n")`). Exact arity: surplus args
+/// make this return `None`, so the invocation is left unrewritten
+/// (and unscanned) and the public form's `compile_error!` gate fires
+/// with its usage message instead of the extras being silently
+/// dropped.
+pub(crate) fn only_str_lit(mac: &syn::Macro) -> Option<String> {
+    let args = mac
+        .parse_body_with(syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated)
+        .ok()?;
+    if args.len() != 1 {
+        return None;
+    }
+    match args.first()? {
+        Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(s),
+            ..
+        }) => Some(s.value()),
+        _ => None,
+    }
+}
+
+/// `secret!`/`secret_opt!` take exactly two string literals
 /// (`(secret_name, key)`). Returns the pair when the call is
-/// well-formed; the public-form gate already errors on bad shape.
+/// well-formed; anything else (including surplus args) returns `None`
+/// so the public-form `compile_error!` gate fires.
 pub(crate) fn two_str_lits(mac: &syn::Macro) -> Option<(String, String)> {
     let args = mac
         .parse_body_with(syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated)
@@ -214,7 +240,11 @@ pub(crate) fn two_str_lits(mac: &syn::Macro) -> Option<(String, String)> {
         }) => Some(s.value()),
         _ => None,
     };
-    Some((lit(it.next()?)?, lit(it.next()?)?))
+    let pair = (lit(it.next()?)?, lit(it.next()?)?);
+    if it.next().is_some() {
+        return None;
+    }
+    Some(pair)
 }
 
 /// Static collector: every decl-macro literal (across all branches) + every
@@ -241,12 +271,12 @@ impl<'ast> Visit<'ast> for BodyScan {
         if let Some((kind, _)) = decl_kind(mac) {
             match kind {
                 DeclKind::Host => {
-                    if let Some(n) = first_str_lit(mac) {
+                    if let Some(n) = only_str_lit(mac) {
                         self.host_paths.push(n);
                     }
                 }
                 DeclKind::InArtifact => {
-                    if let Some(n) = first_str_lit(mac) {
+                    if let Some(n) = only_str_lit(mac) {
                         self.in_artifacts.push(n);
                     }
                 }
@@ -491,21 +521,21 @@ impl VisitMut for DeclRewrite {
 fn rewrite_decl_call(public: &str, mac: &syn::Macro) -> Option<Expr> {
     match public {
         "host" => {
-            let lit = first_str_lit(mac)?;
+            let lit = only_str_lit(mac)?;
             let mount = host_mount_path(&lit);
             Some(syn::parse_quote! {
                 ::std::path::Path::new(#mount)
             })
         }
         "load_artifact" => {
-            let name = first_str_lit(mac)?;
+            let name = only_str_lit(mac)?;
             let path = in_artifact_path(&name);
             Some(syn::parse_quote! {
                 ::cargo_athena::rt::load_artifact(#path, #name)
             })
         }
         "load_artifact_str" => {
-            let name = first_str_lit(mac)?;
+            let name = only_str_lit(mac)?;
             let path = in_artifact_path(&name);
             Some(syn::parse_quote! {
                 ::cargo_athena::rt::load_artifact_str(#path, #name)

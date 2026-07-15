@@ -623,7 +623,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
 
             fn collect(__out: &mut ::cargo_athena::Collector) {
-                if !__out.enter(<Self as ::cargo_athena::Template>::ARGO_NAME) {
+                if !__out.enter::<Self>() {
                     return;
                 }
                 __out.add::<Self>();

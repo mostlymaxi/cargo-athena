@@ -33,6 +33,57 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     if let Err(e) = check_yaml_safe_names(&func, &cfg.name) {
         return e;
     }
+    // Validate `#[inject(...)]` per-arg attrs up front. Without this, a
+    // malformed body (anything but a single string literal) would be
+    // silently ignored — the arg quietly demotes to a normal parameter
+    // and the only rustc signal is a misleading "cannot find attribute
+    // `inject`" from the attr surviving into the caller-visible shim.
+    // Likewise `#[inject]` on an `Artifact<..>` arg used to be silently
+    // dropped, leaving an input artifact with no source.
+    let mut seen_inject = false;
+    for arg in &func.sig.inputs {
+        let syn::FnArg::Typed(pt) = arg else { continue };
+        let is_inject = pt.attrs.iter().any(|a| a.path().is_ident("inject"));
+        // `#[inject]` args must be TRAILING: `INPUTS` carries every arg
+        // in signature order while the caller-visible signature drops
+        // inject args, and workflow wiring binds the caller's i-th
+        // argument to `INPUTS[i]` positionally — a normal parameter
+        // after an inject arg would silently receive the wrong name
+        // (compiles clean, breaks at submit).
+        if seen_inject && !is_inject {
+            return syn::Error::new_spanned(
+                pt,
+                "normal parameters may not follow an `#[inject(..)]` arg — \
+                 move every `#[inject]` arg to the end of the signature",
+            )
+            .to_compile_error()
+            .into();
+        }
+        seen_inject |= is_inject;
+        for attr in &pt.attrs {
+            if !attr.path().is_ident("inject") {
+                continue;
+            }
+            if attr.parse_args::<syn::LitStr>().is_err() {
+                return syn::Error::new_spanned(
+                    attr,
+                    "`#[inject(..)]` takes a single string literal — the raw Argo \
+                     expression to splice, e.g. `#[inject(\"{{workflow.name}}\")]`",
+                )
+                .to_compile_error()
+                .into();
+            }
+            if is_artifact_ty(&pt.ty) {
+                return syn::Error::new_spanned(
+                    attr,
+                    "`#[inject]` is not supported on `Artifact<..>` args: artifact \
+                     inputs are wired from upstream tasks, not from Argo expressions",
+                )
+                .to_compile_error()
+                .into();
+            }
+        }
+    }
 
     let ident = func.sig.ident.clone();
     let rust_name = ident.to_string();
@@ -936,7 +987,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
 
             fn collect(__out: &mut ::cargo_athena::Collector) {
-                if !__out.enter(<Self as ::cargo_athena::Template>::ARGO_NAME) {
+                if !__out.enter::<Self>() {
                     return;
                 }
                 __out.add::<Self>();

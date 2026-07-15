@@ -30,10 +30,17 @@ pub fn doctor(args: DoctorArgs) {
 
     // ---- athena.toml ------------------------------------------------------
     let cfg = match try_load_config() {
-        Some((path, cfg)) => {
+        Some((path, Ok(cfg))) => {
             check_pass("athena.toml", &format!("loaded {path}"));
             passed += 1;
             Some(cfg)
+        }
+        // The file exists but doesn't read/parse — the exact thing
+        // doctor is for, so it must be a red check, not a panic.
+        Some((_, Err(e))) => {
+            check_fail("athena.toml", &e, None);
+            failed += 1;
+            None
         }
         None => {
             check_fail(
@@ -80,7 +87,6 @@ pub fn doctor(args: DoctorArgs) {
     if let Some(cfg) = cfg.as_ref() {
         match rustup_installed_targets() {
             Some(installed) => {
-                let mut missing: Vec<&str> = Vec::new();
                 for t in &cfg.bootstrap.targets {
                     if installed.iter().any(|i| i == t) {
                         check_pass("rustup target", t);
@@ -92,14 +98,12 @@ pub fn doctor(args: DoctorArgs) {
                             Some(&format!("rustup target add {t}")),
                         );
                         failed += 1;
-                        missing.push(t.as_str());
                     }
                 }
                 if cfg.bootstrap.targets.is_empty() {
                     check_warn("rustup target", "athena.toml [bootstrap].targets is empty");
                     warned += 1;
                 }
-                let _ = missing;
             }
             None => {
                 check_warn(
@@ -205,19 +209,18 @@ fn check_warn(name: &str, msg: &str) {
 
 // ---- implementations ------------------------------------------------------
 
-fn try_load_config() -> Option<(String, AthenaConfig)> {
+fn try_load_config() -> Option<(String, Result<AthenaConfig, String>)> {
     // `main()` has already resolved the effective config (`--config`,
     // `$ATHENA_CONFIG`, the repo-local `./athena.toml`, or the global
     // `~/.config` fallback) and exported `ATHENA_CONFIG`. Report whatever
     // it landed on; the path itself shows which source won (e.g. a
-    // `~/.config/...` path means the global fallback). `is_file` guards
-    // against `AthenaConfig::load`'s panic on a missing file.
+    // `~/.config/...` path means the global fallback). `None` = no file
+    // at all; `Some((path, Err(..)))` = present but unreadable/malformed.
     let path = std::env::var_os("ATHENA_CONFIG").map(std::path::PathBuf::from)?;
     if !path.is_file() {
         return None;
     }
-    let cfg = AthenaConfig::load();
-    Some((path.display().to_string(), cfg))
+    Some((path.display().to_string(), AthenaConfig::try_load()))
 }
 
 fn exec_version(cmd: &str, args: &[&str]) -> Option<String> {

@@ -777,17 +777,22 @@ impl AthenaConfig {
     /// exports `ATHENA_CONFIG` before this runs, so the same file loads
     /// here whether invoked in-process or in the spawned user binary.
     pub fn load() -> Self {
+        Self::try_load().unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// Fallible variant of [`Self::load`] for CLI callers: a missing or
+    /// malformed `athena.toml` is a routine user mistake there, so it
+    /// deserves a clean error message, not a panic with a backtrace
+    /// hint. The panicking `load` stays for the in-binary emit path,
+    /// where fail-loud is the documented contract.
+    pub fn try_load() -> Result<Self, String> {
         let env_config = std::env::var_os("ATHENA_CONFIG").map(std::path::PathBuf::from);
         let cwd = std::env::current_dir().unwrap_or_default();
         let path = Self::resolve_config_path(None, env_config.as_deref(), &cwd, None)
-            .expect(CONFIG_NOT_FOUND);
-        Self::load_path(&path)
-    }
-
-    fn load_path(path: &std::path::Path) -> Self {
-        let text = std::fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        toml::from_str(&text).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()))
+            .ok_or_else(|| CONFIG_NOT_FOUND.to_string())?;
+        let text =
+            std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        toml::from_str(&text).map_err(|e| format!("parse {}: {e}", path.display()))
     }
 
     fn find_upwards_from(start: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -1284,6 +1289,30 @@ pub struct FragmentReg {
 }
 inventory::collect!(FragmentReg);
 
+/// Field-wise equality for duplicate-registration detection in
+/// [`BuildCtx::collect`] — an identical re-registration (same crate
+/// linked twice) is harmless, a same-name/different-content pair is a
+/// silent-collision bug.
+fn same_fragment(a: &FragmentReg, b: &FragmentReg) -> bool {
+    a.host_paths == b.host_paths
+        && a.in_artifacts == b.in_artifacts
+        && a.out_artifacts == b.out_artifacts
+        && a.secrets == b.secrets
+        && a.pvc_argo_names == b.pvc_argo_names
+        && a.callees == b.callees
+}
+
+/// See [`same_fragment`].
+fn same_pvc(a: &PvcReg, b: &PvcReg) -> bool {
+    a.mount_path == b.mount_path
+        && a.lifecycle == b.lifecycle
+        && a.size == b.size
+        && a.access_modes == b.access_modes
+        && a.storage_class_name == b.storage_class_name
+        && a.claim_name == b.claim_name
+        && a.read_only == b.read_only
+}
+
 /// Fragment registry snapshot, passed to container `build`s.
 pub struct BuildCtx {
     fragments: HashMap<&'static str, &'static FragmentReg>,
@@ -1344,13 +1373,39 @@ impl BuildCtx {
         commit: Option<&str>,
         dirty: Option<&str>,
     ) -> Self {
-        let mut fragments = HashMap::new();
+        // Both registries are keyed by a bare name (fragments by fn
+        // ident, PVCs by argo name), so two same-named declarations in
+        // different modules/crates would silently last-win — one
+        // container would inherit the *other* declaration's mounts /
+        // secrets / spec. Identical re-registrations (the same crate
+        // linked in twice) are harmless and deduped; a same-name entry
+        // with *different* contents is always a bug, so fail loud here
+        // at emit rather than far away in-pod.
+        let mut fragments: HashMap<&'static str, &'static FragmentReg> = HashMap::new();
         for f in inventory::iter::<FragmentReg> {
-            fragments.insert(f.rust_name, f);
+            if let Some(prev) = fragments.insert(f.rust_name, f)
+                && !same_fragment(prev, f)
+            {
+                panic!(
+                    "two different `#[fragment]` fns named `{}` are linked into this \
+                     binary. Fragment propagation is keyed by the bare fn name, so \
+                     they would silently collide — rename one of them.",
+                    f.rust_name,
+                );
+            }
         }
-        let mut pvcs = HashMap::new();
+        let mut pvcs: HashMap<&'static str, &'static PvcReg> = HashMap::new();
         for p in inventory::iter::<PvcReg> {
-            pvcs.insert(p.argo_name, p);
+            if let Some(prev) = pvcs.insert(p.argo_name, p)
+                && !same_pvc(prev, p)
+            {
+                panic!(
+                    "two different PVC types share the Argo name {:?}. Rename one \
+                     type or give one an explicit `#[ephemeral_pvc(name = \"…\")]` / \
+                     `#[external_pvc(name = \"…\")]`.",
+                    p.argo_name,
+                );
+            }
         }
         // Seal the version tag (baked value munged, else kebab(semver))
         // and build the S3 key from it. Both rules live in `api::munge`,
@@ -1553,7 +1608,16 @@ impl BuildCtx {
         let mut vols = Vec::new();
         let mut mounts = Vec::new();
         for n in names {
-            let Some(reg) = self.pvc(n) else { continue };
+            // The macros only ever pass names backed by an actual `Pvc`
+            // impl, so an unknown name is a wormhole link bug — emitting
+            // a template *missing a mount* would fail far away in-pod
+            // (the `pvc!` path wouldn't exist). Fail loud at emit.
+            let Some(reg) = self.pvc(n) else {
+                panic!(
+                    "PVC {n:?} is not registered in this binary — \
+                     `pvc!`/fragment wormhole link bug (please report it)"
+                )
+            };
             let vol_name = pvc_volume_name(reg.argo_name);
             let claim = match reg.lifecycle {
                 PvcLifecycle::Ephemeral => reg.argo_name.to_string(),
@@ -1577,21 +1641,45 @@ impl BuildCtx {
     }
 
     /// Env-var-sourced K8s secrets: own `secret!`/`secret_opt!` decls
-    /// ∪ the `#[fragment]` closure (deduped on the `(name, key)` pair —
-    /// optionality is preserved from the first occurrence). Same shape
-    /// as `resolved`, but the data are triples not strings, so this is
-    /// open-coded rather than going through the generic helper.
+    /// ∪ the `#[fragment]` closure (deduped on the `(name, key)` pair).
+    /// Same shape as `resolved`, but the data are triples not strings,
+    /// so this is open-coded rather than going through the generic
+    /// helper. Two extra rules the string kinds don't need:
+    ///
+    /// * **Required wins.** A pair declared by both `secret!` and
+    ///   `secret_opt!` (traversal order is non-obvious to users) emits
+    ///   `optional: false` — a missing secret then fails pod-start with
+    ///   a clear K8s event instead of panicking mid-body in-pod.
+    /// * **Env-name collisions fail loud.** `secret_env_name` flattens
+    ///   `.`/`-`/`_` alike, so distinct pairs like `("a.b", "k")` and
+    ///   `("a-b", "k")` map to one env var; emitting both would let one
+    ///   silently shadow the other (host mounts are immune — they key
+    ///   by hash). Panic at emit instead.
     pub fn resolved_secrets(
         &self,
         own: &[(&str, &str, bool)],
         own_callees: &[&str],
     ) -> Vec<(String, String, bool)> {
         let mut out: Vec<(String, String, bool)> = Vec::new();
-        let mut seen: HashSet<(String, String)> = HashSet::new();
-        let mut push = |n: &str, k: &str, opt: bool, out: &mut Vec<_>| {
-            if seen.insert((n.to_string(), k.to_string())) {
-                out.push((n.to_string(), k.to_string(), opt));
+        let mut idx: HashMap<(String, String), usize> = HashMap::new();
+        let mut by_env: HashMap<String, (String, String)> = HashMap::new();
+        let mut push = |n: &str, k: &str, opt: bool, out: &mut Vec<(String, String, bool)>| {
+            let pair = (n.to_string(), k.to_string());
+            if let Some(&i) = idx.get(&pair) {
+                out[i].2 &= opt; // required wins over optional
+                return;
             }
+            let env = crate::api::munge::secret_env_name(n, k);
+            if let Some((pn, pk)) = by_env.get(&env) {
+                panic!(
+                    "secrets ({pn:?}, {pk:?}) and ({n:?}, {k:?}) both map to the \
+                     env var `{env}` — one would silently shadow the other in-pod. \
+                     Rename one secret (or key) so they stay distinguishable."
+                );
+            }
+            by_env.insert(env, pair.clone());
+            idx.insert(pair, out.len());
+            out.push((n.to_string(), k.to_string(), opt));
         };
         for (n, k, opt) in own {
             push(n, k, *opt, &mut out);
@@ -1655,13 +1743,40 @@ fn artifact_ident(key: &str) -> String {
     s
 }
 
+/// [`artifact_ident`] for each key, panicking when two distinct keys
+/// flatten to the same ident: one template would declare two artifact
+/// ports with the same name, which Argo rejects (or worse, last-wins).
+/// The flattening is lossy (`a.b` and `a-b` → `a-b`), so this is the
+/// fail-loud guard for it. The same key appearing twice is fine —
+/// callers dedup on the exact key string.
+fn artifact_idents_checked(keys: &[String]) -> Vec<String> {
+    let mut by_ident: HashMap<String, String> = HashMap::new();
+    keys.iter()
+        .map(|k| {
+            let id = artifact_ident(k);
+            if let Some(prev) = by_ident.insert(id.clone(), k.clone())
+                && prev != *k
+            {
+                panic!(
+                    "artifact keys {prev:?} and {k:?} on one template both flatten \
+                     to the Argo artifact name {id:?} — rename one so they stay \
+                     distinguishable."
+                );
+            }
+            id
+        })
+        .collect()
+}
+
 /// `load_artifact!("key")` input ports: Argo pulls the exact S3 object
 /// `key` from the configured repo into the pod (raw, `archive: none`).
 pub fn artifact_inputs(ctx: &BuildCtx, keys: &[String]) -> Vec<api::Artifact> {
     let s3 = &ctx.config().artifact_repository.s3;
+    let idents = artifact_idents_checked(keys);
     keys.iter()
-        .map(|k| api::Artifact {
-            name: artifact_ident(k),
+        .zip(idents)
+        .map(|(k, ident)| api::Artifact {
+            name: ident,
             path: format!("{}/{k}", rt::IN_DIR),
             s3: Some(s3_loc(s3, k)),
             archive: Some(archive_none()),
@@ -1681,9 +1796,11 @@ pub type TolerationTuple = (String, String, String, String, i64);
 /// the exact S3 object `key` in the configured repo (raw, `archive: none`).
 pub fn artifact_outputs(ctx: &BuildCtx, keys: &[String]) -> Vec<api::Artifact> {
     let s3 = &ctx.config().artifact_repository.s3;
+    let idents = artifact_idents_checked(keys);
     keys.iter()
-        .map(|k| api::Artifact {
-            name: artifact_ident(k),
+        .zip(idents)
+        .map(|(k, ident)| api::Artifact {
+            name: ident,
             path: format!("{}/{k}", rt::OUT_DIR),
             s3: Some(s3_loc(s3, k)),
             archive: Some(archive_none()),
@@ -1696,7 +1813,13 @@ pub fn artifact_outputs(ctx: &BuildCtx, keys: &[String]) -> Vec<api::Artifact> {
 /// Accumulates the reachable templates (as `WorkflowTemplate`s) and the
 /// run-mode dispatch table while `Template::collect` walks the closure.
 pub struct Collector {
-    seen: HashSet<String>,
+    /// argo name → the registering type's identity (+ its rust path for
+    /// diagnostics). A `HashMap` (not a `HashSet`) so `enter` can tell a
+    /// harmless re-visit of the same template (diamond reachability)
+    /// from two *different* fns colliding on one Argo name — the latter
+    /// would silently emit one template and dispatch both call sites to
+    /// whichever body registered, so it fails loud instead.
+    seen: HashMap<String, (std::any::TypeId, &'static str)>,
     /// Deferred so `athena.toml` is read only at emit, never run-mode.
     builders: Vec<fn(&BuildCtx) -> api::Template>,
     runners: HashMap<String, fn(&[String]) -> String>,
@@ -1768,7 +1891,7 @@ impl Default for Collector {
 impl Collector {
     pub fn new() -> Self {
         Self {
-            seen: HashSet::new(),
+            seen: HashMap::new(),
             builders: Vec::new(),
             runners: HashMap::new(),
             exits: HashMap::new(),
@@ -1787,15 +1910,37 @@ impl Collector {
         }
     }
 
-    /// Returns `false` if `argo_name` was already collected (generated
-    /// `collect` impls return early in that case — dedup + cycle guard).
-    pub fn enter(&mut self, argo_name: &str) -> bool {
-        self.seen.insert(argo_name.to_string())
-    }
-
-    /// Register a template's `build` fn (invoked lazily at emit).
-    pub fn add_builder(&mut self, build: fn(&BuildCtx) -> api::Template) {
-        self.builders.push(build);
+    /// Returns `false` if `T` was already collected (generated `collect`
+    /// impls return early in that case — dedup + cycle guard).
+    ///
+    /// Panics when a *different* type already claimed `T::ARGO_NAME`:
+    /// without the check, only the first registrant would emit a
+    /// template and every call site would dispatch to it by name —
+    /// silently running the wrong body. Reachable with two same-named
+    /// fns in different modules/crates, or two identical explicit
+    /// `name = "…"` overrides.
+    pub fn enter<T: Template + 'static>(&mut self) -> bool {
+        let id = std::any::TypeId::of::<T>();
+        match self.seen.entry(T::ARGO_NAME.to_string()) {
+            std::collections::hash_map::Entry::Occupied(e) => {
+                let (prev_id, prev_ty) = *e.get();
+                if prev_id != id {
+                    panic!(
+                        "duplicate Argo template name {:?}: `{}` and `{}` both map to \
+                         it. Rename one fn, or give one an explicit \
+                         `#[container(name = \"…\")]` / `#[workflow(name = \"…\")]`.",
+                        T::ARGO_NAME,
+                        prev_ty,
+                        std::any::type_name::<T>(),
+                    );
+                }
+                false
+            }
+            std::collections::hash_map::Entry::Vacant(v) => {
+                v.insert((id, std::any::type_name::<T>()));
+                true
+            }
+        }
     }
 
     /// Register a template by type: its `build` fn plus, if it sets
@@ -2588,5 +2733,84 @@ mod tests {
         );
         assert_eq!(got, None);
         let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    // ---- fail-loud guards --------------------------------------------
+
+    /// Inventory is empty in this test binary, so `collect` gives a
+    /// fragment-free ctx — enough to exercise `resolved_secrets`' own
+    /// merge/collision rules.
+    fn empty_ctx() -> super::BuildCtx {
+        super::BuildCtx::collect("t", "0.0.0", "t", None, None, None)
+    }
+
+    #[test]
+    fn resolved_secrets_required_wins_over_optional() {
+        let ctx = empty_ctx();
+        // Optional seen first, required later: the emitted entry must be
+        // required, else a missing secret panics mid-body in-pod instead
+        // of failing pod-start.
+        let got = ctx.resolved_secrets(&[("s", "k", true), ("s", "k", false)], &[]);
+        assert_eq!(got, vec![("s".to_string(), "k".to_string(), false)]);
+        // And the reverse order too.
+        let got = ctx.resolved_secrets(&[("s", "k", false), ("s", "k", true)], &[]);
+        assert_eq!(got, vec![("s".to_string(), "k".to_string(), false)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "both map to the env var")]
+    fn resolved_secrets_env_collision_fails_loud() {
+        // "a.b" and "a-b" are distinct valid K8s secret names but
+        // flatten to the same ATHENA_SEC_A_B__K env var.
+        let ctx = empty_ctx();
+        ctx.resolved_secrets(&[("a.b", "k", false), ("a-b", "k", false)], &[]);
+    }
+
+    #[test]
+    fn artifact_idents_pass_distinct_keys() {
+        let keys = vec!["data/in.json".to_string(), "data/out.json".to_string()];
+        assert_eq!(
+            super::artifact_idents_checked(&keys),
+            vec!["data-in-json".to_string(), "data-out-json".to_string()],
+        );
+        // The same key twice is the caller-dedup contract, not a clash.
+        let dup = vec!["a.b".to_string(), "a.b".to_string()];
+        super::artifact_idents_checked(&dup);
+    }
+
+    #[test]
+    #[should_panic(expected = "both flatten to the Argo artifact name")]
+    fn artifact_ident_collision_fails_loud() {
+        let keys = vec!["a.b".to_string(), "a-b".to_string()];
+        super::artifact_idents_checked(&keys);
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate Argo template name")]
+    fn collector_enter_rejects_same_name_different_type() {
+        struct A;
+        struct B;
+        impl super::Template for A {
+            const ARGO_NAME: &'static str = "dup-name";
+            const INPUTS: &'static [&'static str] = &[];
+            const KIND: super::TemplateKind = super::TemplateKind::Container;
+            fn build(_: &super::BuildCtx) -> crate::api::Template {
+                Default::default()
+            }
+            fn collect(_: &mut super::Collector) {}
+        }
+        impl super::Template for B {
+            const ARGO_NAME: &'static str = "dup-name";
+            const INPUTS: &'static [&'static str] = &[];
+            const KIND: super::TemplateKind = super::TemplateKind::Container;
+            fn build(_: &super::BuildCtx) -> crate::api::Template {
+                Default::default()
+            }
+            fn collect(_: &mut super::Collector) {}
+        }
+        let mut c = super::Collector::new();
+        assert!(c.enter::<A>());
+        assert!(!c.enter::<A>()); // same type re-visit: fine, deduped
+        c.enter::<B>(); // different type, same name: panics
     }
 }

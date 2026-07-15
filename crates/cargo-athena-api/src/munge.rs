@@ -196,8 +196,14 @@ pub fn out_artifact_path(name: &str) -> String {
 /// deterministically from the K8s `(secret_name, key)` pair so the
 /// emit-side (declares the matching `secretKeyRef` envFrom) and the
 /// run-side (reads via `std::env::var`) agree. Uppercased, non-
-/// alphanumerics flattened to `_`, halves separated by `__` to stay
-/// distinguishable.
+/// alphanumerics flattened to `_`, halves joined with `__`.
+///
+/// The flattening is LOSSY: distinct pairs can collide (`("a.b", "k")`
+/// and `("a-b", "k")` both give `ATHENA_SEC_A_B__K`, and the `__`
+/// separator is not distinguishable from a flattened char next to a
+/// `_`). Collisions on one template are caught at emit time by
+/// `BuildCtx::resolved_secrets`, which panics rather than letting one
+/// env var silently shadow the other.
 pub fn secret_env_name(name: &str, key: &str) -> String {
     let mut s = String::from("ATHENA_SEC_");
     push_munged(&mut s, name);

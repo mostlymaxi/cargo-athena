@@ -86,7 +86,9 @@ impl BinSel {
         // Package/bin fall back to `[defaults]` in athena.toml (parity with
         // the old PkgSel); only consulted on this path, never in the
         // source-free Exe path above.
-        let d = AthenaConfig::load().defaults;
+        let d = AthenaConfig::try_load()
+            .unwrap_or_else(|e| die(&e))
+            .defaults;
         BinarySource::Cargo {
             manifest_path: self.manifest_path.clone(),
             package: self.package.clone().or(d.package),
