@@ -440,6 +440,11 @@ argo! {
         pub key: String,
         pub access_key_secret: Option<SecretKeySelector>,
         pub secret_key_secret: Option<SecretKeySelector>,
+        /// Bucket addressing style (Argo `addressingStyle`, PR #15734):
+        /// `""` (auto-detect, the default), `"path"`, or `"virtual-hosted"`.
+        /// Empty is skip-serialized, so an unset repo emits no key, and Argo
+        /// builds that lack the field simply ignore it.
+        pub addressing_style: String,
     }
 
     pub struct ArchiveStrategy {

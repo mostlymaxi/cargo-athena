@@ -727,6 +727,10 @@ pub(crate) fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
     let mut b = AmazonS3Builder::new()
         .with_bucket_name(&s3.bucket)
         .with_region(&s3.region)
+        // Path-style by default (object_store's default, what MinIO and
+        // most S3-compatible stores want); virtual-hosted when the repo
+        // config opts in via `[artifact_repository.s3] virtual_host`.
+        .with_virtual_hosted_style_request(s3.virtual_host)
         .with_allow_http(s3.insecure);
     // `AWS_ENDPOINT_URL` (AWS-SDK standard) overrides the config
     // endpoint — needed when S3 is reached differently from here than

@@ -680,6 +680,15 @@ pub struct S3Repo {
     pub region: String,
     #[serde(default)]
     pub insecure: bool,
+    /// `true` for virtual-hosted-style addressing (`https://<bucket>.<endpoint>/<key>`)
+    /// instead of the default path-style (`https://<endpoint>/<bucket>/<key>`).
+    /// Default false: auto-detect, what MinIO and most S3-compatible stores
+    /// want. Steers the `cargo athena` S3 client, and is emitted as the
+    /// artifact's Argo `addressingStyle` (honored only by executors that ship
+    /// upstream PR #15734, newer than any supported Argo; ignored, hence
+    /// harmless, on the rest).
+    #[serde(default)]
+    pub virtual_host: bool,
     pub access_key_secret: SecretRef,
     pub secret_key_secret: SecretRef,
 }
@@ -884,6 +893,13 @@ pub struct S3Ref {
     pub region: String,
     pub insecure: bool,
     pub key: String,
+    /// Virtual-hosted-style addressing (else path-style). A provider-wide
+    /// property of the configured repo, carried here so the CLI's S3
+    /// client uses one addressing style for the binary tarball and for
+    /// `load`/`save_artifact!` objects alike. `#[serde(default)]`: absent
+    /// in metadata from an older binary reads as false (path-style).
+    #[serde(default)]
+    pub virtual_host: bool,
 }
 
 impl S3Ref {
@@ -899,6 +915,7 @@ impl S3Ref {
             region: repo.region.clone(),
             insecure: repo.insecure,
             key,
+            virtual_host: repo.virtual_host,
         }
     }
 }
@@ -1082,6 +1099,11 @@ impl ContainerRunMeta {
                     region: s.region.clone(),
                     insecure: s.insecure,
                     key: s.key.clone(),
+                    // Read the addressing style straight off the emitted
+                    // artifact (the CLI object_store client is a bool: only
+                    // `virtual-hosted` maps to true; `""`/`"path"` are
+                    // path-style to it).
+                    virtual_host: s.addressing_style == "virtual-hosted",
                 },
                 path: a.path.clone(),
             })
@@ -1638,6 +1660,16 @@ pub fn s3_loc(s3: &S3Repo, key: &str) -> api::S3Artifact {
             key: s3.secret_key_secret.key.clone(),
             ..Default::default()
         }),
+        // The config toggle is a bool; map it onto Argo's tri-state
+        // `addressingStyle`. `false` -> `""` (auto-detect) keeps today's
+        // behavior and, being empty, is skip-serialized: no golden churn
+        // and no spurious drift against WTs from a pre-`virtual_host`
+        // binary. Only `true` forces `virtual-hosted`.
+        addressing_style: if s3.virtual_host {
+            "virtual-hosted".to_string()
+        } else {
+            String::new()
+        },
     }
 }
 
@@ -2588,5 +2620,46 @@ mod tests {
         );
         assert_eq!(got, None);
         let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    fn repo(virtual_host: bool) -> super::S3Repo {
+        super::S3Repo {
+            endpoint: "s3.example.com".into(),
+            bucket: "b".into(),
+            region: "us-east-1".into(),
+            insecure: false,
+            virtual_host,
+            access_key_secret: super::SecretRef {
+                name: "cred".into(),
+                key: "accessKey".into(),
+            },
+            secret_key_secret: super::SecretRef {
+                name: "cred".into(),
+                key: "secretKey".into(),
+            },
+        }
+    }
+
+    // `virtual_host` must reach the emitted Argo artifact as Argo's tri-state
+    // `addressingStyle` (PR #15734): `true` -> `virtual-hosted`, `false` ->
+    // `""`. Empty is skip-serialized, so an unset repo emits no key (goldens
+    // stay byte-identical and older Argo executors never see the field).
+    #[test]
+    fn s3_loc_maps_virtual_host_to_addressing_style() {
+        let on = super::s3_loc(&repo(true), "k");
+        assert_eq!(on.addressing_style, "virtual-hosted");
+        let yaml = serde_norway::to_string(&on).unwrap();
+        assert!(
+            yaml.contains("addressingStyle: virtual-hosted"),
+            "expected addressingStyle in emitted YAML:\n{yaml}"
+        );
+
+        let off = super::s3_loc(&repo(false), "k");
+        assert_eq!(off.addressing_style, "");
+        let yaml = serde_norway::to_string(&off).unwrap();
+        assert!(
+            !yaml.contains("addressingStyle"),
+            "path-style repo must omit addressingStyle entirely:\n{yaml}"
+        );
     }
 }
