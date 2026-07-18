@@ -13,18 +13,18 @@ members = ["crates/*", "examples/*"]
 
 [workspace.package]
 edition = "2024"
-version = "0.6.2"
+version = "0.7.0"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/mostlymaxi/cargo-athena"
 
 [workspace.dependencies]
-cargo-athena-api = { path = "crates/cargo-athena-api", version = "0.6.2" }
-cargo-athena-core = { path = "crates/cargo-athena-core", version = "0.6.2" }
-cargo-athena-macros = { path = "crates/cargo-athena-macros", version = "0.6.2" }
+cargo-athena-api = { path = "crates/cargo-athena-api", version = "0.7.0" }
+cargo-athena-core = { path = "crates/cargo-athena-core", version = "0.7.0" }
+cargo-athena-macros = { path = "crates/cargo-athena-macros", version = "0.7.0" }
 # default-features=false: examples/tests consume the library exactly as
 # we tell users to (lib only — no kube/reqwest/tokio/clap CLI tree). The
 # `cargo-athena` package keeps its own `default = ["cli"]` for the bin.
-cargo-athena = { path = "crates/cargo-athena", version = "0.6.2", default-features = false }
+cargo-athena = { path = "crates/cargo-athena", version = "0.7.0", default-features = false }
 
 # proc-macro stack
 syn = { version = "2", features = ["full", "extra-traits", "visit", "visit-mut"] }
