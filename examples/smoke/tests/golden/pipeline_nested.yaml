@@ -7,7 +7,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.2
+    cargo.athena/toolchain: 0.7.0
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-decide
@@ -83,7 +83,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.2
+    cargo.athena/toolchain: 0.7.0
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-left
@@ -159,7 +159,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.2
+    cargo.athena/toolchain: 0.7.0
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-note
@@ -235,7 +235,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.2
+    cargo.athena/toolchain: 0.7.0
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-nested
@@ -309,7 +309,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.2
+    cargo.athena/toolchain: 0.7.0
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-nested-if0
@@ -358,7 +358,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.2
+    cargo.athena/toolchain: 0.7.0
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-nested-if0-arm0
@@ -397,7 +397,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.6.2
+    cargo.athena/toolchain: 0.7.0
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-nested-if0-arm1
