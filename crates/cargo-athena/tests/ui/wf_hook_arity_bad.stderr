@@ -1,0 +1,30 @@
+error[E0061]: this function takes 1 argument but 2 arguments were supplied
+  --> tests/ui/wf_hook_arity_bad.rs:15:1
+   |
+15 | #[cargo_athena::workflow]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+16 | fn wf() {
+17 |     step("a".to_string()).on_success(notify("m".to_string(), "extra".to_string()));
+   |                                                              ------------------- unexpected argument #2 of type `std::string::String`
+   |
+note: associated function defined here
+  --> tests/ui/wf_hook_arity_bad.rs:10:1
+   |
+10 | #[cargo_athena::container]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: this error originates in the attribute macro `cargo_athena::workflow` which comes from the expansion of the attribute macro `cargo_athena::container` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0061]: this function takes 1 argument but 0 arguments were supplied
+  --> tests/ui/wf_hook_arity_bad.rs:15:1
+   |
+15 | #[cargo_athena::workflow]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^ argument #1 of type `std::string::String` is missing
+   |
+note: associated function defined here
+  --> tests/ui/wf_hook_arity_bad.rs:10:1
+   |
+10 | #[cargo_athena::container]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+11 | fn notify(msg: String) {
+   |           -----------
+   = note: this error originates in the attribute macro `cargo_athena::workflow` which comes from the expansion of the attribute macro `cargo_athena::container` (in Nightly builds, run with -Z macro-backtrace for more info)

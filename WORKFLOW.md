@@ -214,7 +214,7 @@ A task call may be suffixed, in any order, with:
 ```rust,ignore
 fetch(url).continue_on(failed, error);          // dependents proceed on failure/error
 transform(x).on_exit(cleanup);                  // unconditional per-task exit hook
-transform(x).on_exit(record("done"));           // hook target may take args
+transform(x).on_exit(record("done".to_string())); // hook target may take args
 transform(x).on_success(notify).on_failure(alarm);   // repeatable phase hooks
 transform(x).on_error(alarm);
 transform(x).hook_if("workflow.status == 'Failed'" = alarm);  // raw Argo expr escape hatch
@@ -229,8 +229,11 @@ transform(x).hook_if("workflow.status == 'Failed'" = alarm);  // raw Argo expr e
 - `.hook_if("raw-argo-expression" = t, …)`: repeatable; verbatim
   Argo expression escape hatch.
 
-Any hook target is `t` or `t(args)`. Hook templates are reachable
-from this workflow, so they get registered like any other callee.
+Any hook target is `t` or `t(args)`. Hook args are type-checked like
+task args: same allowed forms, arity, and types. Passing one binding
+to both the task and a hook is a fan-out and needs an explicit
+`.clone()`. Hook templates are reachable from this workflow, so they
+get registered like any other callee.
 
 ## `.fan_out(|x| C(x, …))` - list fan-out
 

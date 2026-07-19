@@ -1,0 +1,17 @@
+error[E0308]: mismatched types
+  --> tests/ui/wf_hook_arg_type_bad.rs:15:45
+   |
+13 | #[cargo_athena::workflow]
+   | ------------------------- arguments to this function are incorrect
+14 | fn wf() {
+15 |     step("a".to_string()).on_failure(notify("nope"));
+   |                                             ^^^^^^ expected `i64`, found `&str`
+   |
+note: associated function defined here
+  --> tests/ui/wf_hook_arg_type_bad.rs:8:1
+   |
+ 8 | #[cargo_athena::container]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 9 | fn notify(count: i64) {
+   |           ----------
+   = note: this error originates in the attribute macro `cargo_athena::container` (in Nightly builds, run with -Z macro-backtrace for more info)
