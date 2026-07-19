@@ -1,0 +1,8 @@
+error: this #[workflow] declares a return type but its returned value isn't produced by a template call. End with a tail template call `name(args)` (no `;`) or return a `let` binding from one.
+  --> tests/ui/wf_if_arm_no_value.rs:14:28
+   |
+14 |       let x = if flag == "a" {
+   |  ____________________________^
+15 | |         act();
+16 | |     } else {
+   | |_____^

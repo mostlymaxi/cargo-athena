@@ -1,0 +1,5 @@
+error: `annotations` key `bad!key` is not a valid annotation key: it contains `!` (allowed: alphanumeric, `-`, `_`, `.`)
+ --> tests/ui/ctr_annotation_bad_key.rs:4:4
+  |
+4 | fn f() {}
+  |    ^

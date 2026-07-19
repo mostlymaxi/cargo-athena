@@ -1,0 +1,5 @@
+error: `host_mount` `mount_path` must be an absolute path without `:`
+ --> tests/ui/ctr_host_mount_relative.rs:4:41
+  |
+4 |     { host_path = "/data", mount_path = "data" },
+  |                                         ^^^^^^

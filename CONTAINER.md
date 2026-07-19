@@ -24,6 +24,9 @@ distroless and read-only-rootfs images work fine.
 - I/O is compile-time bound to `serde` (`DeserializeOwned` /
   `Serialize`). Borrows can't cross this boundary - take and return
   owned types (`String`, not `&str`).
+- The fn must be a plain monomorphic function: no generics, and each
+  parameter binds a plain identifier (no destructuring patterns).
+  Either is a compile error.
 
 ## Large or binary return values
 
@@ -80,12 +83,12 @@ All optional.
 | Arg | Effect |
 |---|---|
 | `image = "…"` | Container image. Default `[bootstrap].default_image` from `athena.toml`. |
-| `name = "…"` | Override the Argo template name. Default `<crate>-<fn>` (kebab). |
+| `name = "…"` | Override the Argo template name. Default `<crate>-<fn>` (kebab). Must be a DNS-1123 subdomain (lowercase alphanumeric / `-` / `.`); checked at compile time. |
 | `service_account = "…"` | Pod `ServiceAccount`. Default `[defaults].service_account`. |
 | `node_selector = { … }` | Pin pods of this template to nodes matching the labels. Literal keys; values may be injected (see [Parameter injection](#parameter-injection)). |
-| `env = { "K" = "v", … }` | Extra container env entries the body reads via `std::env::var(…)`. Literal keys; values follow the same `"lit" + arg + …` injection grammar as `image`. |
-| `host_mount = [{ host_path, mount_path, read_only }, …]` | Explicit hostPath mounts with chosen mount paths. Use when you really do want a specific in-container path (`/dev/shm`, sidecar data, …); `host!` is the safer form. `read_only` defaults to false. Dedup'd against `host!` paths on the same `host_path`. |
-| `annotations = { "k" = "v", … }` | Pod-template annotations. Literal keys; values injectable like `env`. |
+| `env = { "K" = "v", … }` | Extra container env entries the body reads via `std::env::var(…)`. Literal keys, checked as valid env-var names; values follow the same `"lit" + arg + …` injection grammar as `image`. |
+| `host_mount = [{ host_path, mount_path, read_only }, …]` | Explicit hostPath mounts with chosen mount paths. Use when you really do want a specific in-container path (`/dev/shm`, sidecar data, …); `host!` is the safer form. Both paths must be absolute. `read_only` defaults to false. Dedup'd against `host!` paths on the same `host_path`. |
+| `annotations = { "k" = "v", … }` | Pod-template annotations. Literal keys, checked as valid annotation keys; values injectable like `env`. |
 | `privileged = true` | K8s `securityContext.privileged: true` on this container. Off by default; opt in only when you really do need host devices / kernel-level access. Your cluster's PodSecurity admission still has the final say. |
 | `daemon` (or `daemon = true`) | Argo `Template.daemon: true`: the pod runs long-lived and the workflow proceeds to dependent tasks once the container reaches **readiness** (not completion); Argo terminates it when the enclosing dag/steps finishes. `#[container]`-only (`#[workflow(daemon)]` is a compile error). Caveats: a daemon that exits `Succeeded` is marked **failed** (daemons are meant to run indefinitely), and `retry` only covers startup — once ready, pod failures are ignored. athena has no readinessProbe attr; add one via `pod_spec_patch` if Ready-timing matters. |
 | `on_exit_if_root = t` | Whole-workflow exit handler that fires only when *this* template is the workflow you submit. Distinct from the per-task `.on_exit(t)` builder. |
@@ -97,7 +100,7 @@ All optional.
 | `active_deadline_if_root = <dur>` | Whole-workflow runtime cap. **Root-only.** See [Timeouts](#timeouts). |
 | `mutexes = [{ name, namespace }, …]` | Serialize pods of this template against any other holder of the same mutex name (within one run AND across separate Workflow runs). Both fields accept `"lit" + arg + arg.field` injection. |
 | `mutexes_if_root = [{ name, namespace }, …]` | Serialize the whole submitted run against other runs holding the same mutex. **Root-only.** |
-| `tolerations = [{ key, operator, value, effect, toleration_seconds }, …]` | K8s `Toleration` list on this template's pod. Required: `key`, `operator` (`"Equal"` \| `"Exists"`), `effect` (`"NoSchedule"` \| `"PreferNoSchedule"` \| `"NoExecute"`). Optional: `value` (required only with `Equal`), `toleration_seconds` (NoExecute only). `key`, `value`, `effect` accept `"lit" + arg` injection. |
+| `tolerations = [{ key, operator, value, effect, toleration_seconds }, …]` | K8s `Toleration` list on this template's pod. Required: `key`, `operator` (`"Equal"` \| `"Exists"`), `effect` (`"NoSchedule"` \| `"PreferNoSchedule"` \| `"NoExecute"`). Optional: `value` (required only with `Equal`), `toleration_seconds` (NoExecute only). `key`, `value`, `effect` accept `"lit" + arg` injection. `operator` and a literal `effect` are checked against their closed sets at compile time. |
 | `tolerations_if_root = [{ key, operator, value, effect, ... }, …]` | Same, but applied to every pod in the run (3rd tier of Argo's `tmpl → boundary → wfSpec` lookup). **Root-only.** |
 | `affinity = "<json\|yaml>"` | Opaque YAML/JSON string for K8s pod affinity. athena keeps it opaque rather than modelling the deeply-nested Kubernetes `Affinity` schema; use `pod_spec_patch` if you'd rather express it patch-style. |
 | `affinity_if_root = "<json\|yaml>"` | Same, but applied to every pod in the run. **Root-only.** Hand-write `{{workflow.parameters.X}}` substitutions inside the YAML body if you need dynamic values. |
@@ -162,7 +165,8 @@ The first two are `#[container]`-only and are rejected on a
 
 Every duration accepts an integer (seconds) or a
 [humantime](https://docs.rs/humantime) string (`"90s"`, `"1h30m"`,
-`"2d"`).
+`"2d"`). Whole seconds only: a sub-second component (`"500ms"`,
+`"1h500ms"`) is a compile error rather than a silent truncation.
 
 ## Parameter injection
 
@@ -296,6 +300,10 @@ fn build() {
     std::fs::write(cache.join("result.bin"), b"...").unwrap();
 }
 ```
+
+`size` must be a structurally valid Kubernetes quantity (`"10Gi"`,
+`"500Mi"`); a `name = "…"` override must be a DNS-1123 subdomain.
+Both are checked at compile time.
 
 The mount path is deterministic but opaque (`/athena/pvcs/<hash>`).
 Use the returned `&'static Path` value; never hard-code the path.

@@ -1,0 +1,5 @@
+error: unknown toleration operator `Banana` (expected Equal|Exists)
+ --> tests/ui/ctr_toleration_bad_operator.rs:5:31
+  |
+5 |     { key = "gpu", operator = "Banana", effect = "NoSchedule" },
+  |                               ^^^^^^^^

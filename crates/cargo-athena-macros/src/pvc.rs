@@ -25,9 +25,11 @@ use crate::utils::{kebab, pvc_mount_path};
 pub(crate) struct EphemeralArgs {
     /// Override the auto `<crate>-<type-kebab>` Argo name (e.g. when
     /// two crates want to share the same dynamically-created PVC).
-    pub(crate) name: Option<String>,
+    /// `LitStr` so the DNS-1123 check spans the literal.
+    pub(crate) name: Option<syn::LitStr>,
     /// Storage request — required. K8s quantity string, e.g. `"10Gi"`.
-    pub(crate) size: Option<String>,
+    /// `LitStr` so the quantity-grammar check spans the literal.
+    pub(crate) size: Option<syn::LitStr>,
     /// K8s `accessModes` — required, one of:
     /// `"ReadWriteOnce"`/`"ReadWriteMany"`/`"ReadOnlyMany"`/
     /// `"ReadWriteOncePod"`. Required because RWO vs RWX is a real
@@ -43,7 +45,7 @@ pub(crate) struct ExternalArgs {
     /// Override the auto `<crate>-<type-kebab>` Argo name. Rarely
     /// needed for external PVCs (the `claim_name` is the real
     /// identifier); kept for symmetry with ephemeral.
-    pub(crate) name: Option<String>,
+    pub(crate) name: Option<syn::LitStr>,
     /// Name of the pre-existing PVC in the workflow's namespace.
     /// Required.
     pub(crate) claim_name: Option<String>,
@@ -61,8 +63,8 @@ pub(crate) fn expand_ephemeral(attr: TokenStream, item: TokenStream) -> TokenStr
         Err(e) => return e,
     };
     let span = item_struct.ident.span();
-    let size = match cfg.size {
-        Some(s) if !s.is_empty() => s,
+    let size = match &cfg.size {
+        Some(s) if !s.value().is_empty() => s.value(),
         _ => {
             return syn::Error::new(
                 span,
@@ -73,6 +75,19 @@ pub(crate) fn expand_ephemeral(attr: TokenStream, item: TokenStream) -> TokenStr
             .into();
         }
     };
+    if !k8s_quantity_ok(&size) {
+        return syn::Error::new_spanned(
+            cfg.size.as_ref().expect("checked above"),
+            format!(
+                "`size = \"{size}\"` is not a valid Kubernetes quantity: \
+                 digits, an optional decimal part, then an optional suffix \
+                 (Ki|Mi|Gi|Ti|Pi|Ei, n|u|m|k|M|G|T|P|E, or an exponent like \
+                 \"1e3\") — e.g. \"10Gi\", \"500Mi\""
+            ),
+        )
+        .to_compile_error()
+        .into();
+    }
     if cfg.access_modes.is_empty() {
         return syn::Error::new(
             span,
@@ -213,25 +228,12 @@ fn validate_unit_struct(s: &ItemStruct) -> syn::Result<()> {
     }
 }
 
-fn argo_name_for(name_override: &Option<String>, ident: &syn::Ident) -> syn::Result<String> {
+fn argo_name_for(name_override: &Option<syn::LitStr>, ident: &syn::Ident) -> syn::Result<String> {
     if let Some(n) = name_override {
-        // Validate DNS-1123 subdomain shape (k8s PVC name limit).
-        if n.is_empty()
-            || n.len() > 253
-            || !n
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.')
-            || n.starts_with('-')
-            || n.ends_with('-')
-        {
-            return Err(syn::Error::new(
-                ident.span(),
-                "`name` must be a valid DNS-1123 subdomain: lowercase \
-                 alphanumeric / `-` / `.`, 1..=253 chars, no leading/\
-                 trailing hyphen",
-            ));
-        }
-        return Ok(n.clone());
+        // Shared DNS-1123 subdomain validator (k8s PVC name shape) —
+        // same check as `#[container]`/`#[workflow]` name overrides.
+        crate::utils::check_dns1123_name(n)?;
+        return Ok(n.value());
     }
     // Default: `<crate>-<type-kebab>` (matches the `#[container]` /
     // `#[workflow]` convention; see `make_argo_name`).
@@ -239,9 +241,83 @@ fn argo_name_for(name_override: &Option<String>, ident: &syn::Ident) -> syn::Res
     Ok(format!("{}-{}", kebab(&krate), kebab(&ident.to_string())))
 }
 
+/// Structural check for a K8s resource quantity (`resource.Quantity`):
+/// digits, an optional decimal part, then an optional binary/decimal
+/// SI suffix or decimal exponent. Signs are rejected — a negative or
+/// explicitly signed storage request is never what you want.
+fn k8s_quantity_ok(s: &str) -> bool {
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() && b[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == 0 {
+        return false;
+    }
+    if i < b.len() && b[i] == b'.' {
+        i += 1;
+        let frac_start = i;
+        while i < b.len() && b[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == frac_start {
+            return false;
+        }
+    }
+    let rest = &s[i..];
+    if matches!(
+        rest,
+        "" | "n"
+            | "u"
+            | "m"
+            | "k"
+            | "M"
+            | "G"
+            | "T"
+            | "P"
+            | "E"
+            | "Ki"
+            | "Mi"
+            | "Gi"
+            | "Ti"
+            | "Pi"
+            | "Ei"
+    ) {
+        return true;
+    }
+    // Decimal exponent: `e`/`E`, optional sign, ≥1 digit.
+    let mut ch = rest.chars();
+    if !matches!(ch.next(), Some('e' | 'E')) {
+        return false;
+    }
+    let digits = ch.as_str().strip_prefix(['+', '-']).unwrap_or(ch.as_str());
+    !digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit())
+}
+
 fn parse_attr<T: deluxe::ParseMetaItem + Default>(attr: TokenStream) -> Result<T, TokenStream> {
     if attr.is_empty() {
         return Ok(T::default());
     }
     deluxe::parse2::<T>(attr.into()).map_err(|e| e.into_compile_error().into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::k8s_quantity_ok;
+
+    #[test]
+    fn quantity_grammar() {
+        for ok in [
+            "1", "10", "0.5", "10.5", "10Gi", "500Mi", "1Ti", "128Ki", "1Ei", "100m", "1n", "2k",
+            "3M", "1e3", "1E3", "1e+3", "1e-3", "10.5Gi",
+        ] {
+            assert!(k8s_quantity_ok(ok), "{ok:?} should be accepted");
+        }
+        for bad in [
+            "", "10 Gigs", "Gi", "10GB", "10g", "-1Gi", "+1Gi", "1.", ".5", "1e", "1e+", "1Gi ",
+            " 1Gi", "1 Gi", "1KI", "1gi",
+        ] {
+            assert!(!k8s_quantity_ok(bad), "{bad:?} should be rejected");
+        }
+    }
 }

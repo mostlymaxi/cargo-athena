@@ -1,0 +1,5 @@
+error: #[container] does not support generic functions: the template lowers to one unit-struct identity with one concrete signature (its inputs become a fixed Argo parameter list)
+ --> tests/ui/ctr_generic_fn.rs:5:5
+  |
+5 | fn f<T: ToString>(x: String) {
+  |     ^^^^^^^^^^^^^

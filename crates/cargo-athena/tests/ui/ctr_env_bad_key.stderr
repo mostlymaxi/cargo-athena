@@ -1,0 +1,5 @@
+error: `env` key `BAD KEY` is not a valid env-var name: it contains ` ` (allowed: alphanumeric, `-`, `.`, `_`)
+ --> tests/ui/ctr_env_bad_key.rs:4:4
+  |
+4 | fn f() {}
+  |    ^

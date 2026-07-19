@@ -14,16 +14,17 @@ use syn::{Expr, ItemFn, Path};
 
 use crate::analyze::analyze_workflow;
 use crate::attrs::{
-    WorkflowArgs, inject_lower, lower_mutex_pairs, lower_toleration_args,
-    mutexes_if_root_const_tokens, parallelism_tok, parse_attr, pod_gc_const_tokens,
-    retry_strategy_tokens, secs_i64_tok, template_synchronization_tokens,
-    tolerations_if_root_const_tokens, ttl_const_tokens,
+    WorkflowArgs, check_toleration_effect, check_toleration_operator, inject_lower,
+    lower_mutex_pairs, lower_toleration_args, mutexes_if_root_const_tokens, parallelism_tok,
+    parse_attr, pod_gc_const_tokens, retry_strategy_tokens, secs_i64_tok,
+    template_synchronization_tokens, tolerations_if_root_const_tokens, ttl_const_tokens,
 };
 use crate::conditional::emit_synth;
 use crate::ghost::ghost_fn;
 use crate::node_tokens::node_tokens;
 use crate::utils::{
-    check_yaml_safe_names, fn_args, is_artifact_ty, make_argo_name, scan_body, sig_shim, str_slice,
+    annotation_key_violation, check_dns1123_name, check_fn_shape, check_yaml_safe_names, fn_args,
+    is_artifact_ty, make_argo_name, scan_body, sig_shim, str_slice,
 };
 
 pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -47,15 +48,37 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(c) => c,
         Err(e) => return e,
     };
+    if let Err(e) = check_fn_shape(&func, "workflow") {
+        return e;
+    }
     if let Err(e) = check_yaml_safe_names(&func, &cfg.name) {
         return e;
+    }
+    if let Some(lit) = &cfg.name
+        && let Err(e) = check_dns1123_name(lit)
+    {
+        return e.to_compile_error().into();
+    }
+    // `annotations` keys are k8s annotation keys (closed grammar,
+    // rejected at admission otherwise). Literal map keys carry no
+    // token, so the error points at the fn.
+    for k in cfg.annotations.keys() {
+        if let Some(why) = annotation_key_violation(k) {
+            return syn::Error::new(
+                func.sig.ident.span(),
+                format!("`annotations` key `{k}` is not a valid annotation key: {why}"),
+            )
+            .to_compile_error()
+            .into();
+        }
     }
     let steps_mode = cfg.steps.is_set();
 
     let vis = &func.vis;
     let ident = func.sig.ident.clone();
     let rust_name = ident.to_string();
-    let argo_name = make_argo_name(&cfg.name, &rust_name);
+    let name_override = cfg.name.as_ref().map(|l| l.value());
+    let argo_name = make_argo_name(&name_override, &rust_name);
 
     let scan = scan_body(&func);
     if !scan.host_paths.is_empty()
@@ -317,6 +340,13 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     // which surprise-resolves against the SUBMITTED ROOT when this WT
     // is `templateRef`'d. Same boundary-tier rationale as
     // `boundary_node_selector`.
+    for t in &cfg.boundary_tolerations {
+        if let Err(e) = check_toleration_operator(&t.operator)
+            .and_then(|_| check_toleration_effect(&t.effect.value(), &t.effect))
+        {
+            return e.to_compile_error().into();
+        }
+    }
     let boundary_tol_tokens = {
         let entries = cfg.boundary_tolerations.iter().map(|t| {
             let key = &t.key;
@@ -463,14 +493,11 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };
-    let active_deadline_if_root_tok = match secs_i64_tok(
-        &cfg.active_deadline_if_root,
-        ident.span(),
-        "active_deadline_if_root",
-    ) {
-        Ok(v) => v,
-        Err(e) => return e.to_compile_error().into(),
-    };
+    let active_deadline_if_root_tok =
+        match secs_i64_tok(&cfg.active_deadline_if_root, "active_deadline_if_root") {
+            Ok(v) => v,
+            Err(e) => return e.to_compile_error().into(),
+        };
     // `parallelism = N` → stamped directly into the `api::Template`
     // literal below (template-level, fires under templateRef).
     // `parallelism_if_root = N` → `PARALLELISM_IF_ROOT` const, stamped

@@ -1,0 +1,5 @@
+error: `size = "10 Gigs"` is not a valid Kubernetes quantity: digits, an optional decimal part, then an optional suffix (Ki|Mi|Gi|Ti|Pi|Ei, n|u|m|k|M|G|T|P|E, or an exponent like "1e3") — e.g. "10Gi", "500Mi"
+ --> tests/ui/pvc_ephemeral_bad_size.rs:3:38
+  |
+3 | #[cargo_athena::ephemeral_pvc(size = "10 Gigs", access_modes = ["ReadWriteOnce"])]
+  |                                      ^^^^^^^^^

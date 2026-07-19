@@ -1,0 +1,5 @@
+error: `name = "a..b"` is not a valid DNS-1123 subdomain (it has an empty dot-separated label (leading, trailing, or doubled `.`)); k8s would reject the emitted resource at admission
+ --> tests/ui/pvc_name_bad_dns.rs:4:38
+  |
+4 | #[cargo_athena::ephemeral_pvc(name = "a..b", size = "1Gi", access_modes = ["ReadWriteOnce"])]
+  |                                      ^^^^^^
