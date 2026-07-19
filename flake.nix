@@ -1,5 +1,5 @@
 {
-  description = "cargo-athena — a Rust library + binary scaffolded with Nix";
+  description = "cargo-athena: compile regular Rust into Argo Workflow YAML";
 
   # fenix publishes prebuilt Rust toolchains to nix-community.cachix.org,
   # so `nix develop` *substitutes* the toolchain (a fast binary download)

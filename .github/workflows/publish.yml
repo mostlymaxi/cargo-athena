@@ -76,7 +76,7 @@ jobs:
             exit 1
           fi
 
-      # Dependency order: api -> macros -> core -> facade -> cli.
+      # Dependency order: api -> macros -> core -> cargo-athena (facade + CLI).
       # `cargo publish` waits for each crate to land in the index before
       # returning, so the next crate resolves it from crates.io.
       - name: cargo publish (dependency order)
