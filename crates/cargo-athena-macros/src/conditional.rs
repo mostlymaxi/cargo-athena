@@ -23,9 +23,9 @@ use quote::{format_ident, quote};
 use syn::{Expr, Path, Stmt};
 
 use crate::analyze::{
-    Arg, FAN_RETURN_UNSUPPORTED, JsonSrc, Node, NodeOpts, RETURN_UNRESOLVED, analyze_stmts,
-    call_parts, callee_paths, expr_to_arg, local_binding, path_leaf, push_call, retag_fan_aggs,
-    uniq_task,
+    Arg, FALLIBLE_RETURN_UNSUPPORTED, FAN_RETURN_UNSUPPORTED, JsonSrc, Node, NodeOpts,
+    RETURN_UNRESOLVED, analyze_stmts, call_parts, callee_paths, expr_to_arg, local_binding,
+    path_leaf, push_call, retag_refs, uniq_task,
 };
 use crate::node_tokens::node_tokens;
 use crate::utils::{str_slice, unwrap_expr, yaml_ambiguous};
@@ -530,17 +530,18 @@ pub(crate) fn synth_if(
         if value && aout.is_none() {
             return Err(syn::Error::new_spanned(body, RETURN_UNRESOLVED));
         }
-        // Each arm body is its own scope: re-tag its fan-aggregate
-        // consumers (exactly like the top-level pass in
-        // `analyze_workflow`) and reject a fan binding as the arm's
-        // value — the arm workflow's `return` bubble would hand the
-        // parent the raw double-encoded aggregate.
-        let arm_fan_tasks = retag_fan_aggs(&mut anodes);
+        // Each arm body is its own scope: re-tag refs and reject fan /
+        // fallible bindings as the arm's value (same as top level).
+        let (arm_fan_tasks, arm_fallible) = retag_refs(&mut anodes);
         if let Some(t) = &aout
             && value
-            && arm_fan_tasks.contains(t)
         {
-            return Err(syn::Error::new_spanned(body, FAN_RETURN_UNSUPPORTED));
+            if arm_fan_tasks.contains(t) {
+                return Err(syn::Error::new_spanned(body, FAN_RETURN_UNSUPPORTED));
+            }
+            if arm_fallible.contains(t) {
+                return Err(syn::Error::new_spanned(body, FALLIBLE_RETURN_UNSUPPORTED));
+            }
         }
         let acallees = callee_paths(&anodes, &[]);
         ctx.synth.push(SynthWf {

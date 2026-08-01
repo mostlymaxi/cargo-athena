@@ -24,6 +24,36 @@ use quote::quote;
 
 use crate::analyze::{Arg, FanSrc, HookWhen, JsonSrc, Node};
 
+/// `g` = task `t`'s scope node, nil-safe (hooks can see missing tasks).
+fn task_node(scope: &str, t: &str) -> String {
+    format!("let g = {scope}?.['{t}']; ")
+}
+
+/// `s` = `t`'s aggregated `return`, degraded to `"[]"` when the group
+/// failed / was skipped / is absent. `p` can be the STRING `"[]"`
+/// (all children failed), hence the `type` gate before indexing.
+fn agg_value(scope: &str, t: &str) -> String {
+    format!(
+        "{}let p = g?.outputs?.parameters; \
+         let r = (type(p) == \"map\" ? p?.['return'] : nil) ?? \"[]\"; \
+         let s = r == \"\" || r == \"null\" ? \"[]\" : r; ",
+        task_node(scope, t)
+    )
+}
+
+/// Kind-aware re-norm: Argo re-stringifies scalar elements but keeps
+/// object/array elements native — decode only the strings.
+const RENORM: &str = "map(fromJSON(s), { type(#) == \"string\" ? fromJSON(#) : # })";
+
+/// serde `Result::Err` arm for [`crate::analyze::Arg::RefFallible`] /
+/// `FanAggFallible`. The `}\u{20}}` spacing is load-bearing: Argo ends
+/// a `{{=…}}` tag at the first `}}` substring. `status` falls back to
+/// "Failed": 3.6 group nodes have no status in scope, and this arm is
+/// only reached when elements actually failed.
+fn argo_err(exit_code: &str) -> String {
+    format!("toJSON({{'Err': {{'status': g?.status ?? \"Failed\", 'exit_code': {exit_code}}} }})")
+}
+
 /// The Argo template-substitution string for `arg`, plus the upstream
 /// task name to wire as a DAG dependency (`None` in steps mode — Argo's
 /// `steps:` is sequential, order *is* the dep — and `None` for
@@ -84,45 +114,45 @@ pub(crate) fn arg_value(arg: &Arg, steps: bool) -> (String, Option<String>) {
             v.push_str("}}");
             (v, None)
         }
-        // Consuming a `fan_out` aggregate. Argo's `aggregatedJSONValueList`
-        // (controller/operator.go) is **type-heterogeneous** — proven
-        // from v4.0.5 source: `tryJSONUnmarshal` keeps elements parsing
-        // to an object/array as native JSON, but every JSON scalar
-        // (string/number/bool/null) hits `default: success=false` and
-        // falls back to `json.Marshal([]string{…})` (raw, escaped). So
-        // the aggregate is EITHER `[{…},…]` (native) OR `["\"v\"",…]`
-        // (escaped scalars). One universal kind-aware re-norm keyed off
-        // the actual element kind (NOT the Rust type — unknowable
-        // cross-crate): per element, `fromJSON` it iff it came back a
-        // string, else pass the parsed object/array through; then
-        // re-`toJSON` the array. (`type`/`map`/`fromJSON`/`toJSON` are
-        // expr-lang v1.17 builtins.)
-        //
-        // Empty-fan-out guard. A `withParam` over `[]` is SKIPPED by Argo
-        // (dag.go: `NodeTypeSkipped`, "empty params"), NOT aggregated, so
-        // the `[…]` list is never built. What the skipped node leaves in
-        // the consumer's scope differs by version:
-        //   - v3.7 / v4.0.5: the declared output param is filled with `""`
-        //     (skipped-scope population), so the source resolves to `""`.
-        //   - v3.6: `buildLocalScope` adds only `id`/`status`/… for the
-        //     skipped node — NO `outputs` subtree at all. A plain member
-        //     chain then fetches `.parameters` off nil, which ERRORS, and
-        //     `template.Replace(allowUnresolved=true)` hands the consumer
-        //     the raw unresolved `{{=…}}` tag as its argument.
-        // So the lookup itself must be nil-safe (`?.` + `??`, expr-lang
-        // v1.17 — verified against v3.6.19's vendored version) before the
-        // `""`/`"null"` normalization. A real non-empty aggregate is always
-        // a JSON array string, so the guard only fires on empty/skipped.
-        Arg::FanAgg(t) => {
-            let src = format!("{task_scope}['{t}'].outputs?.parameters?.['return']");
+        // Fan-out aggregate: guarded lookup + kind-aware re-norm.
+        Arg::FanAgg(t) => (
+            format!("{{{{={}toJSON({RENORM})}}}}", agg_value(task_scope, t)),
+            dep(t),
+        ),
+        // `.continue_on` binding: serde-tagged `Result<T, ArgoError>`.
+        Arg::RefFallible(t) => (
+            format!(
+                "{{{{={}let c = g?.outputs?.exitCode; \
+                 g?.status == \"Succeeded\" \
+                 ? toJSON({{'Ok': fromJSON(g?.outputs?.parameters?.['return'] ?? \"null\")}}) \
+                 : {err}}}}}",
+                task_node(task_scope, t),
+                err = argo_err("c == nil ? nil : int(c)")
+            ),
+            dep(t),
+        ),
+        // `.continue_on` fan-out: all-or-nothing `Result<Vec<T>, _>`.
+        // Ok iff the aggregate is as long as the source list (Argo
+        // aggregates succeeded elements only; group `status` is absent
+        // from scope on 3.6, so completeness is judged by data alone).
+        Arg::FanAggFallible { task, src } => {
+            let src_val = match src {
+                FanSrc::Task(p) => {
+                    format!("{task_scope}?.['{p}']?.outputs?.parameters?.['return']")
+                }
+                FanSrc::Input(i) => format!("inputs?.parameters?.['{i}']"),
+            };
             (
                 format!(
-                    "{{{{=let s = {src} ?? \"[]\"; \
-                     toJSON(map(fromJSON(\
-                     s == \"\" || s == \"null\" ? \"[]\" : s), \
-                     {{ type(#) == \"string\" ? fromJSON(#) : # }}))}}}}"
+                    "{{{{={}let q = {src_val} ?? \"[]\"; \
+                     let n = q == \"\" || q == \"null\" ? \"[]\" : q; \
+                     len(fromJSON(s)) == len(fromJSON(n)) \
+                     ? toJSON({{'Ok': {RENORM}}}) \
+                     : {err}}}}}",
+                    agg_value(task_scope, task),
+                    err = argo_err("nil")
                 ),
-                dep(t),
+                dep(task),
             )
         }
     }
@@ -326,13 +356,13 @@ pub(crate) fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
         .collect();
 
     // `fan_out` -> Argo `withParam` over the list source (+ a DAG dep on
-    // the producing task when the source is a prior binding). Uses the
-    // dotted form (not `arg_value`'s bracket form) because `withParam`
-    // is plain Argo templating, not an expr-template.
-    let ref_scope = if steps { "{{steps." } else { "{{tasks." };
+    // the producing task when the source is a prior binding). Dotted
+    // plain-tag form: the source can never be a `.continue_on` binding
+    // (the ghost rejects fanning a `Result`), so it resolves or the fan
+    // is legitimately omitted with its failed producer.
     let (with_param_val, fan_dep) = match &node.fan {
         Some(FanSrc::Task(dep)) => (
-            format!("{ref_scope}{dep}.outputs.parameters.return}}}}"),
+            format!("{{{{{scope}.{dep}.outputs.parameters.return}}}}"),
             if steps {
                 quote! {}
             } else {
@@ -494,17 +524,13 @@ mod tests {
     #[test]
     fn fanagg_emits_kind_aware_renorm() {
         let (v, d) = arg_value(&Arg::FanAgg("caps".to_string()), false);
-        // The lookup is nil-safe (`?.` + `?? "[]"`) because a skipped
-        // empty fan-out has NO `outputs` subtree in scope on Argo v3.6
-        // (a plain member chain errors and the tag is passed through
-        // unresolved); the `""`/`"null"` normalization covers v3.7/v4,
-        // which fill the skipped param with `""`.
         assert_eq!(
             v,
-            "{{=let s = tasks['caps'].outputs?.parameters?.['return'] ?? \"[]\"; \
-             toJSON(map(fromJSON(\
-             s == \"\" || s == \"null\" ? \"[]\" : s), \
-             { type(#) == \"string\" ? fromJSON(#) : # }))}}"
+            "{{=let g = tasks?.['caps']; \
+             let p = g?.outputs?.parameters; \
+             let r = (type(p) == \"map\" ? p?.['return'] : nil) ?? \"[]\"; \
+             let s = r == \"\" || r == \"null\" ? \"[]\" : r; \
+             toJSON(map(fromJSON(s), { type(#) == \"string\" ? fromJSON(#) : # }))}}"
         );
         assert_eq!(d, Some("caps".to_string()));
     }
@@ -513,5 +539,56 @@ mod tests {
     fn fanagg_steps_no_dep() {
         let (_, d) = arg_value(&Arg::FanAgg("caps".to_string()), true);
         assert_eq!(d, None);
+    }
+
+    #[test]
+    fn ref_fallible_encodes_result() {
+        let (v, d) = arg_value(&Arg::RefFallible("risky".to_string()), false);
+        assert_eq!(
+            v,
+            "{{=let g = tasks?.['risky']; \
+             let c = g?.outputs?.exitCode; \
+             g?.status == \"Succeeded\" \
+             ? toJSON({'Ok': fromJSON(g?.outputs?.parameters?.['return'] ?? \"null\")}) \
+             : toJSON({'Err': {'status': g?.status ?? \"Failed\", \
+             'exit_code': c == nil ? nil : int(c)} })}}"
+        );
+        assert_eq!(d, Some("risky".to_string()));
+    }
+
+    #[test]
+    fn fanagg_fallible_is_all_or_nothing() {
+        let (v, d) = arg_value(
+            &Arg::FanAggFallible {
+                task: "caps".to_string(),
+                src: FanSrc::Task("mk".to_string()),
+            },
+            false,
+        );
+        assert_eq!(
+            v,
+            "{{=let g = tasks?.['caps']; \
+             let p = g?.outputs?.parameters; \
+             let r = (type(p) == \"map\" ? p?.['return'] : nil) ?? \"[]\"; \
+             let s = r == \"\" || r == \"null\" ? \"[]\" : r; \
+             let q = tasks?.['mk']?.outputs?.parameters?.['return'] ?? \"[]\"; \
+             let n = q == \"\" || q == \"null\" ? \"[]\" : q; \
+             len(fromJSON(s)) == len(fromJSON(n)) \
+             ? toJSON({'Ok': map(fromJSON(s), { type(#) == \"string\" ? fromJSON(#) : # })}) \
+             : toJSON({'Err': {'status': g?.status ?? \"Failed\", 'exit_code': nil} })}}"
+        );
+        assert_eq!(d, Some("caps".to_string()));
+    }
+
+    #[test]
+    fn fanagg_fallible_input_src() {
+        let (v, _) = arg_value(
+            &Arg::FanAggFallible {
+                task: "caps".to_string(),
+                src: FanSrc::Input("items".to_string()),
+            },
+            false,
+        );
+        assert!(v.contains("let q = inputs?.parameters?.['items'] ?? \"[]\""));
     }
 }

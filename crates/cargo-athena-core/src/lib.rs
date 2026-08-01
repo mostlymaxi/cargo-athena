@@ -50,6 +50,21 @@ pub trait AthenaList<T> {
 impl<T> AthenaList<T> for Vec<T> {}
 impl<T, const N: usize> AthenaList<T> for [T; N] {}
 
+/// Error side of a `.continue_on(..)` binding.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ArgoError {
+    /// Terminal Argo node phase (`"Failed"` / `"Error"`).
+    pub status: String,
+    /// Main-container exit code, when Argo reported one.
+    pub exit_code: Option<i32>,
+}
+
+/// Ghost-only: types a `.continue_on` binding as `Result`.
+#[doc(hidden)]
+pub fn __athena_fallible<T>(_: T) -> Result<T, ArgoError> {
+    unimplemented!("athena ghost: never executed")
+}
+
 /// Marker for types that may be injected into a `#[container]`
 /// attribute (`image = "repo:" + tag`). Restricted to `String`/`str`
 /// and the primitive numbers: their `serde_json` form, unwrapped at

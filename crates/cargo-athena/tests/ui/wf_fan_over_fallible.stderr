@@ -1,0 +1,17 @@
+error[E0599]: no method named `fan_out` found for enum `Result<T, E>` in the current scope
+  --> tests/ui/wf_fan_over_fallible.rs:21:20
+   |
+21 |     let out = list.fan_out(|x| upper(x));
+   |                    ^^^^^^^ method not found in `Result<Vec<std::string::String>, ArgoError>`
+   |
+note: the method `fan_out` exists on the type `Vec<std::string::String>`
+  --> $WORKSPACE/crates/cargo-athena-core/src/lib.rs
+   |
+   | /     fn fan_out<U, F: FnOnce(T) -> U>(self, _f: F) -> Vec<U>
+   | |     where
+   | |         Self: Sized,
+   | |____________________^
+help: consider using `Result::expect` to unwrap the `Vec<std::string::String>` value, panicking if the value is a `Result::Err`
+   |
+21 |     let out = list.expect("REASON").fan_out(|x| upper(x));
+   |                   +++++++++++++++++

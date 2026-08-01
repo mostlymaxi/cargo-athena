@@ -253,13 +253,23 @@ spec:
         continueOn:
           error: true
           failed: true
-      - name: transform
+      - name: ok
         dependencies:
         - raw
         arguments:
           parameters:
           - name: data
-            value: '{{tasks.raw.outputs.parameters.return}}'
+            value: '{{=let g = tasks?.[''raw'']; let c = g?.outputs?.exitCode; g?.status == "Succeeded" ? toJSON({''Ok'': fromJSON(g?.outputs?.parameters?.[''return''] ?? "null")}) : toJSON({''Err'': {''status'': g?.status ?? "Failed", ''exit_code'': c == nil ? nil : int(c)} })}}'
+        templateRef:
+          name: cargo-athena-example-smoke-recover-0-0-0
+          template: cargo-athena-example-smoke-recover
+      - name: transform
+        dependencies:
+        - ok
+        arguments:
+          parameters:
+          - name: data
+            value: '{{tasks.ok.outputs.parameters.return}}'
           - name: factor
             value: '9'
         templateRef:
@@ -280,6 +290,82 @@ spec:
               name: cargo-athena-example-smoke-alarm-0-0-0
               template: cargo-athena-example-smoke-alarm
             expression: workflow.status == 'Failed'
+  volumeClaimTemplates:
+  - metadata:
+      name: cargo-athena-example-smoke-buildcache
+    spec:
+      accessModes:
+      - ReadWriteMany
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: fast-ssd
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cargo-athena-example-smoke-recover-0-0-0
+  labels:
+    cargo.athena/bin: smoke-hooks
+    cargo.athena/channel: release
+    cargo.athena/pkg: cargo-athena-example-smoke
+    cargo.athena/tag: 0-0-0
+    cargo.athena/toolchain: 0.7.1
+    cargo.athena/version: 0.0.0
+spec:
+  entrypoint: cargo-athena-example-smoke-recover
+  templates:
+  - name: cargo-athena-example-smoke-recover
+    inputs:
+      parameters:
+      - name: data
+      artifacts:
+      - name: athena-dist
+        path: /athena/bin
+        s3:
+          endpoint: s3.amazonaws.com
+          bucket: athena-artifacts
+          region: us-east-1
+          key: cargo-athena-example-smoke/0-0-0/smoke-hooks.tar.gz
+          accessKeySecret:
+            name: athena-s3
+            key: accessKey
+          secretKeySecret:
+            name: athena-s3
+            key: secretKey
+    outputs:
+      parameters:
+      - name: return
+        valueFrom:
+          path: /athena/result
+    container:
+      image: busybox:1.36-musl
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -e
+        case "$(uname -m)" in
+          x86_64) __t=x86_64-unknown-linux-musl ;;
+          aarch64|arm64) __t=aarch64-unknown-linux-musl ;;
+          *) echo "athena: unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        chmod +x /athena/bin/app-$__t
+        export CARGO_ATHENA_OUTPUT=/athena/result
+        exec /athena/bin/app-$__t "$@"
+      - --
+      - '{{inputs.parameters.data}}'
+      env:
+      - name: CARGO_ATHENA_TEMPLATE
+        value: cargo-athena-example-smoke-recover
+      volumeMounts:
+      - name: athena-work
+        mountPath: /athena
+    volumes:
+    - name: athena-work
+      emptyDir: {}
+    serviceAccountName: default
   volumeClaimTemplates:
   - metadata:
       name: cargo-athena-example-smoke-buildcache

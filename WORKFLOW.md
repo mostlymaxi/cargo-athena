@@ -216,7 +216,7 @@ Same wiring shape as a plain return; the parent just sees an
 A task call may be suffixed, in any order, with:
 
 ```rust,ignore
-fetch(url).continue_on(failed, error);          // dependents proceed on failure/error
+let r = fetch(url).continue_on(failed, error);  // r: Result<String, ArgoError>
 transform(x).on_exit(cleanup);                  // unconditional per-task exit hook
 transform(x).on_exit(record("done".to_string())); // hook target may take args
 transform(x).on_success(notify).on_failure(alarm);   // repeatable phase hooks
@@ -225,7 +225,11 @@ transform(x).hook_if("workflow.status == 'Failed'" = alarm);  // raw Argo expr e
 ```
 
 - `.continue_on(failed | error | failed, error)`: at most one; lets
-  dependents proceed even when this task fails / errors.
+  dependents proceed even when this task fails / errors. The binding
+  becomes a `Result<T, ArgoError>`: `Ok(value)` on success, else
+  `Err(ArgoError { status, exit_code })`. Consumers declare
+  `Result<T, ArgoError>` and handle it at runtime; it can't be
+  fanned out or returned as the workflow's value.
 - `.on_exit(t)` / `.on_exit(t(args))`: at most one; an unconditional
   per-task exit hook.
 - `.on_success(t)` / `.on_failure(t)` / `.on_error(t)`: repeatable;
@@ -251,6 +255,11 @@ downstream like any output.
 - Element / closure / result types are type-checked.
 - An empty source list aggregates to an empty `Vec`: the per-element
   step just doesn't run, and downstream consumers receive `[]`.
+- With `.continue_on(failed)` the binding is a
+  `Result<Vec<U>, ArgoError>`, all-or-nothing like
+  `collect::<Result<_, _>>()`: `Ok` only when every element
+  succeeded (an empty source is `Ok(vec![])`); ANY failed element
+  gives `Err`. Without it, a failed element fails the workflow.
 
 ## `if` / `else` / `else if`
 

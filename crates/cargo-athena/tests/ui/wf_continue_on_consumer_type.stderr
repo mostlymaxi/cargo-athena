@@ -1,0 +1,23 @@
+error[E0308]: mismatched types
+  --> tests/ui/wf_continue_on_consumer_type.rs:16:13
+   |
+13 | #[cargo_athena::workflow]
+   | ------------------------- arguments to this function are incorrect
+...
+16 |     publish(r);
+   |             ^ expected `String`, found `Result<String, ArgoError>`
+   |
+   = note: expected struct `std::string::String`
+                found enum `Result<std::string::String, ArgoError>`
+note: associated function defined here
+  --> tests/ui/wf_continue_on_consumer_type.rs:8:1
+   |
+ 8 | #[cargo_athena::container]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 9 | fn publish(x: String) {
+   |            ---------
+   = note: this error originates in the attribute macro `cargo_athena::container` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: consider using `Result::expect` to unwrap the `Result<std::string::String, ArgoError>` value, panicking if the value is a `Result::Err`
+   |
+16 |     publish(r.expect("REASON"));
+   |              +++++++++++++++++

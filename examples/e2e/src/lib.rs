@@ -368,8 +368,45 @@ pub fn risky() -> String {
 }
 
 #[container]
-pub fn finalize(r: String) {
-    println!("finalize:{r}");
+pub fn finalize(r: Result<String, cargo_athena::ArgoError>) {
+    println!("finalize:{}", r.expect("risky must succeed"));
+}
+
+#[container]
+pub fn risky_fail() -> String {
+    panic!("deliberate failure (continue_on e2e)")
+}
+
+#[container]
+pub fn expect_err(r: Result<String, cargo_athena::ArgoError>) {
+    let e = r.expect_err("continue_on of a failed task must be Err");
+    println!("OK expect_err status={} exit={:?}", e.status, e.exit_code);
+}
+
+/// Fails on `"b"` — proves the whole fan is Err on ONE bad element.
+#[container]
+pub fn flaky(x: String) -> String {
+    if x == "b" {
+        panic!("deliberate element failure: {x}");
+    }
+    x.to_uppercase()
+}
+
+#[container]
+pub fn always_fail(x: String) -> String {
+    panic!("deliberate element failure: {x}")
+}
+
+#[container]
+pub fn expect_fan_err(tag: String, r: Result<Vec<String>, cargo_athena::ArgoError>) {
+    let e = r.expect_err("fan_out with failures must be Err");
+    println!("OK expect_fan_err {tag} status={}", e.status);
+}
+
+#[container]
+pub fn expect_fan_ok(r: Result<Vec<String>, cargo_athena::ArgoError>) {
+    assert_eq!(r.expect("all-success fan must be Ok"), vec!["A", "B", "C"]);
+    println!("OK expect_fan_ok");
 }
 
 /// `on_exit_if_root` handler (whole-workflow) AND a per-task
@@ -407,6 +444,22 @@ pub fn pipeline(input_blob: String) {
     let empty = make_empty();
     let none = empty.fan_out(|x| upper(x)); // empty source -> [] aggregate
     expect_empty(none);
+
+    // continue_on fan_out: Result<Vec<T>, ArgoError>, all-or-nothing.
+    let l1 = make_list();
+    let part = l1.fan_out(|x| flaky(x)).continue_on(failed);
+    expect_fan_err("partial".to_string(), part); // ONE bad element => Err
+
+    let l2 = make_list();
+    let nothing = l2.fan_out(|x| always_fail(x)).continue_on(failed);
+    expect_fan_err("allfail".to_string(), nothing);
+
+    let l3 = make_list();
+    let full = l3.fan_out(|x| upper(x)).continue_on(failed);
+    expect_fan_ok(full); // no failures => Ok(full vec)
+
+    let bad = risky_fail().continue_on(failed);
+    expect_err(bad); // continue_on task: Err{status, exit_code}
 
     let raw = make_list();
     let bags = raw.fan_out(|x| pack(x)); // Vec<Bag>  (struct row)
