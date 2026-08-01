@@ -7,7 +7,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.0
+    cargo.athena/toolchain: 0.7.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-decide
@@ -83,7 +83,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.0
+    cargo.athena/toolchain: 0.7.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-left
@@ -159,7 +159,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.0
+    cargo.athena/toolchain: 0.7.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-make-meta
@@ -232,7 +232,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.0
+    cargo.athena/toolchain: 0.7.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-note
@@ -308,7 +308,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.0
+    cargo.athena/toolchain: 0.7.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if
@@ -375,7 +375,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.0
+    cargo.athena/toolchain: 0.7.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if0
@@ -429,7 +429,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.0
+    cargo.athena/toolchain: 0.7.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if0-arm0
@@ -473,7 +473,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.0
+    cargo.athena/toolchain: 0.7.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if0-arm1
@@ -517,7 +517,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.0
+    cargo.athena/toolchain: 0.7.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if1
@@ -589,7 +589,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.0
+    cargo.athena/toolchain: 0.7.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if1-arm0
@@ -630,7 +630,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.0
+    cargo.athena/toolchain: 0.7.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if1-arm1
@@ -671,7 +671,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.0
+    cargo.athena/toolchain: 0.7.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-if-if1-arm2
@@ -712,7 +712,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.0
+    cargo.athena/toolchain: 0.7.1
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-right

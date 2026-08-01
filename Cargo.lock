@@ -140,7 +140,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "cargo-athena"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "cargo-athena-core",
  "cargo-athena-macros",
@@ -161,7 +161,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-athena-api"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "serde",
  "serde_norway",
@@ -169,7 +169,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-athena-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "cargo-athena-api",
  "inventory",
@@ -228,7 +228,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-athena-macros"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "cargo-athena-api",
  "deluxe",
