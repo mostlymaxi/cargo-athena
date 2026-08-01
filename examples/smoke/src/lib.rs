@@ -165,7 +165,7 @@ pub fn record(tag: String) {
 #[workflow(on_exit_if_root = teardown)]
 pub fn pipeline_onexit() {
     let raw = fetch("https://example.com".to_string());
-    transform(raw, 2).on_exit(record("done"));
+    transform(raw, 2).on_exit(record("done".to_string()));
 }
 
 // --- struct-field access (`a.field`) ---------------------------------------

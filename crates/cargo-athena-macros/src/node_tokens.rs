@@ -257,13 +257,29 @@ pub(crate) fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                     (format!("hook{hook_n}"), expr)
                 }
             };
+            // Ghost-checked at compile time; belt-and-braces for a
+            // path the ghost can't see: more args than declared INPUTS
+            // would otherwise emit nameless parameters. `<` stays legal
+            // — a trailing `#[inject]` tail widens INPUTS past the
+            // caller-visible args.
+            let n_args = h.args.len();
+            let arity_guard = (n_args > 0).then(|| {
+                quote! {
+                    ::core::assert!(
+                        #n_args <= __hin.len(),
+                        "hook template `{}` declares {} input(s) but \
+                         the hook call passes {} arg(s)",
+                        __hn, __hin.len(), #n_args,
+                    );
+                }
+            });
             let arg_pushes = h.args.iter().enumerate().map(|(i, a)| {
                 // Hooks never push deps — same value template as task
                 // args, just discard the dep half.
                 let (value, _) = arg_value(a, steps);
                 quote! {
                     __hp.push(::cargo_athena::api::Parameter {
-                        name: __hin.get(#i).copied().unwrap_or_default().to_string(),
+                        name: __hin[#i].to_string(),
                         value: ::core::option::Option::Some(#value.to_string()),
                         ..::core::default::Default::default()
                     });
@@ -275,6 +291,7 @@ pub(crate) fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                         <#hp as ::cargo_athena::Template>::ARGO_NAME;
                     let __hin: &[&str] =
                         <#hp as ::cargo_athena::Template>::INPUTS;
+                    #arity_guard
                     let mut __hp: ::std::vec::Vec<
                         ::cargo_athena::api::Parameter,
                     > = ::std::vec::Vec::new();

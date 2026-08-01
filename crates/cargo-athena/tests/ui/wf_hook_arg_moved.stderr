@@ -1,0 +1,19 @@
+error[E0382]: use of moved value: `r`
+  --> tests/ui/wf_hook_arg_moved.rs:23:34
+   |
+22 |     let r = fetch();
+   |         - move occurs because `r` has type `std::string::String`, which does not implement the `Copy` trait
+23 |     publish(r).on_failure(notify(r));
+   |             - value moved here   ^ value used here after move
+   |
+note: consider changing this parameter type in method `__athena_sig` to borrow instead if owning the value isn't necessary
+  --> tests/ui/wf_hook_arg_moved.rs:11:15
+   |
+10 | #[cargo_athena::container]
+   | -------------------------- in this method
+11 | fn publish(x: String) {
+   |               ^^^^^^ this parameter takes ownership of the value
+help: consider cloning the value if the performance cost is acceptable
+   |
+23 |     publish(r.clone()).on_failure(notify(r));
+   |              ++++++++
