@@ -10,7 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLUSTER=athena-e2e
-ARGO_VERSION="${ARGO_VERSION:-v4.0.5}"  # CI overrides per matrix entry
+ARGO_VERSION="${ARGO_VERSION:-v4.0.8}"  # CI overrides per matrix entry
 # ATHENA_E2E_SINGLE=1 → 1-node cluster (hosts without kind cross-node
 # networking, e.g. NixOS default-drop FORWARD). Default is the 3-node split.
 KIND_CFG="$SCRIPT_DIR/kind-cluster.yaml"

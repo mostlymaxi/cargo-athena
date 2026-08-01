@@ -117,7 +117,7 @@ say "submit Workflow (waits for completion)"
 # args-offload (PR #15265 didn't backport), so we downsize there to
 # 8 KB - still proves the workflow-input -> positional argv plumbing,
 # but stays inside the kernel exec ARG_MAX.
-case "${ARGO_VERSION:-v4.0.5}" in
+case "${ARGO_VERSION:-v4.0.8}" in
   v3.6.*) BLOB_BYTES=$((8 * 1024)) ;;
   *)      BLOB_BYTES=$((200 * 1024)) ;;
 esac
