@@ -79,7 +79,7 @@ cargo athena submit my-crate-pipeline -a seed=hi
 
 Wait for the run, assert it `Succeeded`. The project's own GitHub
 Actions matrix does exactly this on every push to `main` against
-three Argo versions (4.0.5 / 3.7.14 / 3.6.19) and the badges in
+three Argo versions (4.0.8 / 3.7.17 / 3.6.19) and the badges in
 [Supported Argo Versions](argo-versions.md) are that live result.
 
 To reproduce the cluster locally:

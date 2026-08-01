@@ -47,7 +47,7 @@ Rust name resolution.
 
 The crate the project's GitHub Actions matrix actually submits to a
 real Argo + MinIO on every push to `main`. It's the live conformance
-test for every supported Argo version (4.0.5 / 3.7.14 / 3.6.19).
+test for every supported Argo version (4.0.8 / 3.7.17 / 3.6.19).
 
 If you want to see a workflow that's verified-running on real Argo,
 this is the one.

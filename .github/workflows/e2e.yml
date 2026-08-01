@@ -92,8 +92,8 @@ jobs:
         # #[container]/#[workflow] "wormhole" design requires. All legs
         # are blocking. All = latest patch.
         argo:
-          - v4.0.5    # maintained (latest minor)
-          - v3.7.14   # maintained (n-1 minor)
+          - v4.0.8    # maintained (latest minor)
+          - v3.7.17   # maintained (n-1 minor)
           - v3.6.19   # minimum supported (EOL, hard gate)
     runs-on: ubuntu-latest
     name: e2e (argo ${{ matrix.argo }})

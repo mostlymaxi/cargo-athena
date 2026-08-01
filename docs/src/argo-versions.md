@@ -6,8 +6,8 @@ matrix is therefore not a claim - it is a continuously verified result.
 
 | Argo | Support |
 |---|---|
-| **v4.0.5** | maintained (latest minor) |
-| **v3.7.14** | maintained (n-1 minor) |
+| **v4.0.8** | maintained (latest minor) |
+| **v3.7.17** | maintained (n-1 minor) |
 | **v3.6.19** | minimum supported (EOL, hard-gated) |
 
 Argo Workflows maintains the two most recent minors; cargo-athena tracks
