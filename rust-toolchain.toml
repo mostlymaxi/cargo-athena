@@ -1,8 +1,10 @@
 [toolchain]
-channel = "stable"
+# Exact version, not "stable": the channel-rust-<ver>.toml manifest URL
+# is immutable, so the flake.nix sha256 pin never drifts when a new
+# stable ships. Bump = edit here + re-pin the sha256 in flake.nix.
+channel = "1.97.1"
 # minimal = rustc + cargo + rust-std only; the components below are
-# added explicitly. Drops rust-docs (never needed in CI/build) — keeps
-# it out of the Nix toolchain closure that CI caches.
+# added explicitly (drops rust-docs from the toolchain closure)
 profile = "minimal"
 components = [
   "rustfmt",
