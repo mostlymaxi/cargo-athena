@@ -33,11 +33,11 @@ All are optional.
 
 | Arg | Effect |
 |---|---|
-| `name = "my-name"` | Override the Argo template name. Default `<crate>-<fn>` (kebab). |
+| `name = "my-name"` | Override the Argo template name. Default `<crate>-<fn>` (kebab). Must be a DNS-1123 subdomain (lowercase alphanumeric / `-` / `.`); checked at compile time. |
 | `steps` | Emit an Argo `steps:` (sequential) template instead of the default data-dependency `dag:`. |
 | `boundary_node_selector = { … }` | A `nodeSelector` constraint on pods whose immediate enclosing dag/steps is this template. Does NOT cascade through nested sub-workflows. Literal only. See [Node selector](#node-selector). |
 | `node_selector_if_root = { … }` | Default `nodeSelector` for every pod in the submitted run. **Root-only**. Values support `"lit" + arg` / `"lit" + arg.field` injection of the workflow's own arguments. |
-| `annotations = { "k" = "v" }` | Template-level annotations on the dag/steps template. Literal keys and values. |
+| `annotations = { "k" = "v" }` | Template-level annotations on the dag/steps template. Literal keys and values; keys are checked as valid annotation keys. |
 | `on_exit_if_root = t` | Whole-workflow exit handler that fires only when *this* template is the workflow you submit. Distinct from the per-task `.on_exit(t)` builder. |
 | `retry(limit, policy, backoff)` | Template-level retry. `limit` is required (`unlimited` means no cap); `policy` ∈ `Always` / `OnFailure` / `OnError` / `OnTransientError`; `backoff` is seconds or a [humantime](https://docs.rs/humantime) string. |
 | `ttl_if_root(after_completion, after_success, after_failure)` | GC the finished Workflow after the given duration. At least one of the three is required. **Root-only.** |
@@ -45,13 +45,13 @@ All are optional.
 | `active_deadline_if_root = <dur>` | Whole-workflow runtime cap. The only timeout that works on a `#[workflow]`. **Root-only.** See [Timeouts](#timeouts). |
 | `mutexes = [{ name, namespace }, …]` | Serialize this template against other holders of the same mutex name (within one run AND across separate Workflow runs). Both fields accept `"lit" + arg + arg.field` injection. See [Mutexes](#mutexes). |
 | `mutexes_if_root = [{ name, namespace }, …]` | Serialize the whole submitted run against other runs holding the same mutex. **Root-only.** |
-| `tolerations_if_root = [{ key, operator, value, effect, ... }, …]` | K8s `Toleration` list applied to every pod in the run. Strings accept `"lit" + arg` injection. **Root-only.** |
+| `tolerations_if_root = [{ key, operator, value, effect, ... }, …]` | K8s `Toleration` list applied to every pod in the run. Strings accept `"lit" + arg` injection. `operator` and a literal `effect` are checked against their closed sets at compile time. **Root-only.** |
 | `affinity_if_root = "<json\|yaml>"` | Opaque YAML/JSON string for pod affinity, applied to every pod in the run. athena keeps it opaque rather than modelling the deeply-nested Kubernetes `Affinity` schema; use `pod_spec_patch_if_root` for patch-style. Hand-write `{{workflow.parameters.X}}` substitutions inside the YAML body as needed. **Root-only.** |
 | `pod_spec_patch_if_root = "<json\|yaml>"` | Strategic-merge patch Argo applies to **every** pod in the submitted run. Universal escape hatch for any podSpec field athena doesn't have a first-class attr for. String accepts `"lit" + arg` injection. **Root-only.** athena does NOT validate the patch shape; Argo / k8s reject malformed input at submit / admission time. |
 | `image_pull_secrets_if_root = ["regcred", …]` | Root-only `WorkflowSpec.ImagePullSecrets`. Secret names the kubelet uses to pull every pod's image from a private registry. K8s / Argo expose this only at workflow scope; per-container needs go through `pod_spec_patch`. |
 | `parallelism = N` | `Template.parallelism` on this dag/steps. Caps concurrent children scheduled under THIS template invocation only (pods from nested templates don't count). Literal `i64`, `> 0`. |
 | `parallelism_if_root = N` | Root-only `WorkflowSpec.parallelism`. Caps total concurrent pods across the run. Inert when this WT is `templateRef`'d. Literal `i64`, `> 0`. |
-| `boundary_tolerations = [{ key, operator, value, effect, ... }, …]` | K8s `Toleration` list on this dag/steps template, inherited by child pods that don't set their own. Same boundary tier as `boundary_node_selector`. **Literal only** (use `tolerations_if_root` for values that depend on an argument). |
+| `boundary_tolerations = [{ key, operator, value, effect, ... }, …]` | K8s `Toleration` list on this dag/steps template, inherited by child pods that don't set their own. Same boundary tier as `boundary_node_selector`; same compile-time `operator`/`effect` closed-set checks as `tolerations_if_root`. **Literal only** (use `tolerations_if_root` for values that depend on an argument). |
 | `boundary_affinity = "<json\|yaml>"` | Opaque YAML/JSON string for pod affinity on this dag/steps template, inherited by child pods that don't set their own. **Literal only.** |
 
 A parameter *name* (i.e. a function argument) or a `name = "…"`
@@ -59,6 +59,9 @@ value that a YAML 1.1 parser reads as a boolean/null (`y` / `yes` /
 `n` / `no` / `on` / `off` / `true` / `false` / `null` / `~`, any
 case) is a compile error: Argo's YAML→JSON parser would silently
 mis-type it.
+
+The fn itself must be a plain monomorphic function: no generics, and
+each parameter binds a plain identifier (no destructuring patterns).
 
 ## Timeouts
 
@@ -73,7 +76,8 @@ when this template is referenced as a nested sub-workflow.
 
 Every duration is an integer (seconds) or a
 [humantime](https://docs.rs/humantime) string (`"90s"`, `"1h30m"`,
-`"2d"`).
+`"2d"`). Whole seconds only: a sub-second component (`"500ms"`,
+`"1h500ms"`) is a compile error rather than a silent truncation.
 
 ## Node selector
 

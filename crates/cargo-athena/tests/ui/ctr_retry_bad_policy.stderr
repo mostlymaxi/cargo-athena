@@ -1,5 +1,5 @@
 error: unknown retry policy `Nope` (expected Always|OnFailure|OnError|OnTransientError)
- --> tests/ui/ctr_retry_bad_policy.rs:4:4
+ --> tests/ui/ctr_retry_bad_policy.rs:3:53
   |
-4 | fn f() {}
-  |    ^
+3 | #[cargo_athena::container(retry(limit = 1, policy = "Nope"))]
+  |                                                     ^^^^^^

@@ -369,8 +369,6 @@ pub(crate) fn str_slice(items: &[String]) -> TokenStream2 {
     quote! { &[ #( #lits ),* ] }
 }
 
-/// Defining crate's name (set by Cargo while this crate compiles), used to
-/// namespace Argo template names so they're globally unique across crates.
 /// `true` if `ty` is `Artifact<...>` in any of its three written forms
 /// (`Artifact<T>`, `cargo_athena::Artifact<T>`, `::cargo_athena::Artifact<T>`).
 /// Used by `#[container]` and `#[workflow]` to discriminate parameter-
@@ -386,6 +384,8 @@ pub(crate) fn is_artifact_ty(ty: &Type) -> bool {
         .is_some_and(|s| s.ident == "Artifact" && !s.arguments.is_empty())
 }
 
+/// Defining crate's name (set by Cargo while this crate compiles), used to
+/// namespace Argo template names so they're globally unique across crates.
 pub(crate) fn crate_ns() -> String {
     std::env::var("CARGO_CRATE_NAME")
         .or_else(|_| std::env::var("CARGO_PKG_NAME"))
@@ -399,6 +399,177 @@ pub(crate) fn make_argo_name(name_override: &Option<String>, rust_name: &str) ->
         Some(n) => n.clone(),
         None => format!("{}-{}", kebab(&crate_ns()), kebab(rust_name)),
     }
+}
+
+/// Why `name` is not a valid RFC-1123 subdomain, or `None` if it is.
+/// The single validator behind every `name = "..."` override
+/// (`#[container]` / `#[workflow]` / `#[ephemeral_pvc]` /
+/// `#[external_pvc]`) — the string becomes a k8s `metadata.name`, and
+/// k8s rejects anything else at admission, so fail at compile time.
+pub(crate) fn dns1123_violation(name: &str) -> Option<String> {
+    if name.is_empty() {
+        return Some("it is empty".to_string());
+    }
+    if name.len() > 253 {
+        return Some(format!("it is {} chars (max 253)", name.len()));
+    }
+    for label in name.split('.') {
+        if label.is_empty() {
+            return Some(
+                "it has an empty dot-separated label (leading, trailing, or doubled `.`)"
+                    .to_string(),
+            );
+        }
+        if label.len() > 63 {
+            return Some(format!("label `{label}` is {} chars (max 63)", label.len()));
+        }
+        if let Some(c) = label
+            .chars()
+            .find(|c| !(c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-'))
+        {
+            return Some(format!(
+                "it contains `{c}` (allowed: lowercase alphanumeric, `-`, `.`)"
+            ));
+        }
+        if label.starts_with('-') || label.ends_with('-') {
+            return Some(format!("label `{label}` starts or ends with `-`"));
+        }
+    }
+    None
+}
+
+/// Validate a `name = "..."` override as a DNS-1123 subdomain, spanned
+/// at the literal.
+pub(crate) fn check_dns1123_name(lit: &syn::LitStr) -> syn::Result<()> {
+    let v = lit.value();
+    match dns1123_violation(&v) {
+        None => Ok(()),
+        Some(why) => Err(syn::Error::new_spanned(
+            lit,
+            format!(
+                "`name = \"{v}\"` is not a valid DNS-1123 subdomain ({why}); \
+                 k8s would reject the emitted resource at admission"
+            ),
+        )),
+    }
+}
+
+/// Why `name` is not a valid k8s env-var name
+/// (`[-._a-zA-Z][-._a-zA-Z0-9]*`), or `None` if it is. Anything else
+/// fails at pod admission.
+pub(crate) fn env_var_name_violation(name: &str) -> Option<String> {
+    let ok_head = |c: char| c.is_ascii_alphabetic() || matches!(c, '-' | '.' | '_');
+    let ok_tail = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_');
+    let mut chars = name.chars();
+    let Some(head) = chars.next() else {
+        return Some("it is empty".to_string());
+    };
+    if !ok_head(head) {
+        return Some(format!(
+            "it starts with `{head}` (must be a letter, `-`, `.`, or `_`)"
+        ));
+    }
+    if let Some(c) = chars.find(|c| !ok_tail(*c)) {
+        return Some(format!(
+            "it contains `{c}` (allowed: alphanumeric, `-`, `.`, `_`)"
+        ));
+    }
+    None
+}
+
+/// Why `key` is not a valid k8s annotation key (a qualified name:
+/// optional DNS-1123 subdomain prefix + `/` + a 1..=63-char name that
+/// starts/ends alphanumeric with `-`/`_`/`.` allowed inside), or
+/// `None` if it is.
+pub(crate) fn annotation_key_violation(key: &str) -> Option<String> {
+    let (prefix, name) = match key.rsplit_once('/') {
+        Some((p, n)) => (Some(p), n),
+        None => (None, key),
+    };
+    if let Some(p) = prefix {
+        if p.is_empty() {
+            return Some("its `/`-prefix is empty".to_string());
+        }
+        // A prefix must be a DNS-1123 subdomain, but is conventionally
+        // written lowercase anyway — reuse the subdomain validator.
+        if let Some(why) = dns1123_violation(p) {
+            return Some(format!(
+                "its prefix `{p}` is not a DNS-1123 subdomain ({why})"
+            ));
+        }
+    }
+    if name.is_empty() {
+        return Some("its name part is empty".to_string());
+    }
+    if name.len() > 63 {
+        return Some(format!("its name part is {} chars (max 63)", name.len()));
+    }
+    let alnum = |c: char| c.is_ascii_alphanumeric();
+    if !name.starts_with(alnum) || !name.ends_with(alnum) {
+        return Some("its name part must start and end alphanumeric".to_string());
+    }
+    if let Some(c) = name
+        .chars()
+        .find(|c| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')))
+    {
+        return Some(format!(
+            "it contains `{c}` (allowed: alphanumeric, `-`, `_`, `.`)"
+        ));
+    }
+    None
+}
+
+/// Reject fn shapes the macros cannot lower, with the error spanned at
+/// the offending piece instead of surfacing as a rustc error inside a
+/// hidden generated item. Generics are structurally unsupported (the
+/// unit-struct identity + `INPUTS` const need ONE concrete signature);
+/// non-identifier argument patterns have no Argo parameter name.
+pub(crate) fn check_fn_shape(func: &ItemFn, kind: &str) -> Result<(), TokenStream> {
+    let g = &func.sig.generics;
+    if !g.params.is_empty() || g.where_clause.is_some() {
+        let target: TokenStream2 = if g.params.is_empty() {
+            quote::ToTokens::to_token_stream(&g.where_clause)
+        } else {
+            quote::ToTokens::to_token_stream(g)
+        };
+        return Err(syn::Error::new_spanned(
+            target,
+            format!(
+                "#[{kind}] does not support generic functions: the template \
+                 lowers to one unit-struct identity with one concrete \
+                 signature (its inputs become a fixed Argo parameter list)"
+            ),
+        )
+        .to_compile_error()
+        .into());
+    }
+    for arg in &func.sig.inputs {
+        match arg {
+            syn::FnArg::Receiver(r) => {
+                return Err(syn::Error::new_spanned(
+                    r,
+                    format!("#[{kind}] must be a free function (no `self`)"),
+                )
+                .to_compile_error()
+                .into());
+            }
+            syn::FnArg::Typed(pt) => {
+                if !matches!(&*pt.pat, syn::Pat::Ident(_)) {
+                    return Err(syn::Error::new_spanned(
+                        &pt.pat,
+                        format!(
+                            "unsupported parameter pattern in a #[{kind}]: \
+                             bind a plain identifier (each parameter becomes \
+                             a named Argo input)"
+                        ),
+                    )
+                    .to_compile_error()
+                    .into());
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// YAML 1.1 parsers (Argo's Go YAML→JSON among them) read certain bare
@@ -421,7 +592,7 @@ pub(crate) fn yaml_ambiguous(s: &str) -> Option<&'static str> {
 /// inputs are covered by the same check.
 pub(crate) fn check_yaml_safe_names(
     func: &ItemFn,
-    name_override: &Option<String>,
+    name_override: &Option<syn::LitStr>,
 ) -> Result<(), TokenStream> {
     for (ident, _) in fn_args(func) {
         if let Some(why) = yaml_ambiguous(&ident.to_string()) {
@@ -441,11 +612,12 @@ pub(crate) fn check_yaml_safe_names(
             .into());
         }
     }
-    if let Some(n) = name_override
-        && let Some(why) = yaml_ambiguous(n)
+    if let Some(lit) = name_override
+        && let Some(why) = yaml_ambiguous(&lit.value())
     {
-        return Err(syn::Error::new(
-            func.sig.ident.span(),
+        let n = lit.value();
+        return Err(syn::Error::new_spanned(
+            lit,
             format!(
                 "`name = \"{n}\"` is unsafe: a YAML 1.1 parser \
                  (including Argo's) reads `{n}` as {why}, not a \
@@ -640,6 +812,58 @@ pub(crate) fn unwrap_expr(e: &Expr) -> &Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dns1123_subdomain_shapes() {
+        for ok in [
+            "a",
+            "abc",
+            "a-b",
+            "a.b",
+            "a-1.b-2",
+            "0a",
+            "x".repeat(63).as_str(),
+        ] {
+            assert!(dns1123_violation(ok).is_none(), "{ok:?} should be valid");
+        }
+        // `.foo` / `a..b` / `foo.` were accepted by the old bespoke PVC
+        // check (it never looked at per-label emptiness) — pinned here.
+        for bad in [
+            "", ".foo", "a..b", "foo.", "-a", "a-", "a.-b", "A", "a_b", "a b",
+        ] {
+            assert!(
+                dns1123_violation(bad).is_some(),
+                "{bad:?} should be rejected"
+            );
+        }
+        assert!(
+            dns1123_violation(&"a".repeat(254)).is_some(),
+            "253-char cap"
+        );
+        let long_label = "a".repeat(64);
+        assert!(
+            dns1123_violation(&long_label).is_some(),
+            "63-char label cap"
+        );
+    }
+
+    #[test]
+    fn env_and_annotation_key_shapes() {
+        assert!(env_var_name_violation("PATH").is_none());
+        assert!(env_var_name_violation("_x.y-z").is_none());
+        assert!(env_var_name_violation("9BAD").is_some());
+        assert!(env_var_name_violation("BAD KEY").is_some());
+        assert!(env_var_name_violation("").is_some());
+
+        assert!(annotation_key_violation("simple").is_none());
+        assert!(annotation_key_violation("example.com/role").is_none());
+        assert!(annotation_key_violation("cargo.athena/tag").is_none());
+        assert!(annotation_key_violation("bad!key").is_some());
+        assert!(annotation_key_violation("/name").is_some());
+        assert!(annotation_key_violation("UPPER.Prefix/x").is_some());
+        assert!(annotation_key_violation("-edge").is_some());
+        assert!(annotation_key_violation(&"a".repeat(64)).is_some());
+    }
 
     #[test]
     fn scan_records_fragment_callees_qualified_or_bare() {

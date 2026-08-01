@@ -38,7 +38,9 @@ use crate::utils::unwrap_expr;
 #[derive(Default)]
 pub(crate) struct RetryArgs {
     limit: Option<syn::Expr>,
-    policy: Option<String>,
+    /// Kept as `LitStr` (not `String`) so the unknown-policy error can
+    /// span the offending literal instead of the fn ident.
+    policy: Option<syn::LitStr>,
     backoff: Option<syn::Expr>,
 }
 
@@ -53,7 +55,7 @@ impl RetryArgs {
             match key.to_string().as_str() {
                 "limit" => out.limit = Some(input.parse::<syn::Expr>()?),
                 "policy" => {
-                    out.policy = Some(input.parse::<syn::LitStr>()?.value());
+                    out.policy = Some(input.parse::<syn::LitStr>()?);
                 }
                 "backoff" => out.backoff = Some(input.parse::<syn::Expr>()?),
                 other => {
@@ -161,7 +163,8 @@ impl deluxe::ParseMetaItem for TtlArgs {
 /// `RetryArgs`.
 #[derive(Default)]
 pub(crate) struct PodGcArgs {
-    strategy: Option<String>,
+    /// `LitStr` so the unknown-strategy error spans the literal.
+    strategy: Option<syn::LitStr>,
 }
 
 impl PodGcArgs {
@@ -172,7 +175,7 @@ impl PodGcArgs {
             input.parse::<syn::Token![=]>()?;
             match key.to_string().as_str() {
                 "strategy" => {
-                    out.strategy = Some(input.parse::<syn::LitStr>()?.value());
+                    out.strategy = Some(input.parse::<syn::LitStr>()?);
                 }
                 other => {
                     return Err(syn::Error::new_spanned(
@@ -224,8 +227,9 @@ impl deluxe::ParseMetaItem for PodGcArgs {
 /// (`/dev/shm`, a sidecar's data dir, etc.).
 #[derive(deluxe::ParseMetaItem)]
 pub(crate) struct HostMountEntry {
-    pub(crate) host_path: String,
-    pub(crate) mount_path: String,
+    /// `LitStr` so the absolute-path checks span the literal.
+    pub(crate) host_path: syn::LitStr,
+    pub(crate) mount_path: syn::LitStr,
     #[deluxe(default)]
     pub(crate) read_only: bool,
 }
@@ -249,13 +253,15 @@ pub(crate) struct MutexArg {
 /// — K8s `Toleration` entry. `key`, `value`, `effect` accept the same
 /// `"lit" + arg` injection grammar as `image`/`env` (scope per attr:
 /// `inputs.parameters` for container-level, `workflow.parameters` for
-/// `_if_root`). `operator` is a literal string (small closed set:
-/// `"Equal"` | `"Exists"`); `toleration_seconds` is a literal i64
-/// (0 ⇒ skip-serialize, k8s default "applies forever").
+/// `_if_root`). `operator` is a literal string (closed set `"Equal"` |
+/// `"Exists"`, checked at compile time); a literal `effect` is checked
+/// against K8s's closed set too (an injected/substituted effect is
+/// checked by k8s at admission instead). `toleration_seconds` is a
+/// literal i64 (0 ⇒ skip-serialize, k8s default "applies forever").
 #[derive(deluxe::ParseMetaItem)]
 pub(crate) struct TolerationArg {
     pub(crate) key: syn::Expr,
-    pub(crate) operator: String,
+    pub(crate) operator: syn::LitStr,
     #[deluxe(default)]
     pub(crate) value: Option<syn::Expr>,
     pub(crate) effect: syn::Expr,
@@ -264,17 +270,18 @@ pub(crate) struct TolerationArg {
 }
 
 /// Literal-only `TolerationArg`: same shape, but every field is a
-/// plain `String` / `i64` (no `syn::Expr`). Used for
+/// plain literal (no `syn::Expr`, no injection). Used for
 /// `boundary_tolerations` (Argo's boundary tier reads tolerations
 /// before per-template substitution gets a chance, so injection is
 /// unsafe by construction — same rationale as `boundary_node_selector`).
 #[derive(deluxe::ParseMetaItem)]
 pub(crate) struct BoundaryTolerationArg {
     pub(crate) key: String,
-    pub(crate) operator: String,
+    /// `LitStr` so the closed-set checks span the offending literal.
+    pub(crate) operator: syn::LitStr,
     #[deluxe(default)]
     pub(crate) value: String,
-    pub(crate) effect: String,
+    pub(crate) effect: syn::LitStr,
     #[deluxe(default)]
     pub(crate) toleration_seconds: i64,
 }
@@ -283,7 +290,8 @@ pub(crate) struct BoundaryTolerationArg {
 #[deluxe(default)]
 pub(crate) struct ContainerArgs {
     pub(crate) image: Option<syn::Expr>,
-    pub(crate) name: Option<String>,
+    /// `LitStr` so the DNS-1123 / YAML-safety checks span the literal.
+    pub(crate) name: Option<syn::LitStr>,
     pub(crate) service_account: Option<syn::Expr>,
     pub(crate) node_selector: std::collections::BTreeMap<String, syn::Expr>,
     /// `on_exit_if_root = path::to::template` — whole-workflow exit
@@ -445,7 +453,8 @@ pub(crate) struct ContainerArgs {
 #[derive(deluxe::ParseMetaItem, Default)]
 #[deluxe(default)]
 pub(crate) struct WorkflowArgs {
-    pub(crate) name: Option<String>,
+    /// `LitStr` so the DNS-1123 / YAML-safety checks span the literal.
+    pub(crate) name: Option<syn::LitStr>,
     pub(crate) steps: deluxe::Flag,
     /// `boundary_node_selector = { "k" = "v" }` — Argo
     /// `Template.NodeSelector` on this dag/steps template. Despite its
@@ -611,11 +620,11 @@ pub(crate) fn retry_strategy_tokens(
     let policy_tok = match &r.policy {
         None => quote! { ::std::string::String::new() },
         Some(p) => {
-            match p.as_str() {
+            match p.value().as_str() {
                 "Always" | "OnFailure" | "OnError" | "OnTransientError" => {}
                 other => {
-                    return Err(syn::Error::new(
-                        span,
+                    return Err(syn::Error::new_spanned(
+                        p,
                         format!(
                             "unknown retry policy `{other}` (expected \
                              Always|OnFailure|OnError|OnTransientError)"
@@ -626,7 +635,7 @@ pub(crate) fn retry_strategy_tokens(
             quote! { #p.to_string() }
         }
     };
-    let backoff_tok = match parse_opt_duration_secs(&r.backoff, span, "retry(backoff)")? {
+    let backoff_tok = match parse_opt_duration_secs(&r.backoff, "retry(backoff)")? {
         None => quote! { ::core::option::Option::None },
         Some(secs) => {
             // Argo `Backoff.Duration` is a Go-duration string; emit
@@ -654,16 +663,15 @@ pub(crate) fn retry_strategy_tokens(
 /// `ttl_if_root(..)`, `retry(backoff)`) so the accepted syntax is
 /// uniform everywhere. An **integer literal = whole seconds**; a
 /// **string literal = a [`humantime`] duration** (`"90s"`, `"1h30m"`,
-/// `"2d"`). Returns whole seconds, enforced `> 0`. `attr` names the
-/// attribute in diagnostics.
-pub(crate) fn parse_duration_secs(
-    e: &Expr,
-    span: proc_macro2::Span,
-    attr: &str,
-) -> Result<u64, syn::Error> {
+/// `"2d"`). Returns whole seconds, enforced `> 0`; a sub-second
+/// component is a targeted error (Argo's fields count whole seconds,
+/// and silently truncating `"1h500ms"` would lie about the emitted
+/// value). Errors span the offending value expression. `attr` names
+/// the attribute in diagnostics.
+pub(crate) fn parse_duration_secs(e: &Expr, attr: &str) -> Result<u64, syn::Error> {
     let bad = || {
-        syn::Error::new(
-            span,
+        syn::Error::new_spanned(
+            e,
             format!(
                 "`{attr}`: expected a positive integer (seconds) or a \
                  duration string like \"1h30m\" / \"2d\" (humantime)"
@@ -678,12 +686,24 @@ pub(crate) fn parse_duration_secs(
         Expr::Lit(syn::ExprLit {
             lit: syn::Lit::Str(s),
             ..
-        }) => humantime::parse_duration(&s.value())
-            .map_err(|_| bad())?
-            .as_secs(),
+        }) => {
+            let d = humantime::parse_duration(&s.value()).map_err(|_| bad())?;
+            if d.subsec_nanos() != 0 {
+                return Err(syn::Error::new_spanned(
+                    e,
+                    format!(
+                        "`{attr}`: sub-second durations are not supported \
+                         (Argo counts whole seconds, so {:?} cannot be \
+                         represented exactly) - use whole seconds",
+                        s.value()
+                    ),
+                ));
+            }
+            d.as_secs()
+        }
         _ => {
-            return Err(syn::Error::new(
-                span,
+            return Err(syn::Error::new_spanned(
+                e,
                 format!("`{attr}`: expected an integer or a duration string"),
             ));
         }
@@ -697,12 +717,11 @@ pub(crate) fn parse_duration_secs(
 /// `None` → `Ok(None)`; else `parse_duration_secs`.
 pub(crate) fn parse_opt_duration_secs(
     e: &Option<Expr>,
-    span: proc_macro2::Span,
     attr: &str,
 ) -> Result<Option<u64>, syn::Error> {
     match e {
         None => Ok(None),
-        Some(e) => Ok(Some(parse_duration_secs(e, span, attr)?)),
+        Some(e) => Ok(Some(parse_duration_secs(e, attr)?)),
     }
 }
 
@@ -710,19 +729,20 @@ pub(crate) fn parse_opt_duration_secs(
 /// `Template.activeDeadlineSeconds`, `ttlStrategy.secondsAfter*`).
 pub(crate) fn secs_i32_tok(
     e: &Option<Expr>,
-    span: proc_macro2::Span,
     attr: &str,
 ) -> Result<proc_macro2::TokenStream, syn::Error> {
-    match parse_opt_duration_secs(e, span, attr)? {
+    match e {
         None => Ok(quote! { ::core::option::Option::None }),
-        Some(s) if s <= i32::MAX as u64 => {
-            let n = s as i32;
-            Ok(quote! { ::core::option::Option::Some(#n) })
-        }
-        Some(_) => Err(syn::Error::new(
-            span,
-            format!("`{attr}`: duration is too large (max ~68 years)"),
-        )),
+        Some(expr) => match parse_duration_secs(expr, attr)? {
+            s if s <= i32::MAX as u64 => {
+                let n = s as i32;
+                Ok(quote! { ::core::option::Option::Some(#n) })
+            }
+            _ => Err(syn::Error::new_spanned(
+                expr,
+                format!("`{attr}`: duration is too large (max ~68 years)"),
+            )),
+        },
     }
 }
 
@@ -730,19 +750,20 @@ pub(crate) fn secs_i32_tok(
 /// `WorkflowSpec.activeDeadlineSeconds`, an `int64`).
 pub(crate) fn secs_i64_tok(
     e: &Option<Expr>,
-    span: proc_macro2::Span,
     attr: &str,
 ) -> Result<proc_macro2::TokenStream, syn::Error> {
-    match parse_opt_duration_secs(e, span, attr)? {
+    match e {
         None => Ok(quote! { ::core::option::Option::None }),
-        Some(s) if s <= i64::MAX as u64 => {
-            let n = s as i64;
-            Ok(quote! { ::core::option::Option::Some(#n) })
-        }
-        Some(_) => Err(syn::Error::new(
-            span,
-            format!("`{attr}`: duration is too large"),
-        )),
+        Some(expr) => match parse_duration_secs(expr, attr)? {
+            s if s <= i64::MAX as u64 => {
+                let n = s as i64;
+                Ok(quote! { ::core::option::Option::Some(#n) })
+            }
+            _ => Err(syn::Error::new_spanned(
+                expr,
+                format!("`{attr}`: duration is too large"),
+            )),
+        },
     }
 }
 
@@ -774,11 +795,8 @@ pub(crate) fn parallelism_tok(
 /// We emit canonical `"<n>s"` — Go always accepts it, and humantime
 /// days/weeks normalize to seconds so `"2d"` works even though Go has
 /// no day unit. `None` ⇒ empty string (skip-serialized field default).
-pub(crate) fn timeout_tokens(
-    e: &Option<Expr>,
-    span: proc_macro2::Span,
-) -> Result<proc_macro2::TokenStream, syn::Error> {
-    match parse_opt_duration_secs(e, span, "timeout")? {
+pub(crate) fn timeout_tokens(e: &Option<Expr>) -> Result<proc_macro2::TokenStream, syn::Error> {
+    match parse_opt_duration_secs(e, "timeout")? {
         None => Ok(quote! { ::std::string::String::new() }),
         Some(s) => {
             let v = format!("{s}s");
@@ -805,9 +823,9 @@ pub(crate) fn ttl_const_tokens(
              after_completion/after_success/after_failure",
         ));
     }
-    let comp = secs_i32_tok(&t.after_completion, span, "ttl_if_root(after_completion)")?;
-    let succ = secs_i32_tok(&t.after_success, span, "ttl_if_root(after_success)")?;
-    let fail = secs_i32_tok(&t.after_failure, span, "ttl_if_root(after_failure)")?;
+    let comp = secs_i32_tok(&t.after_completion, "ttl_if_root(after_completion)")?;
+    let succ = secs_i32_tok(&t.after_success, "ttl_if_root(after_success)")?;
+    let fail = secs_i32_tok(&t.after_failure, "ttl_if_root(after_failure)")?;
     Ok(quote! {
         ::core::option::Option::Some(::cargo_athena::api::TtlStrategy {
             seconds_after_completion: #comp,
@@ -837,11 +855,11 @@ pub(crate) fn pod_gc_const_tokens(
         }
         Some(s) => s,
     };
-    match s.as_str() {
+    match s.value().as_str() {
         "OnPodCompletion" | "OnPodSuccess" | "OnWorkflowCompletion" | "OnWorkflowSuccess" => {}
         other => {
-            return Err(syn::Error::new(
-                span,
+            return Err(syn::Error::new_spanned(
+                s,
                 format!(
                     "unknown podGC strategy `{other}` (expected \
                      OnPodCompletion|OnPodSuccess|OnWorkflowCompletion|OnWorkflowSuccess)"
@@ -975,11 +993,47 @@ pub(crate) fn lower_mutex_pairs(
         .collect()
 }
 
+/// K8s `Toleration.operator` is a closed set; anything else fails at
+/// k8s admission, so fail at compile time with the literal spanned.
+pub(crate) fn check_toleration_operator(op: &syn::LitStr) -> syn::Result<()> {
+    match op.value().as_str() {
+        "Equal" | "Exists" => Ok(()),
+        other => Err(syn::Error::new_spanned(
+            op,
+            format!("unknown toleration operator `{other}` (expected Equal|Exists)"),
+        )),
+    }
+}
+
+/// K8s `Toleration.effect` closed set (empty = tolerate every effect).
+/// Checked on the *lowered* string so an injected value or a
+/// hand-written `{{…}}` substitution (resolved by Argo at run time)
+/// passes through unchecked.
+pub(crate) fn check_toleration_effect<T: quote::ToTokens>(
+    lowered: &str,
+    tokens: &T,
+) -> syn::Result<()> {
+    if lowered.contains("{{") {
+        return Ok(());
+    }
+    match lowered {
+        "" | "NoSchedule" | "PreferNoSchedule" | "NoExecute" => Ok(()),
+        other => Err(syn::Error::new_spanned(
+            tokens,
+            format!(
+                "unknown toleration effect `{other}` (expected \
+                 NoSchedule|PreferNoSchedule|NoExecute, or empty to match all)"
+            ),
+        )),
+    }
+}
+
 /// Lower a `Vec<TolerationArg>` to `(key, operator, value, effect,
 /// toleration_seconds)` 5-tuples. `key`/`value`/`effect` go through
 /// `inject_lower` against the right scope (so `"lit" + arg` becomes
-/// `{{=fromJSON(scope['arg'])}}`); `operator` is a literal string;
-/// `toleration_seconds` is a literal i64.
+/// `{{=fromJSON(scope['arg'])}}`); `operator` is a literal string and
+/// both closed sets are enforced here; `toleration_seconds` is a
+/// literal i64.
 /// 5-tuple matching `cargo_athena_core::TolerationTuple` — the lowered
 /// shape the macro produces for each toleration entry.
 pub(crate) type TolerationTuple = (String, String, String, String, i64);
@@ -993,13 +1047,15 @@ pub(crate) fn lower_toleration_args(
 ) -> syn::Result<Vec<TolerationTuple>> {
     list.iter()
         .map(|t| {
+            check_toleration_operator(&t.operator)?;
             let key = inject_lower(&t.key, args, ops, scope, kind)?;
             let value = match &t.value {
                 Some(e) => inject_lower(e, args, ops, scope, kind)?,
                 None => String::new(),
             };
             let effect = inject_lower(&t.effect, args, ops, scope, kind)?;
-            Ok((key, t.operator.clone(), value, effect, t.toleration_seconds))
+            check_toleration_effect(&effect, &t.effect)?;
+            Ok((key, t.operator.value(), value, effect, t.toleration_seconds))
         })
         .collect()
 }

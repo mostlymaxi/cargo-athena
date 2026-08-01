@@ -1,0 +1,5 @@
+error: `name = "My_Container"` is not a valid DNS-1123 subdomain (it contains `M` (allowed: lowercase alphanumeric, `-`, `.`)); k8s would reject the emitted resource at admission
+ --> tests/ui/ctr_name_bad_dns.rs:4:34
+  |
+4 | #[cargo_athena::container(name = "My_Container")]
+  |                                  ^^^^^^^^^^^^^^

@@ -23,8 +23,9 @@ use quote::{format_ident, quote};
 use syn::{Expr, Path, Stmt};
 
 use crate::analyze::{
-    Arg, FAN_RETURN_UNSUPPORTED, JsonSrc, Node, NodeOpts, analyze_stmts, call_parts, callee_paths,
-    expr_to_arg, local_binding, path_leaf, push_call, retag_fan_aggs, uniq_task,
+    Arg, FAN_RETURN_UNSUPPORTED, JsonSrc, Node, NodeOpts, RETURN_UNRESOLVED, analyze_stmts,
+    call_parts, callee_paths, expr_to_arg, local_binding, path_leaf, push_call, retag_fan_aggs,
+    uniq_task,
 };
 use crate::node_tokens::node_tokens;
 use crate::utils::{str_slice, unwrap_expr, yaml_ambiguous};
@@ -54,16 +55,17 @@ impl CmpOp {
 
 /// A condition operand. Like `Arg` but literals keep their kind (a
 /// string compares as the JSON-quoted `"v"`, a number/bool bare — proven
-/// on real Argo v4.0.5). `Ref`/`Input`/`Json` are *parent-scoped*; the
-/// `if` synthesis remaps them to the cond-wrapper's own input params.
+/// on real Argo v4.0.5). Conditions are always resolved *inside* the
+/// synthesized wrapper, where every parent binding/input arrives as a
+/// wrapper input (hoisting + capture remapping happen first) — so the
+/// only non-literal operands are input-rooted.
 pub(crate) enum WhenOp {
-    /// Prior `let` binding → producing task (a DAG dep at cond level).
-    Ref(String),
-    /// A parent `#[workflow]` input parameter.
+    /// A wrapper input parameter (a captured parent binding/input).
     Input(String),
-    /// `a.b.c` named-field access (same lowering as `Arg::Json`).
+    /// `a.b.c` named-field access on an input (same lowering as
+    /// `Arg::Json`).
     Json {
-        src: JsonSrc,
+        input: String,
         path: Vec<String>,
     },
     Str(String),
@@ -113,13 +115,23 @@ pub(crate) fn cond_operand(
     // Non-literal operands share the exact arg rules (binding/input/
     // .field/.clone); map the resulting `Arg` into a `WhenOp`.
     match expr_to_arg(e, bindings, inputs) {
-        Ok(Arg::Ref(t)) => Ok(WhenOp::Ref(t)),
         Ok(Arg::Input(n)) => Ok(WhenOp::Input(n)),
-        Ok(Arg::Json { src, path }) => Ok(WhenOp::Json { src, path }),
+        Ok(Arg::Json {
+            src: JsonSrc::Input(n),
+            path,
+        }) => Ok(WhenOp::Json { input: n, path }),
         // `Arg::Lit` only comes back for a literal, handled above; `Item`
-        // can't occur outside a fan_out closure.
+        // can't occur outside a fan_out closure; `Ref`/task-rooted `Json`
+        // can't occur because conditions are resolved inside the wrapper
+        // with empty bindings (parent bindings arrive as inputs).
         Ok(_) => Err(syn::Error::new_spanned(e, UNSUPPORTED_COND)),
-        Err(_) => Err(syn::Error::new_spanned(e, UNSUPPORTED_COND)),
+        // Keep the resolver's own diagnosis (e.g. "`x` is not a
+        // #[workflow] input …") — it names the actual problem; append
+        // the condition-grammar context.
+        Err(mut inner) => {
+            inner.combine(syn::Error::new_spanned(e, UNSUPPORTED_COND));
+            Err(inner)
+        }
     }
 }
 
@@ -257,7 +269,6 @@ pub(crate) fn hoist_cond(
     }
 }
 
-/// A call `path(args...)` where `path` is any path expression. Returns the
 /// What a (synthetic or real) workflow's `outputs.parameters.return`
 /// resolves to.
 pub(crate) enum SynthOut {
@@ -352,18 +363,9 @@ pub(crate) fn if_arms(mut e: &syn::ExprIf) -> Vec<(Option<Expr>, syn::Block)> {
 pub(crate) fn when_op_str(o: &WhenOp) -> String {
     match o {
         WhenOp::Input(n) => format!("{{{{inputs.parameters.{n}}}}}"),
-        WhenOp::Ref(t) => {
-            format!("{{{{tasks.{t}.outputs.parameters.return}}}}")
-        }
-        WhenOp::Json { src, path } => {
+        WhenOp::Json { input, path } => {
             let acc: String = path.iter().map(|f| format!("['{f}']")).collect();
-            let refexpr = match src {
-                JsonSrc::Task(t) => {
-                    format!("tasks['{t}'].outputs.parameters['return']")
-                }
-                JsonSrc::Input(n) => format!("inputs.parameters['{n}']"),
-            };
-            format!("{{{{=toJSON(fromJSON({refexpr}){acc})}}}}")
+            format!("{{{{=toJSON(fromJSON(inputs.parameters['{input}']){acc})}}}}")
         }
         WhenOp::Str(s) => {
             format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
@@ -522,6 +524,12 @@ pub(crate) fn synth_if(
             &format!("{}_if{}_arm{}", ctx.parent_rust, k, j),
             ctx,
         )?;
+        // A value-`if` arm must produce the value — report it with the
+        // arm's own span (analyze_stmts leaves this to its callers so
+        // the top-level workflow can point at the return type instead).
+        if value && aout.is_none() {
+            return Err(syn::Error::new_spanned(body, RETURN_UNRESOLVED));
+        }
         // Each arm body is its own scope: re-tag its fan-aggregate
         // consumers (exactly like the top-level pass in
         // `analyze_workflow`) and reject a fan binding as the arm's

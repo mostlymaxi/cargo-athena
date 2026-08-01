@@ -335,8 +335,11 @@ pub fn emulate(a: EmulateArgs) {
         c.arg("-v").arg(format!("{hp}:{mount}"));
     }
     // Selector goes in env; positional argv carries the function params.
-    c.arg("-e")
-        .arg(format!("CARGO_ATHENA_TEMPLATE={}", meta.name));
+    c.arg("-e").arg(format!(
+        "{}={}",
+        cargo_athena::CARGO_ATHENA_TEMPLATE_ENV,
+        meta.name
+    ));
     // Argo sets the container `command` (→ overrides the image
     // ENTRYPOINT) + `args`. Mirror that with --entrypoint so the
     // injected bootstrap runs exactly as in-pod. `meta.args` from the

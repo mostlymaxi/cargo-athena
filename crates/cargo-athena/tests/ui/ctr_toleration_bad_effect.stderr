@@ -1,0 +1,5 @@
+error: unknown toleration effect `Sometimes` (expected NoSchedule|PreferNoSchedule|NoExecute, or empty to match all)
+ --> tests/ui/ctr_toleration_bad_effect.rs:5:50
+  |
+5 |     { key = "gpu", operator = "Exists", effect = "Sometimes" },
+  |                                                  ^^^^^^^^^^^

@@ -1,0 +1,5 @@
+error: `name = ".foo"` is not a valid DNS-1123 subdomain (it has an empty dot-separated label (leading, trailing, or doubled `.`)); k8s would reject the emitted resource at admission
+ --> tests/ui/wf_name_bad_dns.rs:4:33
+  |
+4 | #[cargo_athena::workflow(name = ".foo")]
+  |                                 ^^^^^^

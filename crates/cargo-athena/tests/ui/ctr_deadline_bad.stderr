@@ -1,5 +1,5 @@
 error: `pod_running_timeout`: expected a positive integer (seconds) or a duration string like "1h30m" / "2d" (humantime)
- --> tests/ui/ctr_deadline_bad.rs:4:4
+ --> tests/ui/ctr_deadline_bad.rs:3:49
   |
-4 | fn f() {}
-  |    ^
+3 | #[cargo_athena::container(pod_running_timeout = "later")]
+  |                                                 ^^^^^^^

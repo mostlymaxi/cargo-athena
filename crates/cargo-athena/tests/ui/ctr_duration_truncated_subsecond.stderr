@@ -1,0 +1,5 @@
+error: `timeout`: sub-second durations are not supported (Argo counts whole seconds, so "1h500ms" cannot be represented exactly) - use whole seconds
+ --> tests/ui/ctr_duration_truncated_subsecond.rs:3:37
+  |
+3 | #[cargo_athena::container(timeout = "1h500ms")]
+  |                                     ^^^^^^^^^

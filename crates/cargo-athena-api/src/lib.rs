@@ -24,9 +24,10 @@ pub mod munge;
 /// `skip_serializing_if` support: one generic "is this empty?" predicate
 /// so every field can share `#[serde(skip_serializing_if = "ser::skip")]`.
 pub mod ser {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::BTreeMap;
 
     /// True when a value is "empty" and should be omitted from output.
+    /// Impls cover exactly the field types the `argo!` structs use.
     pub trait Skip {
         fn skip(&self) -> bool;
     }
@@ -41,22 +42,12 @@ pub mod ser {
             !*self
         }
     }
-    impl Skip for i32 {
-        fn skip(&self) -> bool {
-            *self == 0
-        }
-    }
     impl<T> Skip for Option<T> {
         fn skip(&self) -> bool {
             self.is_none()
         }
     }
     impl<T> Skip for Vec<T> {
-        fn skip(&self) -> bool {
-            self.is_empty()
-        }
-    }
-    impl<K, V> Skip for HashMap<K, V> {
         fn skip(&self) -> bool {
             self.is_empty()
         }
@@ -278,7 +269,6 @@ argo! {
         // Exactly one of the following describes the template body.
         pub container: Option<Container>,
         pub dag: Option<DagTemplate>,
-        pub script: Option<ScriptTemplate>,
         /// `#[container(daemon)]` → Argo `Template.daemon: true`. The pod
         /// is treated as long-running: the workflow proceeds to dependents
         /// as soon as the container reaches READINESS (not completion), and
@@ -515,12 +505,6 @@ argo! {
     /// produced YAML stays terse.
     pub struct SecurityContext {
         pub privileged: bool,
-    }
-
-    pub struct ScriptTemplate {
-        pub image: String,
-        pub command: Vec<String>,
-        pub source: String,
     }
 
     pub struct EnvVar {

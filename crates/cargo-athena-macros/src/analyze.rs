@@ -986,12 +986,11 @@ pub(crate) fn analyze_stmts(
     ctx.parent_rust = saved.0;
     ctx.parent_argo = saved.1;
 
-    if want_output && output_task.is_none() {
-        return Err(syn::Error::new_spanned(
-            stmts.last().map(|s| quote!(#s)).unwrap_or_default(),
-            RETURN_UNRESOLVED,
-        ));
-    }
+    // NOTE: an unresolved output (`want_output` but no terminal task) is
+    // NOT an error here — each caller reports [`RETURN_UNRESOLVED`] with
+    // its own precise span (the fn's return type at top level, the arm
+    // body inside a value-`if`). Signalling it through the return value
+    // instead of matching on error TEXT keeps arm-local spans intact.
     Ok((nodes, if want_output { output_task } else { None }))
 }
 
@@ -1017,15 +1016,10 @@ pub(crate) fn analyze_workflow(
         parent_argo,
         &func.sig.ident.to_string(),
         &mut ctx,
-    )
-    .map_err(|e| {
-        // Re-target the generic "unresolved" span to the return type.
-        if e.to_string() == RETURN_UNRESOLVED {
-            syn::Error::new_spanned(&func.sig.output, RETURN_UNRESOLVED)
-        } else {
-            e
-        }
-    })?;
+    )?;
+    if want_output && output_task.is_none() {
+        return Err(syn::Error::new_spanned(&func.sig.output, RETURN_UNRESOLVED));
+    }
     let fan_tasks = retag_fan_aggs(&mut nodes);
     // A fan binding can be CONSUMED by a task (re-tagged above), but not
     // RETURNED as the workflow's value: the `outputs.parameters.return`

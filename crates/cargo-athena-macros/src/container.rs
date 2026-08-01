@@ -19,7 +19,8 @@ use crate::attrs::{
     timeout_tokens, tolerations_if_root_const_tokens, ttl_const_tokens,
 };
 use crate::utils::{
-    check_yaml_safe_names, fn_arg_injects, fn_args, func_without_inject_args, is_artifact_ty,
+    annotation_key_violation, check_dns1123_name, check_fn_shape, check_yaml_safe_names,
+    env_var_name_violation, fn_arg_injects, fn_args, func_without_inject_args, is_artifact_ty,
     make_argo_name, scan_body, secret_slice_tokens, sig_shim, str_slice, strip_inject_attrs,
     with_host_rewritten,
 };
@@ -30,8 +31,61 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(c) => c,
         Err(e) => return e,
     };
+    if let Err(e) = check_fn_shape(&func, "container") {
+        return e;
+    }
     if let Err(e) = check_yaml_safe_names(&func, &cfg.name) {
         return e;
+    }
+    if let Some(lit) = &cfg.name
+        && let Err(e) = check_dns1123_name(lit)
+    {
+        return e.to_compile_error().into();
+    }
+    // `env` keys become k8s env-var names, `annotations` keys k8s
+    // annotation keys — both have closed grammars the API server
+    // enforces at admission; reject at compile time instead. Map keys
+    // are plain strings (no token to span), so these point at the fn.
+    for k in cfg.env.keys() {
+        if let Some(why) = env_var_name_violation(k) {
+            return syn::Error::new(
+                func.sig.ident.span(),
+                format!("`env` key `{k}` is not a valid env-var name: {why}"),
+            )
+            .to_compile_error()
+            .into();
+        }
+    }
+    for k in cfg.annotations.keys() {
+        if let Some(why) = annotation_key_violation(k) {
+            return syn::Error::new(
+                func.sig.ident.span(),
+                format!("`annotations` key `{k}` is not a valid annotation key: {why}"),
+            )
+            .to_compile_error()
+            .into();
+        }
+    }
+    // `host_mount` paths: k8s requires absolute paths for both sides,
+    // and a `:` inside `mountPath` is rejected at admission.
+    for h in &cfg.host_mount {
+        if !h.host_path.value().starts_with('/') {
+            return syn::Error::new_spanned(
+                &h.host_path,
+                "`host_mount` `host_path` must be an absolute path",
+            )
+            .to_compile_error()
+            .into();
+        }
+        let mp = h.mount_path.value();
+        if !mp.starts_with('/') || mp.contains(':') {
+            return syn::Error::new_spanned(
+                &h.mount_path,
+                "`host_mount` `mount_path` must be an absolute path without `:`",
+            )
+            .to_compile_error()
+            .into();
+        }
     }
     // Validate `#[inject(...)]` per-arg attrs up front. Without this, a
     // malformed body (anything but a single string literal) would be
@@ -87,7 +141,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let ident = func.sig.ident.clone();
     let rust_name = ident.to_string();
-    let argo_name = make_argo_name(&cfg.name, &rust_name);
+    let name_override = cfg.name.as_ref().map(|l| l.value());
+    let argo_name = make_argo_name(&name_override, &rust_name);
     let scan = scan_body(&func);
 
     // The real body becomes a hidden fn; the public identity is a type.
@@ -606,8 +661,9 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     // `host_mount = [{ host_path, mount_path, read_only }, …]`:
     // literal-only triples, threaded into `container_volumes` so the
     // dedup-against-`host!` lives in core.
-    let host_mount_hosts: Vec<&String> = cfg.host_mount.iter().map(|h| &h.host_path).collect();
-    let host_mount_mounts: Vec<&String> = cfg.host_mount.iter().map(|h| &h.mount_path).collect();
+    let host_mount_hosts: Vec<&syn::LitStr> = cfg.host_mount.iter().map(|h| &h.host_path).collect();
+    let host_mount_mounts: Vec<&syn::LitStr> =
+        cfg.host_mount.iter().map(|h| &h.mount_path).collect();
     let host_mount_ro: Vec<bool> = cfg.host_mount.iter().map(|h| h.read_only).collect();
     // `privileged = true` → K8s `securityContext.privileged: true`. Off
     // → emit `security_context: None` so the empty struct is
@@ -642,28 +698,22 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };
-    let timeout_tok = match timeout_tokens(&cfg.timeout, ident.span()) {
+    let timeout_tok = match timeout_tokens(&cfg.timeout) {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };
-    let pod_running_timeout_tok = match secs_i32_tok(
-        &cfg.pod_running_timeout,
-        ident.span(),
-        "pod_running_timeout",
-    ) {
-        Ok(v) => v,
-        Err(e) => return e.to_compile_error().into(),
-    };
+    let pod_running_timeout_tok =
+        match secs_i32_tok(&cfg.pod_running_timeout, "pod_running_timeout") {
+            Ok(v) => v,
+            Err(e) => return e.to_compile_error().into(),
+        };
     // Root-only WorkflowSpec runtime cap (stamped per-WT by `Collector`
     // like `ON_EXIT`/`TTL`; the only real whole-workflow timeout).
-    let active_deadline_if_root_tok = match secs_i64_tok(
-        &cfg.active_deadline_if_root,
-        ident.span(),
-        "active_deadline_if_root",
-    ) {
-        Ok(v) => v,
-        Err(e) => return e.to_compile_error().into(),
-    };
+    let active_deadline_if_root_tok =
+        match secs_i64_tok(&cfg.active_deadline_if_root, "active_deadline_if_root") {
+            Ok(v) => v,
+            Err(e) => return e.to_compile_error().into(),
+        };
     // WorkflowSpec-scoped `ttlStrategy` / `podGC` trait consts (stamped
     // per-WT by `Collector` like `ON_EXIT`).
     let ttl_tok = match ttl_const_tokens(&cfg.ttl_if_root, ident.span()) {
@@ -722,7 +772,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         // Hidden real implementation — executed in-pod (Run mode).
         #impl_fn
 
-        // Never-run: each injected attribute operand must be `Display`.
+        // Never-run: each injected attribute operand must be `Injectable`.
         #inject_check
 
         // The importable identity: a type, not a fn.

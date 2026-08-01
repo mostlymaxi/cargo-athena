@@ -1,0 +1,5 @@
+error: unknown toleration operator `Sometimes` (expected Equal|Exists)
+ --> tests/ui/wf_boundary_toleration_bad.rs:4:31
+  |
+4 |     { key = "gpu", operator = "Sometimes", effect = "NoSchedule" },
+  |                               ^^^^^^^^^^^

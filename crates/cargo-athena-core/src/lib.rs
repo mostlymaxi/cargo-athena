@@ -342,17 +342,14 @@ pub enum IoKind {
 /// `#[workflow]` ghost (see `feedback-ghost-first.md` in agent
 /// memory) — they are NOT enforced by bespoke macro checks. The only
 /// public surface is `Artifact::new` / `Artifact::into_inner`.
+#[derive(Debug)]
 pub struct Artifact<T> {
     inner: T,
-    _marker: ::core::marker::PhantomData<fn() -> T>,
 }
 
 impl<T> Artifact<T> {
     pub fn new(v: T) -> Self {
-        Self {
-            inner: v,
-            _marker: ::core::marker::PhantomData,
-        }
+        Self { inner: v }
     }
 
     pub fn into_inner(self) -> T {
@@ -855,6 +852,11 @@ pub const ATHENA_DIST_ARTIFACT: &str = "athena-dist";
 /// to run. Argv (positional, in `INPUTS` order) carries the function's
 /// own parameters.
 pub const CARGO_ATHENA_TEMPLATE_ENV: &str = "CARGO_ATHENA_TEMPLATE";
+/// Env var the in-pod entrypoint reads for where to write the body's
+/// serialized return value. Cross-file contract: `bootstrap.sh` exports
+/// it (`export CARGO_ATHENA_OUTPUT=@@OUTPUT_PATH@@`) before exec'ing
+/// the binary — keep the two in sync.
+pub const CARGO_ATHENA_OUTPUT_ENV: &str = "CARGO_ATHENA_OUTPUT";
 
 /// `true` if this binary is dispatching a container body (in-pod,
 /// started by Argo via the emitted bootstrap); `false` for every other
@@ -1253,7 +1255,7 @@ pub fn container_delivery(
     // `archive: None` (NOT `archive: none`) lets Argo auto-detect the
     // input as a tarball and untar it into `path` (`ATHENA_BIN_DIR`).
     let artifact = api::Artifact {
-        name: "athena-dist".to_string(),
+        name: ATHENA_DIST_ARTIFACT.to_string(),
         path: ATHENA_BIN_DIR.to_string(),
         s3: Some(s3_loc(s3, ctx.artifact_key())),
         archive: None,
@@ -2027,16 +2029,6 @@ impl Collector {
         self.runners.insert(argo_name.to_string(), run);
     }
 
-    /// Emit the multi-document stream: one `WorkflowTemplate` per template
-    /// plus a runnable `Workflow` for the entrypoint `E`. Builds the
-    /// `BuildCtx` (and reads `athena.toml`) here — emit only.
-    /// Emit the multi-doc YAML. `with_workflow` appends a convenience
-    /// runnable `Workflow` (`generateName`, `workflowTemplateRef` →
-    /// root) — off by default: the deterministic, stable-named
-    /// `WorkflowTemplate`s are the artifact you register/GitOps, and
-    /// runs are triggered with `argo submit --from
-    /// workflowtemplate/<root>`. The convenience Workflow is opt-in for
-    /// quick demos / `kubectl create -f -`.
     /// The deterministic `WorkflowTemplate` set `emit` serializes —
     /// every reachable template, sorted, with each `on_exit_if_root`
     /// hook stamped on its own template. Shared by YAML emit and the
@@ -2209,12 +2201,16 @@ impl Collector {
                     }),
                 });
         }
-        // `name` carries no per-WT information yet (over-inclusion
-        // doc'd above). Keep the param so a future precision pass
-        // can read it without touching the call sites.
-        let _ = name;
     }
 
+    /// Emit the multi-doc YAML stream: one `WorkflowTemplate` per
+    /// reachable template. `with_workflow` appends a convenience
+    /// runnable `Workflow` (`generateName`, `workflowTemplateRef` →
+    /// root) — off by default: the deterministic, stable-named
+    /// `WorkflowTemplate`s are the artifact you register/GitOps, and
+    /// runs are triggered with `argo submit --from
+    /// workflowtemplate/<root>`. The convenience Workflow is opt-in for
+    /// quick demos / `kubectl create -f -`.
     pub fn emit<E: Template>(&self, ctx: &BuildCtx, with_workflow: bool) -> String {
         let tpls = self.build_templates(ctx);
         let mut docs: Vec<String> = tpls
@@ -2507,14 +2503,14 @@ pub fn entrypoint_impl<E: Template>(
     // pod spec doesn't carry it as a per-template argv string, and so
     // argv is 100% function data, eligible for Argo's automatic offload
     // of large `container.args` to a ConfigMap (env vars are not).
-    if let Ok(t) = std::env::var("CARGO_ATHENA_TEMPLATE") {
+    if let Ok(t) = std::env::var(CARGO_ATHENA_TEMPLATE_ENV) {
         let run = *collector
             .runners
             .get(&t)
             .unwrap_or_else(|| panic!("no runnable container template named {t:?}"));
         let argv: Vec<String> = std::env::args().skip(1).map(deref_offloaded_arg).collect();
         let output = run(&argv);
-        if let Ok(path) = std::env::var("CARGO_ATHENA_OUTPUT") {
+        if let Ok(path) = std::env::var(CARGO_ATHENA_OUTPUT_ENV) {
             std::fs::write(path, &output).expect("write CARGO_ATHENA_OUTPUT");
         } else {
             println!("{output}");
