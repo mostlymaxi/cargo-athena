@@ -1,11 +1,6 @@
 {
   description = "cargo-athena: compile regular Rust into Argo Workflow YAML";
 
-  # fenix publishes prebuilt Rust toolchains to nix-community.cachix.org,
-  # so `nix develop` *substitutes* the toolchain (a fast binary download)
-  # instead of refetching the Rust dist + realizing wrappers — locally
-  # AND in CI. Trusted Nix users pick this up automatically; others run
-  # with `--accept-flake-config` (or add themselves to `trusted-users`).
   nixConfig = {
     extra-substituters = [ "https://nix-community.cachix.org" ];
     extra-trusted-public-keys = [
@@ -35,14 +30,9 @@
         overlays = [ fenix.overlays.default ];
         pkgs = import nixpkgs { inherit system overlays; };
 
-        # Toolchain is defined once in ./rust-toolchain.toml so that
-        # `cargo`/`rustup` and Nix agree on the exact same Rust. fenix's
-        # `fromToolchainFile` wants a `sha256` over the resolved toolchain;
-        # re-pin it (run `nix develop`, paste the hash Nix prints) whenever
-        # rust-toolchain.toml or the fenix input changes.
         rustToolchain = pkgs.fenix.fromToolchainFile {
           file = ./rust-toolchain.toml;
-          sha256 = "sha256-h+t2xTBz5yt2YIO+1VMIIGlCU7gyp2LYOFvaV1nwOXU=";
+          sha256 = "sha256-A1abGIbOtcBSdrUMhDGrER3pRM1hQP4fp9gh3Y4PKc8=";
         };
 
         rustPlatform = pkgs.makeRustPlatform {
@@ -50,13 +40,9 @@
           rustc = rustToolchain;
         };
 
-        # Single source of truth for the version (workspace Cargo.toml).
         version =
-          (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+          (fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
 
-        # One source of truth for the dev tooling, composed so each CI
-        # job materializes only what it uses — the rest of the fat shell
-        # is never substituted on that job's fresh runners.
         ciPackages = [ rustToolchain ]; # test / clippy / publish
         crossTools = [
           # static-musl cross-compilation for `cargo athena build`.
@@ -72,11 +58,11 @@
           pkgs.minio-client
           pkgs.jq
         ];
-        # Documentation site (docs/, published to GitHub Pages). No rust
-        # — keep it out of the docs closure.
+
         docsPackages = [ pkgs.mdbook ];
         crossPackages = ciPackages ++ crossTools; # .#build (e2e build job)
         e2ePackages = ciPackages ++ clusterTools; # .#e2e  (e2e job)
+
         devPackages = # fat local default = union of all
           ciPackages
           ++ crossTools
@@ -87,28 +73,24 @@
             pkgs.cargo-edit
             pkgs.cargo-nextest
           ];
-        # Lets rust-analyzer find the standard library sources.
+
         rustSrcEnv = "${rustToolchain}/lib/rustlib/src/rust/library";
       in
       {
-        # `nix build` / `nix profile install github:mostlymaxi/cargo-athena`
-        # / `nix run github:mostlymaxi/cargo-athena -- athena …`
         packages.default = rustPlatform.buildRustPackage {
           pname = "cargo-athena";
           inherit version;
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
-          # Just the CLI binary — the workspace also has the library
-          # crates + examples we don't want in the install closure.
           cargoBuildFlags = [
             "--package"
             "cargo-athena"
             "--bin"
             "cargo-athena"
           ];
-          # The workspace test suite needs docker/kind/trybuild and is
-          # not a packaging concern; CI covers it.
+
           doCheck = false;
+
           meta = {
             description = "Compile regular Rust into Argo Workflow YAML";
             homepage = "https://github.com/mostlymaxi/cargo-athena";
@@ -134,8 +116,7 @@
         };
 
         # Lean per-job CI shells: each substitutes only its own tools, so
-        # `nix develop .#<x>` on a fresh runner skips the rest. One
-        # source of truth — every one is a subset of the fat default.
+        # `nix develop .#<x>` on a fresh runner skips the rest.
         devShells.ci = pkgs.mkShell {
           # test / clippy / publish (compile only)
           packages = ciPackages;
