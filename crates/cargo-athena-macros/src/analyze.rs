@@ -43,6 +43,13 @@ pub(crate) enum Arg {
     /// `toJSON(fromJSON(..))` universal-safe form). Carries the
     /// producing `fan_out` task (adds the DAG dep, like `Ref`).
     FanAgg(String),
+    /// `Ref` to a `.continue_on` task: `Result<T, ArgoError>` encoding.
+    RefFallible(String),
+    /// `FanAgg` of a `.continue_on` fan: all-or-nothing
+    /// `Result<Vec<T>, ArgoError>`. Carries the fan's list source so
+    /// emit can compare aggregate length against source length (group
+    /// `status` is absent from scope on Argo 3.6).
+    FanAggFallible { task: String, src: FanSrc },
 }
 
 /// Where a `Json` arg's root value comes from.
@@ -54,6 +61,7 @@ pub(crate) enum JsonSrc {
 }
 
 /// The list a `fan_out` iterates (Argo `withParam`).
+#[derive(Clone)]
 pub(crate) enum FanSrc {
     /// Prior `let` binding (Vec/array from a task) → `{{tasks.<t>.…}}`
     /// (adds a DAG dep on the producer).
@@ -1020,20 +1028,23 @@ pub(crate) fn analyze_workflow(
     if want_output && output_task.is_none() {
         return Err(syn::Error::new_spanned(&func.sig.output, RETURN_UNRESOLVED));
     }
-    let fan_tasks = retag_fan_aggs(&mut nodes);
-    // A fan binding can be CONSUMED by a task (re-tagged above), but not
-    // RETURNED as the workflow's value: the `outputs.parameters.return`
-    // bubble is a plain `valueFrom.parameter` copy of the raw aggregate,
-    // whose elements are still individually JSON-encoded — the parent
-    // would read a double-encoded array. (Arm bodies get the same check
-    // in `synth_if`.)
-    if let Some(t) = &output_task
-        && fan_tasks.contains(t)
-    {
-        return Err(syn::Error::new_spanned(
-            &func.sig.output,
-            FAN_RETURN_UNSUPPORTED,
-        ));
+    let (fan_tasks, fallible_tasks) = retag_refs(&mut nodes);
+    // Consumable but not returnable (arm bodies get the same checks in
+    // `synth_if`): a fan aggregate would bubble double-encoded, a
+    // fallible binding has no `Result` bubble encoding.
+    if let Some(t) = &output_task {
+        if fan_tasks.contains(t) {
+            return Err(syn::Error::new_spanned(
+                &func.sig.output,
+                FAN_RETURN_UNSUPPORTED,
+            ));
+        }
+        if fallible_tasks.contains(t) {
+            return Err(syn::Error::new_spanned(
+                &func.sig.output,
+                FALLIBLE_RETURN_UNSUPPORTED,
+            ));
+        }
     }
     Ok((nodes, output_task, ctx.synth))
 }
@@ -1043,24 +1054,30 @@ Argo aggregate's elements are individually JSON-encoded, so the parent would \
 read a double-encoded array). Pass the binding to a consuming template inside \
 this workflow and return that instead.";
 
-/// Re-tag `Arg::Ref`s to `fan_out` tasks as [`Arg::FanAgg`] within ONE
-/// scope's node list (task args and hook args alike), returning the
-/// scope's fan task set so callers can also reject a fan task as the
-/// scope's terminal output.
-///
-/// A downstream task consuming a `fan_out` binding gets Argo's
-/// `withParam` aggregate, whose elements are each per-item task's
-/// already-JSON-encoded `return` — a plain `Ref` double-encodes, so
-/// emit must use the array-renormalizing expr instead. Scope-local by
-/// construction: a `Ref` can only name a task in its own node list
-/// (outer bindings enter an `if` arm as captured *inputs*, never refs),
-/// so the caller must run this once per scope — the top-level body AND
-/// every synthesized `if`-arm body (missing the latter was a real bug:
-/// fan-out inside an arm silently emitted the double-encoded form).
-pub(crate) fn retag_fan_aggs(nodes: &mut [Node]) -> std::collections::HashSet<String> {
-    let fan_tasks: std::collections::HashSet<String> = nodes
+pub(crate) const FALLIBLE_RETURN_UNSUPPORTED: &str = "a `.continue_on(..)` binding is a `Result<T, ArgoError>` and can't be \
+returned as the workflow's value. Pass it to a consuming template inside \
+this workflow and return that instead.";
+
+/// Per-scope arg re-tag (task and hook args alike): a `Ref` to a
+/// `fan_out` task becomes an aggregate, a `Ref` to a `.continue_on`
+/// task becomes `Result`-encoded. Scope-local: run once per scope
+/// (top-level body AND every `if`-arm body). Returns (fan tasks,
+/// fallible tasks) so callers can reject either as the scope's
+/// terminal output.
+pub(crate) fn retag_refs(
+    nodes: &mut [Node],
+) -> (
+    std::collections::HashSet<String>,
+    std::collections::HashSet<String>,
+) {
+    let fan_srcs: std::collections::HashMap<String, FanSrc> = nodes
         .iter()
-        .filter(|n| n.fan.is_some())
+        .filter_map(|n| n.fan.clone().map(|f| (n.task.clone(), f)))
+        .collect();
+    let fan_tasks: std::collections::HashSet<String> = fan_srcs.keys().cloned().collect();
+    let fallible: std::collections::HashSet<String> = nodes
+        .iter()
+        .filter(|n| n.continue_on.is_some())
         .map(|n| n.task.clone())
         .collect();
     for n in nodes.iter_mut() {
@@ -1069,12 +1086,18 @@ pub(crate) fn retag_fan_aggs(nodes: &mut [Node]) -> std::collections::HashSet<St
             .iter_mut()
             .chain(n.hooks.iter_mut().flat_map(|h| h.args.iter_mut()));
         for a in args {
-            if let Arg::Ref(t) = a
-                && fan_tasks.contains(t)
-            {
-                *a = Arg::FanAgg(t.clone());
+            if let Arg::Ref(t) = a {
+                *a = match (fan_srcs.get(t), fallible.contains(t)) {
+                    (Some(src), true) => Arg::FanAggFallible {
+                        task: t.clone(),
+                        src: src.clone(),
+                    },
+                    (Some(_), false) => Arg::FanAgg(t.clone()),
+                    (None, true) => Arg::RefFallible(t.clone()),
+                    (None, false) => continue,
+                };
             }
         }
     }
-    fan_tasks
+    (fan_tasks, fallible)
 }

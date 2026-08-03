@@ -40,10 +40,12 @@ struct GhostRewrite;
 impl VisitMut for GhostRewrite {
     fn visit_expr_mut(&mut self, e: &mut Expr) {
         let mut hooks: Vec<Expr> = Vec::new();
+        let mut fallible = false;
         while let Expr::MethodCall(mc) = e {
             if !is_builder_method(&mc.method) {
                 break;
             }
+            fallible |= mc.method == "continue_on";
             if mc.method == "hook_if" {
                 // `.hook_if("expr" = t, …)` — targets are the assign
                 // right sides; the string keys aren't Rust values.
@@ -78,6 +80,11 @@ impl VisitMut for GhostRewrite {
                 .push(syn::PathSegment::from(format_ident!("__athena_sig")));
         }
         syn::visit_mut::visit_expr_mut(self, e);
+        // After recursion so the wrapper's inner call isn't re-visited.
+        if fallible {
+            let inner = e.clone();
+            *e = syn::parse_quote!(::cargo_athena::__athena_fallible(#inner));
+        }
     }
 }
 

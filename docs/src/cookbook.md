@@ -269,13 +269,21 @@ When to pick which:
 ## Per-task hooks
 
 `.continue_on` / `.on_success` / `.on_failure` / `.on_error` /
-`.on_exit` fire for one specific task:
+`.on_exit` fire for one specific task. A `.continue_on` binding is a
+`Result<T, ArgoError>` (`ArgoError` carries the Argo phase and exit
+code), so a container decides what a failure means:
 
 ```rust,ignore
+#[container]
+fn recover(data: Result<String, cargo_athena::ArgoError>) -> String {
+    data.unwrap_or_else(|e| format!("fallback:{}", e.status))
+}
+
 #[workflow]
 fn resilient() {
     let raw = fetch("u".to_string()).continue_on(failed, error);
-    transform(raw, 9)
+    let ok = recover(raw);     // handle the Result in a pod
+    transform(ok, 9)
         .on_failure(alarm)
         .on_exit(cleanup);     // runs when *this task* finishes
 }

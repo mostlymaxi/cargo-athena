@@ -1,0 +1,5 @@
+error: a `.continue_on(..)` binding is a `Result<T, ArgoError>` and can't be returned as the workflow's value. Pass it to a consuming template inside this workflow and return that instead.
+ --> tests/ui/wf_fallible_return.rs:8:9
+  |
+8 | fn wf() -> Result<String, cargo_athena::ArgoError> {
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
