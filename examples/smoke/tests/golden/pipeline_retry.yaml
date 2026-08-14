@@ -7,7 +7,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.1
+    cargo.athena/toolchain: 0.8.0
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-flaky
@@ -86,7 +86,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.1
+    cargo.athena/toolchain: 0.8.0
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-flaky-forever
@@ -161,7 +161,7 @@ metadata:
     cargo.athena/channel: release
     cargo.athena/pkg: cargo-athena-example-smoke
     cargo.athena/tag: 0-0-0
-    cargo.athena/toolchain: 0.7.1
+    cargo.athena/toolchain: 0.8.0
     cargo.athena/version: 0.0.0
 spec:
   entrypoint: cargo-athena-example-smoke-pipeline-retry
