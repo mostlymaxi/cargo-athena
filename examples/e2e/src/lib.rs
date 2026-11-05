@@ -331,8 +331,8 @@ pub fn read_note(_after: String) {
 //      this but below the practical safe ceiling.
 //
 //   2. `verify_input_blob`: workflow-input -> consumer arg. The e2e
-//      script submits with a 200 KB literal via `--parameter-file`
-//      (downsized on Argo 3.6, which lacks args-offload). Past 128 KB
+//      script submits with a 200 KB literal via `--parameter-file`.
+//      Past 128 KB
 //      Argo's controller offloads the consumer's whole `c.Args[]` to
 //      a per-pod ConfigMap and replaces any single arg > 128 KB with
 //      a `@/tmp/argo_arg_<i>.txt` sentinel; athena's runtime
@@ -353,8 +353,7 @@ pub fn verify_blob(blob: String) {
     println!("OK verify_blob {} bytes", blob.len());
 }
 
-/// Asserts content (all `'x'`) but not a fixed size: the e2e script
-/// downsizes on Argo 3.6, where the offload feature is absent.
+/// Asserts content (all `'x'`); the e2e script sets the size.
 #[container]
 pub fn verify_input_blob(blob: String) {
     assert!(!blob.is_empty(), "input_blob arrived empty");
@@ -566,9 +565,8 @@ pub fn pipeline(input_blob: String) {
     verify_blob(blob);
 
     // Workflow-input -> consumer arg. The e2e script submits with a
-    // >128 KB literal on Argo 3.7+ to exercise the controller's
-    // args-offload + athena's @filename de-reference (a smaller value
-    // on 3.6, which lacks the feature).
+    // >128 KB literal to exercise the controller's
+    // args-offload + athena's @filename de-reference.
     verify_input_blob(input_blob);
 
     // Force-link the steps-mode workflow into this entrypoint's emit

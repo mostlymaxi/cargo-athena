@@ -111,16 +111,10 @@ say "apply WorkflowTemplates"
 kubectl apply -n "$NS" -f /tmp/athena-wts.yaml
 
 say "submit Workflow (waits for completion)"
-# `pipeline` takes an `input_blob: String`. We submit a >128 KB literal
-# on Argo 3.7+ to exercise the controller's args-offload path and
-# athena's `@/tmp/argo_arg_<i>.txt` de-reference. Argo 3.6 lacks
-# args-offload (PR #15265 didn't backport), so we downsize there to
-# 8 KB - still proves the workflow-input -> positional argv plumbing,
-# but stays inside the kernel exec ARG_MAX.
-case "${ARGO_VERSION:-v4.0.8}" in
-  v3.6.*) BLOB_BYTES=$((8 * 1024)) ;;
-  *)      BLOB_BYTES=$((200 * 1024)) ;;
-esac
+# `pipeline` takes an `input_blob: String`. A >128 KB literal exercises
+# the controller's args-offload path and athena's
+# `@/tmp/argo_arg_<i>.txt` de-reference.
+BLOB_BYTES=$((200 * 1024))
 PARAM_FILE=$(mktemp -t athena-params.XXXXXX.yaml)
 {
   printf 'input_blob: "'
@@ -161,7 +155,12 @@ say "feature-matrix assertions"
 # The mega pipeline Succeeding already proves every feature ran; these
 # assert the *observable effect* of the trickier ones from pod logs.
 WF=$(argo get -n "$NS" @latest -o json | jq -r '.metadata.name')
-fetch_logs() { LOGS=$(argo logs -n "$NS" "$WF" 2>/dev/null || true); }
+# One `kubectl logs` per pod: a bulk `argo logs` drops pods it fails to
+# fetch without an error.
+fetch_logs() {
+  LOGS=$(kubectl -n "$NS" get pods -l "workflows.argoproj.io/workflow=$WF" -o name \
+    | xargs -P 8 -I{} kubectl -n "$NS" logs {} -c main)
+}
 fetch_logs
 need() { # need <grep-regex> <feature label>
   # `argo logs` right after completion can miss pods: re-fetch on a miss.
@@ -195,7 +194,7 @@ need 'note:L4'                     "value-if + statement-if (chose left(4))"
 need 'id=abc'                      "struct-field access (m.id)"
 need 'tagged image busybox:1.36-musl' "image injection (busybox: + tag)"
 need 'read e2e-note = payload-42'  "save_artifact! -> load_artifact! roundtrip"
-need "OK verify_input_blob $BLOB_BYTES bytes" "workflow-input arg (offload path on 3.7+)"
+need "OK verify_input_blob $BLOB_BYTES bytes" "workflow-input arg (args-offload path)"
 need 'cleanup ran'                 "on_exit_if_root + per-task .on_exit"
 
 # #[workflow(node_selector=…)] must cascade onto every task pod.
@@ -239,7 +238,7 @@ echo "ok: submit -> $SUBWF Succeeded"
 say "submit pipeline_steps (#[workflow(steps)]) — live steps-mode assertion"
 # Macro/golden tests pin the emit shape; this asserts Argo actually
 # accepts the `steps:` template + cross-step `{{steps.X.outputs.…}}`
-# refs on a live cluster across the v4.0/v3.7/v3.6 matrix.
+# refs on a live cluster across the Argo version matrix.
 STEPSWF=$( cd "$ROOT" && cargo run -q -p cargo-athena --bin cargo-athena -- \
   athena submit -w cargo-athena-example-e2e-pipeline-steps \
   --package "$PKG" --bin "$BIN" -n "$NS" --skip-binary-check -y \
