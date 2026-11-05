@@ -742,16 +742,16 @@ pub(crate) fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
         .with_bucket_name(&s3.bucket)
         .with_region(&s3.region)
         .with_allow_http(s3.insecure);
-    // `AWS_ENDPOINT_URL` (AWS-SDK standard) overrides the config
-    // endpoint — needed when S3 is reached differently from here than
-    // from the pods (e.g. an in-cluster DNS in `athena.toml` for the
-    // bootstrap, but a port-forward / public host when `publish`ing
-    // from outside the cluster). Falls back to `AWS_ENDPOINT_URL_S3`.
-    let ep_env = std::env::var("AWS_ENDPOINT_URL")
-        .ok()
-        .or_else(|| std::env::var("AWS_ENDPOINT_URL_S3").ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+    // AWS_ENDPOINT_URL_S3, else AWS_ENDPOINT_URL (SDK precedence), overrides
+    // the config endpoint (e.g. a port-forward for publish).
+    let ep_env = ["AWS_ENDPOINT_URL_S3", "AWS_ENDPOINT_URL"]
+        .iter()
+        .find_map(|k| {
+            std::env::var(k)
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        });
     if let Some(url) = ep_env {
         if url.starts_with("http://") {
             b = b.with_allow_http(true);
