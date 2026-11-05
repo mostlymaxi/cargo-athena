@@ -10,7 +10,8 @@
 //!   closed AST; [`render_when`] is the single producer of the Argo
 //!   `when` string (so a malformed expression is unrepresentable).
 //! - [`hoist_cond`]: pre-pass that pulls template-call operands in the
-//!   condition into parent tasks (Rust evaluates conds unconditionally).
+//!   condition into parent tasks (Rust evaluates conds unconditionally),
+//!   and constant operands into wrapper inputs.
 //! - [`synth_if`]: emits the wrapper + arm `SynthWf`s; the returned task
 //!   name is what the parent dag/steps consumes.
 //! - [`emit_synth`]: lowers one `SynthWf` to a hidden
@@ -27,7 +28,7 @@ use crate::analyze::{
     path_leaf, push_call, retag_refs, uniq_task,
 };
 use crate::node_tokens::node_tokens;
-use crate::utils::{str_slice, unwrap_expr, yaml_ambiguous};
+use crate::utils::{arg_slot, str_slice, unwrap_expr, yaml_ambiguous};
 
 #[derive(Clone, Copy)]
 pub(crate) enum CmpOp {
@@ -89,7 +90,8 @@ pub(crate) enum WhenExpr {
 }
 pub(crate) const UNSUPPORTED_COND: &str = "unsupported `if` condition. Allowed: \
 comparisons (== != < <= > >=) and `&&`/`||`/`!` over a #[workflow] input, \
-a prior `let = template(...)` binding, an `a.field` of one, or a literal. \
+a prior `let = template(...)` binding, an `a.field` of one, a literal, or a \
+constant value. \
 Method calls, arithmetic, function calls and casts aren't lowered.";
 
 /// Resolve a single condition operand, preserving literal kind. Reuses
@@ -100,15 +102,13 @@ pub(crate) fn cond_operand(
     bindings: &std::collections::HashMap<String, String>,
     inputs: &std::collections::HashSet<String>,
 ) -> syn::Result<WhenOp> {
-    if let Expr::Lit(syn::ExprLit { lit, .. }) = unwrap_expr(e) {
+    if let Some((neg, lit)) = plain_lit(e) {
         return Ok(match lit {
-            syn::Lit::Str(s) => WhenOp::Str(s.value()),
-            syn::Lit::Int(i) => WhenOp::Int(i.base10_digits().to_string()),
-            syn::Lit::Float(f) => WhenOp::Int(f.base10_digits().to_string()),
-            syn::Lit::Bool(b) => WhenOp::Bool(b.value),
-            other => {
-                return Err(syn::Error::new_spanned(other, UNSUPPORTED_COND));
-            }
+            syn::Lit::Str(s) if neg.is_empty() => WhenOp::Str(s.value()),
+            syn::Lit::Int(i) => WhenOp::Int(format!("{neg}{}", i.base10_digits())),
+            syn::Lit::Float(f) => WhenOp::Int(format!("{neg}{}", f.base10_digits())),
+            syn::Lit::Bool(b) if neg.is_empty() => WhenOp::Bool(b.value),
+            other => return Err(syn::Error::new_spanned(other, UNSUPPORTED_COND)),
         });
     }
     // Non-literal operands share the exact arg rules (binding/input/
@@ -119,18 +119,29 @@ pub(crate) fn cond_operand(
             src: JsonSrc::Input(n),
             path,
         }) => Ok(WhenOp::Json { input: n, path }),
-        // `Arg::Lit` only comes back for a literal, handled above; `Item`
+        // `Lit`/`Const` operands were hoisted to inputs; `Item`
         // can't occur outside a fan_out closure; `Ref`/task-rooted `Json`
         // can't occur because conditions are resolved inside the wrapper
         // with empty bindings (parent bindings arrive as inputs).
         Ok(_) => Err(syn::Error::new_spanned(e, UNSUPPORTED_COND)),
-        // Keep the resolver's own diagnosis (e.g. "`x` is not a
-        // #[workflow] input …") — it names the actual problem; append
-        // the condition-grammar context.
+        // Keep the resolver's own diagnosis; append the condition-grammar
+        // context.
         Err(mut inner) => {
             inner.combine(syn::Error::new_spanned(e, UNSUPPORTED_COND));
             Err(inner)
         }
+    }
+}
+
+/// `lit` or `-lit`: rendered inline, never hoisted.
+fn plain_lit(e: &Expr) -> Option<(&'static str, &syn::Lit)> {
+    match unwrap_expr(e) {
+        Expr::Lit(l) => Some(("", &l.lit)),
+        Expr::Unary(u) if matches!(u.op, syn::UnOp::Neg(_)) => match unwrap_expr(&u.expr) {
+            Expr::Lit(l) => Some(("-", &l.lit)),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -184,7 +195,9 @@ pub(crate) fn cond_to_when(
 /// A single condition operand: if it's a template call (`if foo() > 3`),
 /// hoist it to a parent task (Rust evaluates the condition regardless of
 /// branch, so it runs unconditionally) and substitute a reference to it;
-/// identical calls within one `if` are hoisted once. Otherwise unchanged.
+/// identical calls within one `if` are hoisted once. A constant operand
+/// (not a plain literal) is hoisted the same way, as a wrapper input.
+/// Otherwise unchanged.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn hoist_operand(
     e: &Expr,
@@ -193,39 +206,41 @@ pub(crate) fn hoist_operand(
     bindings: &std::collections::HashMap<String, String>,
     inputs: &std::collections::HashSet<String>,
     seen: &mut std::collections::HashMap<String, syn::Ident>,
-    cond_binds: &mut std::collections::HashMap<String, String>,
+    hoisted: &mut std::collections::HashMap<String, Arg>,
 ) -> syn::Result<Expr> {
-    if let Some((c2, r2)) = call_parts(e) {
-        let key = quote!(#e).to_string();
-        let id = if let Some(id) = seen.get(&key) {
-            id.clone()
-        } else {
-            let leaf = path_leaf(&c2);
-            let t = push_call(
-                c2,
-                r2,
-                &leaf,
-                NodeOpts::default(),
-                None,
-                None,
-                used,
-                nodes,
-                bindings,
-                inputs,
-            )?;
-            let id = format_ident!("__athena_cond_{}", seen.len());
-            cond_binds.insert(id.to_string(), t);
-            seen.insert(key, id.clone());
-            id
-        };
-        Ok(syn::parse_quote!(#id))
-    } else {
-        Ok(e.clone())
+    let key = quote!(#e).to_string();
+    if let Some(id) = seen.get(&key) {
+        return Ok(syn::parse_quote!(#id));
     }
+    let arg = if let Some((c2, r2)) = call_parts(e) {
+        let leaf = path_leaf(&c2);
+        Arg::Ref(push_call(
+            c2,
+            r2,
+            &leaf,
+            NodeOpts::default(),
+            None,
+            None,
+            used,
+            nodes,
+            bindings,
+            inputs,
+        )?)
+    } else if plain_lit(e).is_none()
+        && let Ok(a @ (Arg::Lit(_) | Arg::Const(_))) = expr_to_arg(e, bindings, inputs, None)
+    {
+        a
+    } else {
+        return Ok(e.clone());
+    };
+    let id = format_ident!("__athena_cond_{}", seen.len());
+    hoisted.insert(id.to_string(), arg);
+    seen.insert(key, id.clone());
+    Ok(syn::parse_quote!(#id))
 }
 
-/// Rewrite a condition, hoisting every template-call operand (recursive
-/// over the `== != < <= > >=`, `&&`, `||`, `!` grammar so
+/// Rewrite a condition, hoisting every template-call and constant
+/// operand (recursive over the `== != < <= > >=`, `&&`, `||`, `!` grammar so
 /// `a && foo() == bar()` hoists both). Non-grammar shapes pass through
 /// unchanged — `cond_to_when` then produces the proper error.
 #[allow(clippy::too_many_arguments)]
@@ -236,7 +251,7 @@ pub(crate) fn hoist_cond(
     bindings: &std::collections::HashMap<String, String>,
     inputs: &std::collections::HashSet<String>,
     seen: &mut std::collections::HashMap<String, syn::Ident>,
-    cond_binds: &mut std::collections::HashMap<String, String>,
+    hoisted: &mut std::collections::HashMap<String, Arg>,
 ) -> syn::Result<Expr> {
     match unwrap_expr(e) {
         Expr::Binary(b) => {
@@ -244,12 +259,12 @@ pub(crate) fn hoist_cond(
             let mut nb = b.clone();
             let (l, r) = match b.op {
                 Eq(_) | Ne(_) | Lt(_) | Le(_) | Gt(_) | Ge(_) => (
-                    hoist_operand(&b.left, used, nodes, bindings, inputs, seen, cond_binds)?,
-                    hoist_operand(&b.right, used, nodes, bindings, inputs, seen, cond_binds)?,
+                    hoist_operand(&b.left, used, nodes, bindings, inputs, seen, hoisted)?,
+                    hoist_operand(&b.right, used, nodes, bindings, inputs, seen, hoisted)?,
                 ),
                 And(_) | Or(_) => (
-                    hoist_cond(&b.left, used, nodes, bindings, inputs, seen, cond_binds)?,
-                    hoist_cond(&b.right, used, nodes, bindings, inputs, seen, cond_binds)?,
+                    hoist_cond(&b.left, used, nodes, bindings, inputs, seen, hoisted)?,
+                    hoist_cond(&b.right, used, nodes, bindings, inputs, seen, hoisted)?,
                 ),
                 _ => return Ok(e.clone()),
             };
@@ -260,11 +275,11 @@ pub(crate) fn hoist_cond(
         Expr::Unary(u) if matches!(u.op, syn::UnOp::Not(_)) => {
             let mut nu = u.clone();
             nu.expr = Box::new(hoist_cond(
-                &u.expr, used, nodes, bindings, inputs, seen, cond_binds,
+                &u.expr, used, nodes, bindings, inputs, seen, hoisted,
             )?);
             Ok(Expr::Unary(nu))
         }
-        _ => hoist_operand(e, used, nodes, bindings, inputs, seen, cond_binds),
+        _ => hoist_operand(e, used, nodes, bindings, inputs, seen, hoisted),
     }
 }
 
@@ -431,12 +446,12 @@ pub(crate) fn synth_if(
         ));
     }
 
-    // Hoist template-call operands in conditions to parent tasks
-    // (`if foo() > 3` → a parent `foo` node + `__athena_cond_N` ref);
-    // identical calls share one task. Conditions are then plain
+    // Hoist template-call and constant operands in conditions to
+    // `__athena_cond_N` wrapper inputs (`if foo() > 3` → a parent `foo`
+    // node); identical operands share one. Conditions are then plain
     // binding/input/field/literal expressions again.
-    let mut seen_calls: std::collections::HashMap<String, syn::Ident> = Default::default();
-    let mut cond_binds: std::collections::HashMap<String, String> = Default::default();
+    let mut seen: std::collections::HashMap<String, syn::Ident> = Default::default();
+    let mut hoisted: std::collections::HashMap<String, Arg> = Default::default();
     let arms: Vec<(Option<Expr>, syn::Block)> = arms
         .into_iter()
         .map(|(c, b)| -> syn::Result<_> {
@@ -447,19 +462,14 @@ pub(crate) fn synth_if(
                     nodes,
                     bindings,
                     inputs,
-                    &mut seen_calls,
-                    &mut cond_binds,
+                    &mut seen,
+                    &mut hoisted,
                 )?),
                 None => None,
             };
             Ok((c, b))
         })
         .collect::<syn::Result<_>>()?;
-    // Parent scope augmented with the hoisted condition tasks.
-    let mut eff_bindings = bindings.clone();
-    for (kk, vv) in &cond_binds {
-        eff_bindings.insert(kk.clone(), vv.clone());
-    }
 
     // Captured free vars = (every arm body ∪ every condition) ∩ parent
     // scope. Whole bindings/inputs only (a field/`.f` captures its base).
@@ -485,7 +495,7 @@ pub(crate) fn synth_if(
     }
     let captures: Vec<String> = refset
         .into_iter()
-        .filter(|n| eff_bindings.contains_key(n) || inputs.contains(n))
+        .filter(|n| hoisted.contains_key(n) || bindings.contains_key(n) || inputs.contains(n))
         .collect();
     for c in &captures {
         if let Some(why) = yaml_ambiguous(c) {
@@ -603,12 +613,10 @@ pub(crate) fn synth_if(
     // Parent calls the wrapper exactly like a returning sub-workflow.
     let parent_args = captures
         .iter()
-        .map(|n| {
-            if let Some(t) = eff_bindings.get(n) {
-                Arg::Ref(t.clone())
-            } else {
-                Arg::Input(n.clone())
-            }
+        .map(|n| match (hoisted.remove(n), bindings.get(n)) {
+            (Some(a), _) => a,
+            (None, Some(t)) => Arg::Ref(t.clone()),
+            (None, None) => Arg::Input(n.clone()),
         })
         .collect();
     let task = uniq_task(used, &format!("if{k}"));
@@ -701,9 +709,19 @@ pub(crate) fn emit_synth(s: &SynthWf) -> TokenStream2 {
         }
     };
     let callees = &s.callees;
+    // Untyped: only a hoisted condition constant flows through these.
+    let slots = (0..s.inputs.len()).map(arg_slot);
     quote! {
         #[allow(non_camel_case_types)]
         struct #ident;
+        impl #ident {
+            #(
+                #[allow(dead_code)]
+                fn #slots<T>() -> ::core::marker::PhantomData<fn(T)> {
+                    ::core::marker::PhantomData
+                }
+            )*
+        }
         impl ::cargo_athena::Template for #ident {
             const ARGO_NAME: &'static str = #argo;
             const INPUTS: &'static [&'static str] = #inputs_slice;
@@ -739,5 +757,69 @@ pub(crate) fn emit_synth(s: &SynthWf) -> TokenStream2 {
                 )*
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analyze::analyze_workflow;
+    use syn::parse_quote;
+
+    /// The `if0` wrapper, and the parent task that calls it.
+    fn if0(f: syn::ItemFn) -> (SynthWf, Node) {
+        let (nodes, _, synth) = analyze_workflow(&f, "w")
+            .map_err(|e| e.to_string())
+            .unwrap();
+        let wrap = synth.into_iter().find(|s| s.argo_name == "w-if0").unwrap();
+        let call = nodes.into_iter().find(|n| n.task == "if0").unwrap();
+        (wrap, call)
+    }
+
+    #[test]
+    fn arm_does_not_capture_const_let() {
+        let (w, _) = if0(parse_quote!(
+            fn wf(x: u32) {
+                let cfg = Opts { a: 1 };
+                if x > 1 {
+                    run(cfg)
+                }
+            }
+        ));
+        assert_eq!(w.inputs, ["x"]);
+    }
+
+    #[test]
+    fn const_operand_hoisted() {
+        let (w, call) = if0(parse_quote!(
+            fn wf(m: i64) {
+                if m > LIMIT {
+                    act()
+                }
+            }
+        ));
+        assert_eq!(w.inputs, ["m", "__athena_cond_0"]);
+        assert!(matches!(call.args[..], [Arg::Input(_), Arg::Const(_)]));
+        assert_eq!(
+            w.nodes[0].when.as_deref(),
+            Some("({{inputs.parameters.m}} > {{inputs.parameters.__athena_cond_0}})")
+        );
+    }
+
+    #[test]
+    fn literal_operands_inline() {
+        let (w, _) = if0(parse_quote!(
+            fn wf(m: i64) {
+                let k = 3;
+                if m > k && m > -3_000_000_000 {
+                    act()
+                }
+            }
+        ));
+        assert_eq!(w.inputs, ["m"]);
+        assert_eq!(
+            w.nodes[0].when.as_deref(),
+            Some("(({{inputs.parameters.m}} > 3) && ({{inputs.parameters.m}} > -3000000000))")
+        );
     }
 }
