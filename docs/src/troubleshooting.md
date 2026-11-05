@@ -40,6 +40,31 @@ binding.fan_out(|x| template(x, …));
 binding.continue_on(...)       // and the other per-task hooks
 ```
 
+### "... in an `if` condition"
+
+```
+error: `.len()` isn't lowered in an `if` condition. ...
+error[E0277]: `HashSet<std::string::String>` can't be compared with `==`/`!=` in an `if` condition
+```
+
+A condition only compares strings, `char`, `bool` and numbers, and it
+can't call methods. Compute the `bool` in a `#[container]` and call
+it in the condition:
+
+```rust,ignore
+#[container]
+fn is_long(s: String) -> bool {
+    s.len() > 10
+}
+
+#[workflow]
+fn pipeline(name: String) {
+    if is_long(name.clone()) {
+        note(name);
+    }
+}
+```
+
 ### "the trait `Injectable` is not implemented for ..."
 
 You used `image = "repo:" + arg` (or similar) where `arg` is a type

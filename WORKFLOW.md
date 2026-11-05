@@ -271,16 +271,21 @@ Real Rust conditionals run exactly one branch:
 
 ```rust,ignore
 // statement-if / else-if / else
-if n == 0 {
+if count == 0 {
     note("zero".to_string());
-} else if m.id == "abc" && n > 1 {
+} else if m.id == "abc" && count > 1 {
     note(chosen);
 } else {
     note("other".to_string());
 }
 
 // value-if: pass the taken branch's value out
-let chosen = if n > 3 { left(n) } else { right(n) };
+let chosen = if count > 3 { left(count) } else { right(count) };
+
+// anything else: a #[container] that returns bool
+if has_tags(tags.clone()) {
+    deploy(tags);
+}
 ```
 
 - **Conditions** are a closed grammar: comparisons `== != < <= > >=`
@@ -288,6 +293,16 @@ let chosen = if n > 3 { left(n) } else { right(n) };
   `#[workflow]` input, an `a.field` of one, a literal, or a nested
   template call. Anything outside this grammar (method calls,
   arithmetic, casts) is a targeted compile error.
+- `==` and `!=` work on strings, `char`, `bool` and numbers. `<`,
+  `<=`, `>` and `>=` work on strings, `char` and numbers (order a
+  string against a literal as `s < "m".to_string()`). To compare
+  structs, compare their fields (`m.id == "abc"`). Numbers compare as
+  64-bit floats, so integers are exact up to 2^53.
+- To test anything else (a method, a list, an `Option`, a
+  `.continue_on(..)` result), write a `#[container]` that returns
+  `bool` and call it in the condition. A template call in a condition
+  runs as its own step before the `if`, also when an earlier branch
+  is taken.
 - **Value-`if`** requires an `else` and both arms producing the same
   type.
 - Bindings created *inside* an arm are not visible after the `if`.
