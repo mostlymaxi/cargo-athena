@@ -148,8 +148,8 @@ arbitrary method calls, `let` with non-ident/tuple patterns,
 Nothing is silently dropped.
 
 Each task is named after the template it calls (`fetch`, then
-`fetch-2` for a second call), never after the `let` binding. An `if`
-task is named `if`.
+`fetch-2` for a second call), never after the `let` binding. Each
+`if` / `else` becomes one task named `if` (then `if-2`, …).
 
 ### Arguments to a template call
 
