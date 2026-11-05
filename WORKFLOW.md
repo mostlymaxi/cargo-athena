@@ -238,10 +238,11 @@ transform(x).hook_if("workflow.status == 'Failed'" = alarm);  // raw Argo expr e
   Argo expression escape hatch.
 
 Any hook target is `t` or `t(args)`. Hook args are type-checked like
-task args: same allowed forms, arity, and types. Passing one binding
-to both the task and a hook is a fan-out and needs an explicit
-`.clone()`. Hook templates are reachable from this workflow, so they
-get registered like any other callee.
+task args: same allowed forms, arity, and types. A task waits for
+every task its hook args use, the same as for its own args. Passing
+one binding to both the task and a hook is a fan-out and needs an
+explicit `.clone()`. Hook templates are reachable from this workflow,
+so they get registered like any other callee.
 
 ## `.fan_out(|x| C(x, …))` - list fan-out
 
