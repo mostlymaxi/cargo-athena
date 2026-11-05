@@ -1,0 +1,5 @@
+error: `labels` key `workflows.argoproj.io/workflow` is not a valid label key: Argo sets it on every pod
+ --> tests/ui/ctr_label_argo_key.rs:3:4
+  |
+3 | fn f() {}
+  |    ^
