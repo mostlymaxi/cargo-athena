@@ -22,7 +22,8 @@ spec:
           effect: NoSchedule
       containers:
         - name: minio
-          image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+          # minio/minio is gone from Docker Hub and quay; same server.
+          image: cgr.dev/chainguard/minio@sha256:3c60a2a8c4d33409a9bc7a623a7fcbfb4605adc3d89422d2f53b3f673a6e5597
           args: ["server", "/data", "--console-address", ":9001"]
           env:
             - { name: MINIO_ROOT_USER, value: athena }
@@ -69,13 +70,8 @@ spec:
           effect: NoSchedule
       containers:
         - name: mc
-          image: minio/mc:RELEASE.2025-04-16T18-13-26Z
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              set -e
-              until mc alias set m http://minio:9000 athena athena12345; do
-                echo "waiting for minio..."; sleep 2
-              done
-              mc mb --ignore-existing m/athena-artifacts
-              echo "bucket ready"
+          image: cgr.dev/chainguard/minio-client@sha256:1dccd2a6fd59914a98ac2d9dad95e552c91243cb0bd7242aaa224802df4b3432
+          # No shell in this image: the Job retries until minio is up.
+          args: ["mb", "--ignore-existing", "m/athena-artifacts"]
+          env:
+            - { name: MC_HOST_m, value: "http://athena:athena12345@minio:9000" }
