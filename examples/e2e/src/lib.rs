@@ -15,7 +15,7 @@
 //!   wrappers) with a closed-grammar numeric condition,
 //! * a **nested call** `note(echo(..))`,
 //! * **struct-field access** `m.id` (`{{=toJSON(fromJSON(..)['id'])}}`),
-//! * **attribute injection** on three leaf-template fields:
+//! * **attribute injection** on four leaf-template fields:
 //!   `image = "busybox:" + tag` (real pullable tag),
 //!   `service_account = "defa" + suffix` (resolves to `default` SA),
 //!   `node_selector = { "kubernetes.io/arch" = arch }` (matches the
@@ -280,9 +280,12 @@ pub fn use_id(id: String) {
     println!("id={id}");
 }
 
-// --- attribute injection (image = "busybox:" + tag) ------------------------
+// --- attribute injection (image = "busybox:" + tag) + pod labels -----------
 
-#[container(image = "busybox:" + tag)]
+#[container(
+    image = "busybox:" + tag,
+    labels = { "athena-e2e/kind" = "tagged", "athena-e2e/tag" = "v" + tag },
+)]
 pub fn tagged(tag: String) {
     println!("tagged image busybox:{tag}");
 }

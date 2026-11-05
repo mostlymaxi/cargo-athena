@@ -202,6 +202,16 @@ else
   echo "FAIL: node_selector not on pods (got '$SEL')"; exit 1
 fi
 
+# #[container(labels=…)]: one literal + one injected label on the pod.
+LBL=$(kubectl -n "$NS" get pods \
+  -l "workflows.argoproj.io/workflow=$WF,athena-e2e/kind=tagged,athena-e2e/tag=v1.36-musl" \
+  --no-headers 2>/dev/null | wc -l)
+if [ "$LBL" -ge 1 ]; then
+  echo "ok: container labels on pod (literal + injected)"
+else
+  echo "FAIL: container labels not on the tagged pod"; exit 1
+fi
+
 say "CLI gate: emulate (docker)"
 # Run one #[container] under docker exactly as Argo would, from the
 # already-built tarball (no S3 needed). Proves the emulate runtime path.
