@@ -137,10 +137,11 @@ Cookbook: [Mutual exclusion across runs](cookbook.md#mutual-exclusion-across-run
 
 ## The body
 
-Only three statement shapes are lowered:
+Only these statement shapes are lowered:
 
 ```rust,ignore
 let x = template(args);   // a task; `x` binds its output
+let k = 3;                // a constant value: no task
 template(args);           // a task (no output consumed)
 if cond { ... } else { ... }  // see "if / else" below
 ```
@@ -158,24 +159,95 @@ Nothing is silently dropped.
 | a `#[workflow]` input param | the workflow input, forwarded |
 | a prior `let` binding | the producer's output **+ a DAG edge** |
 | `binding.clone()` / `binding.to_owned()` | same as the binding (type-preserving) |
-| `"lit".to_string()` / `"lit".into()` | same as the literal (**literal-only**) |
+| `.to_string()` on a literal, `.into()` on a string literal | its value |
 | `binding.field.sub` | one named field of the producer's output |
 | a nested call `foo(bar())` | `bar` becomes its own task; recursive |
+| a `const` item: `MAX`, `config::NAME`, `Opts::DEFAULT` | its value |
+| a struct / tuple / array literal or an enum variant: `Opts { a: 3, b: "x".to_string() }`, `Some(3)`, `Mode::Fast` | its value (serde attributes apply) |
+| a constant `let` binding | its value, no task |
+| `constant.field` | that field's value |
 
 Notes:
 
 - **`.clone()` is the fan-out marker.** Sending one binding to *two*
   consumers requires an explicit `.clone()` - which matches what
   Argo actually does (copy the parameter into each consumer).
-- **`.to_string()` / `.into()` are literal-only.** On a binding or
-  input they're rejected: they'd change the Rust type without
-  changing the wire value, a silent mismatch. Any literal value is
-  fine.
+- **`.to_string()` / `.into()` on a binding or input are rejected.**
+  On a constant, `.to_string()` works, and `.into()` works on a
+  string literal.
 - **`Artifact<T>`-typed bindings wire through S3 automatically.** If
   the producer returns `Artifact<T>` and the consumer accepts
   `Artifact<T>`, the call site looks identical to any other
   binding-to-arg flow. See
   [`#[container]` -> Large or binary return values](container.md#large-or-binary-return-values).
+
+### Constant values
+
+Pass `const` items, literals of your own types, and constant `let`
+bindings straight to a template:
+
+```rust,ignore
+const LIMIT: u32 = 10;
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+enum Mode { Fast, Slow(u32) }
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct Opts { retries: u32, label: String, mode: Mode }
+
+impl Opts {
+    const DEFAULT: Opts = Opts { retries: 3, label: String::new(), mode: Mode::Fast };
+}
+
+#[workflow]
+fn pipeline(size: u32) {
+    let cfg = Opts { label: "nightly".to_string(), ..Opts::DEFAULT };
+    run(cfg.clone());                 // the whole struct
+    retry(cfg.retries);               // one field
+    tune(Mode::Slow(2), Some(LIMIT), (1, "x".to_string()));
+    if size > LIMIT {
+        alert(cfg.label);
+    }
+}
+```
+
+A constant can contain:
+
+| Shape | Example |
+|---|---|
+| literals | `3`, `"x"`, `true` |
+| `const` items | `MAX`, `config::NAME`, `Opts::DEFAULT` |
+| constant `let` bindings | `let k = 3;`, then `k` |
+| struct / tuple / array literals | `Opts { retries: 3, ..Opts::DEFAULT }`, `(1, "x".to_string())`, `[1, 2]` |
+| enum variants and tuple structs | `None`, `Some(3)`, `Mode::Slow(2)` |
+| field access and negation | `cfg.retries`, `-5` |
+| conversions | `.clone()`, `.to_owned()`, `.to_string()`, `.to_vec()`, `.into()` on a string literal |
+| `const { .. }` blocks | `const { MAX * 2 }`, `const { Vec::new() }` |
+
+Rules:
+
+- The value's type must implement `serde::Serialize`. A `let` bound
+  to a path (`let cfg = CFG;`) needs it too, even if you pass only
+  `cfg.retries`.
+- A constant `let` makes no task. Use `.clone()` to pass a non-`Copy`
+  constant twice.
+- A constant `let` can't have a type annotation. Use a typed literal
+  (`5_000_000_000u64`) or a `const` item.
+- A call whose name starts with an uppercase letter is a constructor
+  (`Some(3)`, `Mode::Slow(2)`). Other calls aren't run: use a `const`
+  item, a `const { .. }` block or a `#[container]`.
+- For a list, write `["a".to_string()].to_vec()`. `vec![..]` isn't
+  supported.
+- A constant can't contain a workflow input, a task result or the
+  `.fan_out` element. Build such a value in a `#[container]`.
+- A `static` works only when its type is `Copy`. Use a `const` with a
+  plain value (`const IMG: &str = "img";`). A `LazyLock` value is
+  computed again each time you emit.
+- Declare `const` items in the module, not in the workflow body.
+- A constant can't be a `.fan_out` source or a workflow's return
+  value.
+- Constant values are written into the emitted templates. Emit again
+  after you change one.
 
 ### Return values
 
@@ -254,7 +326,7 @@ per element of `a`. `b` is the aggregated `Vec<U>`, consumed
 downstream like any output.
 
 - `a` must be a prior `let` binding or a `#[workflow]` input that is
-  a list.
+  a list, not a constant.
 - The closure body must be a single template call.
 - Element / closure / result types are type-checked.
 - An empty source list aggregates to an empty `Vec`: the per-element
@@ -285,9 +357,11 @@ let chosen = if n > 3 { left(n) } else { right(n) };
 
 - **Conditions** are a closed grammar: comparisons `== != < <= > >=`
   combined with `&&` / `||` / `!`. Operands are a binding, a
-  `#[workflow]` input, an `a.field` of one, a literal, or a nested
-  template call. Anything outside this grammar (method calls,
-  arithmetic, casts) is a targeted compile error.
+  `#[workflow]` input, an `a.field` of one, a literal, a constant
+  value (`if size > LIMIT`), or a nested template call. Anything
+  outside this grammar (method calls, arithmetic, casts) is a
+  targeted compile error. A constant in a condition must be a number,
+  string, bool or unit enum variant.
 - **Value-`if`** requires an `else` and both arms producing the same
   type.
 - Bindings created *inside* an arm are not visible after the `if`.
@@ -308,6 +382,7 @@ Cookbook recipes that exercise these features:
 - [Fan-out over a list](cookbook.md#fan-out-over-a-list)
 - [Conditionals](cookbook.md#conditionals)
 - [Pass only one field of a struct](cookbook.md#pass-only-one-field-of-a-struct)
+- [Pass constants and config structs](cookbook.md#pass-constants-and-config-structs)
 - [Force a sequential execution order](cookbook.md#force-a-sequential-execution-order)
 - [Per-task hooks](cookbook.md#per-task-hooks)
 - [Retry with backoff](cookbook.md#retry-with-backoff)

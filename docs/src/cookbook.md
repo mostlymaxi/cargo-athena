@@ -12,6 +12,7 @@ pages.
 - [Fan-out over a list](#fan-out-over-a-list)
 - [Conditionals](#conditionals)
 - [Pass only one field of a struct](#pass-only-one-field-of-a-struct)
+- [Pass constants and config structs](#pass-constants-and-config-structs)
 - [Force a sequential execution order](#force-a-sequential-execution-order)
 
 **Artifacts & data sharing**
@@ -130,7 +131,9 @@ fn gated() {
 ```
 
 Conditions are a closed grammar (`== != < <= > >=`, `&& || !` over
-bindings / inputs / `a.field` / literals / nested calls).
+bindings / inputs / `a.field` / literals / constants / nested calls). A
+constant in a condition must be a number, string, bool or unit enum
+variant.
 
 ## Pass only one field of a struct
 
@@ -152,6 +155,36 @@ fn pipeline() {
 
 Named fields only (no `a.0` / `a[i]`). The compiler checks that the
 field exists and matches the consumer's type.
+
+## Pass constants and config structs
+
+Pass a `const`, a struct literal, or a constant `let` like any other
+argument. A constant `let` makes no task:
+
+```rust,ignore
+const MAX_RETRIES: u32 = 3;
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct Config { region: String, retries: u32, tags: Vec<String> }
+
+#[container] fn deploy(cfg: Config) { println!("{}", cfg.region); }
+#[container] fn retry_budget(budget: u32) { println!("{budget}"); }
+
+#[workflow]
+fn release() {
+    let cfg = Config {
+        region: "eu-west-1".to_string(),
+        retries: MAX_RETRIES,
+        tags: ["blue".to_string()].to_vec(),
+    };
+    deploy(cfg.clone());
+    retry_budget(cfg.retries);
+}
+```
+
+The value is serialized with its serde attributes. A constant can't
+contain a workflow input or a task result: build that value in a
+`#[container]`. Full rules: [Constant values](workflow.md#constant-values).
 
 ## Force a sequential execution order
 
