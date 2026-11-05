@@ -481,6 +481,8 @@ pub fn cleanup() {
 /// *this* is the submitted root).
 #[workflow(
     node_selector_if_root = { "kubernetes.io/arch" = "amd64" },
+    pod_labels_if_root = { "athena-e2e/root" = "pipeline" },
+    pod_annotations_if_root = { "athena-e2e/root" = "pipeline" },
     on_exit_if_root = cleanup,
 )]
 pub fn pipeline(input_blob: String) {
@@ -587,7 +589,7 @@ pub fn pipeline(input_blob: String) {
     // sub-workflow under the mega-pipeline (cross-template steps:
     // semantics asserted live). The e2e script also submits it as a
     // top-level root, separately.
-    pipeline_steps();
+    pipeline_steps("nested".to_string());
 }
 
 /// `#[workflow(steps)]` live coverage: emits an Argo `steps:` template
@@ -601,9 +603,17 @@ pub fn pipeline(input_blob: String) {
 /// root-only) — that's Argo's only nodeSelector tier that lands on
 /// every pod in the run regardless of nesting. So this sub-workflow's
 /// pods inherit it from wfSpec without any re-declaration here.
-#[workflow(steps)]
-pub fn pipeline_steps() {
+///
+/// Its own `pod_labels_if_root` applies only when submitted as the root
+/// (the script passes `tier=gold`); nested under `pipeline`, its pods
+/// carry `pipeline`'s instead.
+#[workflow(
+    steps,
+    pod_labels_if_root = { "athena-e2e/root" = "steps", "athena-e2e/tier" = tier },
+)]
+pub fn pipeline_steps(tier: String) {
     let s = stamp();
     let r = echo(s);
     audit(r);
+    note(tier);
 }

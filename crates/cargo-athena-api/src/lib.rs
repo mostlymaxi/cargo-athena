@@ -160,6 +160,9 @@ argo! {
         /// sub-workflows in one run) contend on the same name —
         /// empirically verified on v4.0.5, holder key `<ns>/<wf>`.
         pub synchronization: Option<Synchronization>,
+        /// Root-scoped labels + annotations for every pod in the run
+        /// (`pod_labels_if_root` / `pod_annotations_if_root`).
+        pub pod_metadata: Option<ObjectMeta>,
         /// Workflow priority (int32). The Argo controller schedules
         /// higher-priority workflows first when its parallelism limit
         /// is hit. Today only `cargo athena submit --priority` sets

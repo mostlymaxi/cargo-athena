@@ -13,6 +13,9 @@ spec:
   entrypoint: cargo-athena-example-smoke-pipeline-pod-attrs
   templates:
   - name: cargo-athena-example-smoke-pipeline-pod-attrs
+    inputs:
+      parameters:
+      - name: tier
     dag:
       tasks:
       - name: run-svc
@@ -25,6 +28,12 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-run-svc-0-0-0
           template: cargo-athena-example-smoke-run-svc
+  podMetadata:
+    labels:
+      team.athena/owner: platform
+      tier: '{{=fromJSON(workflow.parameters[''tier''])}}'
+    annotations:
+      trace.athena/tier: tier-{{=fromJSON(workflow.parameters['tier'])}}
   volumeClaimTemplates:
   - metadata:
       name: cargo-athena-example-smoke-buildcache

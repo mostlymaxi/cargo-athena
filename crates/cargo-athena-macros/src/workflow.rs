@@ -24,7 +24,7 @@ use crate::ghost::ghost_fn;
 use crate::node_tokens::node_tokens;
 use crate::utils::{
     check_dns1123_name, check_fn_shape, check_yaml_safe_names, fn_args, is_artifact_ty,
-    make_argo_name, scan_body, sig_shim, str_slice,
+    make_argo_name, pod_meta_violation, scan_body, sig_shim, str_slice,
 };
 
 pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -58,6 +58,23 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         && let Err(e) = check_dns1123_name(lit)
     {
         return e.to_compile_error().into();
+    }
+    let pod_metas = [
+        ("pod_labels_if_root", true, &cfg.pod_labels_if_root),
+        (
+            "pod_annotations_if_root",
+            false,
+            &cfg.pod_annotations_if_root,
+        ),
+    ];
+    for (attr, label, map) in pod_metas {
+        for (k, v) in map {
+            if let Some(msg) = pod_meta_violation(attr, label, k, v) {
+                return syn::Error::new(func.sig.ident.span(), msg)
+                    .to_compile_error()
+                    .into();
+            }
+        }
     }
     let steps_mode = cfg.steps.is_set();
 
@@ -272,6 +289,30 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     let node_selector_if_root_tok = quote! {
         &[ #( (#nsi_keys, #nsi_vals) ),* ]
+    };
+    // `pod_labels_if_root` / `pod_annotations_if_root`: same lowering.
+    let mut pod_meta_tok = |map: &std::collections::BTreeMap<String, Expr>| {
+        let keys: Vec<&String> = map.keys().collect();
+        let vals = map
+            .values()
+            .map(|e| {
+                inject_lower(
+                    e,
+                    &argset,
+                    &mut wf_inject_ops,
+                    "workflow.parameters",
+                    "workflow",
+                )
+            })
+            .collect::<syn::Result<Vec<_>>>()?;
+        Ok::<_, syn::Error>(quote! { &[ #( (#keys, #vals) ),* ] })
+    };
+    let (pod_labels_if_root_tok, pod_annotations_if_root_tok) = match (
+        pod_meta_tok(&cfg.pod_labels_if_root),
+        pod_meta_tok(&cfg.pod_annotations_if_root),
+    ) {
+        (Ok(l), Ok(a)) => (l, a),
+        (Err(e), _) | (_, Err(e)) => return e.to_compile_error().into(),
     };
     // `mutexes = [{ name, namespace }, …]` (template-level) /
     // `mutexes_if_root = […]` (root-only). Lowers each operand via
@@ -589,6 +630,10 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #active_deadline_if_root_tok;
             const NODE_SELECTOR_IF_ROOT: &'static [(&'static str, &'static str)] =
                 #node_selector_if_root_tok;
+            const POD_LABELS_IF_ROOT: &'static [(&'static str, &'static str)] =
+                #pod_labels_if_root_tok;
+            const POD_ANNOTATIONS_IF_ROOT: &'static [(&'static str, &'static str)] =
+                #pod_annotations_if_root_tok;
             const MUTEXES_IF_ROOT: &'static [(&'static str, &'static str)] =
                 #mutexes_if_root_tok;
             const TOLERATIONS_IF_ROOT:

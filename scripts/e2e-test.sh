@@ -212,6 +212,19 @@ else
   echo "FAIL: container labels not on the tagged pod"; exit 1
 fi
 
+# pod_*_if_root: the root's podMetadata is on EVERY pod, including the
+# nested pipeline_steps pods (whose own podMetadata must stay inert).
+pods_n() { kubectl -n "$NS" get pods -l "$1" --no-headers 2>/dev/null | wc -l; }
+ALL=$(pods_n "workflows.argoproj.io/workflow=$WF")
+ROOTED=$(pods_n "workflows.argoproj.io/workflow=$WF,athena-e2e/root=pipeline,!athena-e2e/tier")
+ANN=$(kubectl -n "$NS" get pods -l "workflows.argoproj.io/workflow=$WF" -o json \
+  | jq '[.items[] | select(.metadata.annotations["athena-e2e/root"] == "pipeline")] | length')
+if [ "$ALL" -gt 0 ] && [ "$ROOTED" = "$ALL" ] && [ "$ANN" = "$ALL" ]; then
+  echo "ok: pod_labels_if_root + pod_annotations_if_root on all $ALL pods"
+else
+  echo "FAIL: pod_*_if_root: $ROOTED labeled, $ANN annotated, of $ALL pods"; exit 1
+fi
+
 say "CLI gate: emulate (docker)"
 # Run one #[container] under docker exactly as Argo would, from the
 # already-built tarball (no S3 needed). Proves the emulate runtime path.
@@ -246,7 +259,7 @@ say "submit pipeline_steps (#[workflow(steps)]) — live steps-mode assertion"
 # accepts the `steps:` template + cross-step `{{steps.X.outputs.…}}`
 # refs on a live cluster across the Argo version matrix.
 STEPSWF=$( cd "$ROOT" && cargo run -q -p cargo-athena --bin cargo-athena -- \
-  athena submit -w cargo-athena-example-e2e-pipeline-steps \
+  athena submit -w cargo-athena-example-e2e-pipeline-steps -a tier=gold \
   --package "$PKG" --bin "$BIN" -n "$NS" --skip-binary-check -y \
   2>/dev/null | tail -1 )
 echo "submit created: $STEPSWF"
@@ -256,6 +269,13 @@ STEPSPHASE=$(argo get -n "$NS" "$STEPSWF" -o json 2>/dev/null | jq -r '.status.p
 [ "$STEPSPHASE" = "Succeeded" ] || {
   echo "FAIL: pipeline_steps $STEPSWF phase=$STEPSPHASE"; exit 1; }
 echo "ok: pipeline_steps -> $STEPSWF Succeeded"
+SALL=$(pods_n "workflows.argoproj.io/workflow=$STEPSWF")
+STIER=$(pods_n "workflows.argoproj.io/workflow=$STEPSWF,athena-e2e/root=steps,athena-e2e/tier=gold")
+if [ "$SALL" -gt 0 ] && [ "$STIER" = "$SALL" ]; then
+  echo "ok: pod_labels_if_root as root (injected tier=gold) on all $SALL pods"
+else
+  echo "FAIL: pipeline_steps pod_labels_if_root on $STIER of $SALL pods"; exit 1
+fi
 
 say "single-arch tarball probe (resubmit one e2e step against a 1-entry tarball)"
 # Argo's executor `unpack` (`workflow/executor/executor.go:1177-1218`,
