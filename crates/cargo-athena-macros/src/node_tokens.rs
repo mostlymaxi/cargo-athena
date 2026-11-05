@@ -18,11 +18,15 @@
 //!
 //! A hook arg's dep lands on the hooked task: Argo scopes a DAG hook
 //! to that task's ancestors.
+//!
+//! A constant arg has no Argo string: [`value_tokens`] serializes it in
+//! the user's binary when `build()` runs.
 
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 
 use crate::analyze::{Arg, FanSrc, HookWhen, JsonSrc, Node};
+use crate::utils::arg_slot;
 
 /// `{{=…}}` over task `t`'s scope node `g`. Nil `g` yields nil, which
 /// makes Argo defer the tag: its child-template pass has `<scope>.name`
@@ -70,6 +74,8 @@ pub(crate) fn arg_value(arg: &Arg, steps: bool) -> (String, Option<String>) {
         // Already-JSON-encoded literal (Regime B — `expr_to_arg` ran
         // `serde_json::to_string` so every param value is uniform JSON).
         Arg::Lit(v) => (v.clone(), None),
+        // In-binary value: see value_tokens.
+        Arg::Const(_) => (String::new(), None),
         // Whole-binding consumption of an upstream task: the explicitly
         // declared `outputs.parameters.return` (NOT `outputs.result`,
         // which is Argo's script-stdout alias and only exists for
@@ -190,6 +196,18 @@ pub(crate) fn arg_value_artifact(arg: &Arg, steps: bool) -> (String, Option<Stri
     }
 }
 
+/// A param value as a `String` expression (+ dep). `Const` is serialized
+/// in-binary, typed by `slot`.
+fn value_tokens(arg: &Arg, steps: bool, slot: TokenStream2) -> (TokenStream2, Option<String>) {
+    match arg {
+        Arg::Const(e) => (quote!(::cargo_athena::__athena_const(#slot(), #e)), None),
+        _ => {
+            let (s, dep) = arg_value(arg, steps);
+            (quote!(#s.to_string()), dep)
+        }
+    }
+}
+
 pub(crate) fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
     let task = &node.task;
     let callee = &node.callee;
@@ -201,7 +219,8 @@ pub(crate) fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
     // (empty/short slice) is Parameter, so any callee that hasn't been
     // recompiled against the new trait keeps its old wiring.
     let arg_stmts = node.args.iter().enumerate().map(|(i, a)| {
-        let (param_value, param_dep) = arg_value(a, steps);
+        let slot = arg_slot(i);
+        let (param_value, param_dep) = value_tokens(a, steps, quote!(#callee::#slot));
         let (art_value, art_dep) = arg_value_artifact(a, steps);
         let param_dep_push = match param_dep {
             Some(d) => quote! { __deps.push(#d.to_string()); },
@@ -223,7 +242,7 @@ pub(crate) fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                         #param_dep_push
                         __params.push(::cargo_athena::api::Parameter {
                             name: __name,
-                            value: ::core::option::Option::Some(#param_value.to_string()),
+                            value: ::core::option::Option::Some(#param_value),
                             ..::core::default::Default::default()
                         });
                     }
@@ -314,11 +333,12 @@ pub(crate) fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                 }
             });
             let arg_pushes = h.args.iter().enumerate().map(|(i, a)| {
-                let (value, _) = arg_value(a, steps);
+                let slot = arg_slot(i);
+                let (value, _) = value_tokens(a, steps, quote!(#hp::#slot));
                 quote! {
                     __hp.push(::cargo_athena::api::Parameter {
                         name: __hin[#i].to_string(),
-                        value: ::core::option::Option::Some(#value.to_string()),
+                        value: ::core::option::Option::Some(#value),
                         ..::core::default::Default::default()
                     });
                 }
@@ -459,6 +479,12 @@ mod tests {
             arg_value(&Arg::Lit("7".to_string()), true),
             ("7".to_string(), None),
         );
+    }
+
+    #[test]
+    fn const_has_no_argo_string_or_dep() {
+        let c = Arg::Const(syn::parse_quote!(MAX));
+        assert_eq!(arg_value(&c, false), (String::new(), None));
     }
 
     #[test]

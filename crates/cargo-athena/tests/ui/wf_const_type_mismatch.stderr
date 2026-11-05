@@ -1,0 +1,23 @@
+error[E0308]: mismatched types
+  --> tests/ui/wf_const_type_mismatch.rs:12:12
+   |
+10 | #[cargo_athena::workflow]
+   | ------------------------- arguments to this function are incorrect
+11 | fn wf() {
+12 |     take_n(NAME);
+   |            ^^^^ expected `u32`, found `&str`
+   |
+note: associated function defined here
+  --> tests/ui/wf_const_type_mismatch.rs:5:1
+   |
+ 5 | #[cargo_athena::container]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 6 | fn take_n(count: u32) {
+   |           ----------
+   = note: this error originates in the attribute macro `cargo_athena::container` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+  --> tests/ui/wf_const_type_mismatch.rs:12:12
+   |
+12 |     take_n(NAME);
+   |            ^^^^ expected `u32`, found `&str`

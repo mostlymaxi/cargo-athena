@@ -7,12 +7,14 @@
 //! `C::__athena_sig(args)`, so rustc fully type-checks arg/arity/field/
 //! return flow on the analyzed body — a bad `a.field`, wrong type, or
 //! consuming a non-returning `#[workflow]` becomes a compile error.
+//! Constructor calls (`Some(..)`) and `const { .. }` blocks stay real
+//! Rust, so constant args type-check against the callee too.
 
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{Expr, ItemFn, visit_mut::VisitMut};
 
-use crate::utils::{is_builder_method, unwrap_expr};
+use crate::utils::{is_builder_method, is_ctor, unwrap_expr};
 
 /// A hook target `t` / `t(args)` as the call the ghost type-checks — a
 /// bare path becomes the zero-arg call `t()` (a template with inputs
@@ -39,6 +41,10 @@ struct GhostRewrite;
 
 impl VisitMut for GhostRewrite {
     fn visit_expr_mut(&mut self, e: &mut Expr) {
+        // Calls inside `const { .. }` are real Rust.
+        if let Expr::Const(_) = e {
+            return;
+        }
         let mut hooks: Vec<Expr> = Vec::new();
         let mut fallible = false;
         while let Expr::MethodCall(mc) = e {
@@ -72,18 +78,44 @@ impl VisitMut for GhostRewrite {
                 __athena_ghost_base
             });
         }
+        let mut ctor = None;
         if let Expr::Call(c) = e
             && let Expr::Path(p) = &mut *c.func
         {
-            p.path
-                .segments
-                .push(syn::PathSegment::from(format_ident!("__athena_sig")));
+            if p.qself.is_none() && is_ctor(&p.path) {
+                ctor = Some(p.clone());
+            } else {
+                p.path
+                    .segments
+                    .push(syn::PathSegment::from(format_ident!("__athena_sig")));
+            }
         }
         syn::visit_mut::visit_expr_mut(self, e);
+        // A CamelCase fn isn't a constructor: E0532.
+        if let Some(f) = ctor {
+            let call = e.clone();
+            *e = syn::parse_quote!({
+                let __athena_v = #call;
+                let _ = ::core::matches!(__athena_v, #f(..));
+                __athena_v
+            });
+        }
         // After recursion so the wrapper's inner call isn't re-visited.
         if fallible {
             let inner = e.clone();
             *e = syn::parse_quote!(::cargo_athena::__athena_fallible(#inner));
+        }
+    }
+
+    /// `let r = cleanup;` (missing `()`) would silently drop a step:
+    /// require a bare-path constant to be `Serialize`.
+    fn visit_local_mut(&mut self, l: &mut syn::Local) {
+        syn::visit_mut::visit_local_mut(self, l);
+        if let Some(init) = &mut l.init
+            && let Expr::Path(_) = unwrap_expr(&init.expr)
+        {
+            let v = &init.expr;
+            init.expr = syn::parse_quote!(::cargo_athena::__athena_value(#v));
         }
     }
 }

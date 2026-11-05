@@ -34,11 +34,55 @@ Supported shapes are:
 
 ```rust,ignore
 let x = template(args);
+let k = <constant>;
 template(args);
 if cond { ... } else { ... }
 binding.fan_out(|x| template(x, …));
 binding.continue_on(...)       // and the other per-task hooks
 ```
+
+### "... can't be part of a constant value"
+
+A constant (a struct / tuple / array literal, a constructor, a
+constant `let`) contains a workflow input, a task result, or the
+`.fan_out` element. Pass that value on its own, or build the whole
+value in a `#[container]` that takes it as an argument.
+
+### "a call inside a constant value must be an enum variant or tuple struct"
+
+Only constructors (`Some(..)`, `Kind::A(..)`) are allowed inside a
+constant. Compute other values in a `const` item, a `const { .. }`
+block, or a `#[container]`.
+
+### "cannot move out of static item"
+
+```
+error[E0507]: cannot move out of static item `IMG`
+```
+
+A `static` that isn't `Copy` (for example a `LazyLock`) can't be a
+constant argument. Use a `const` item with a plain value:
+`const IMG: &str = "img";`.
+
+### "expected a pattern, found a function call"
+
+```
+error[E0532]: expected a pattern, found a function call
+```
+
+A function whose name starts with an uppercase letter is read as a
+constructor. Rename the function, or compute the value in a `const`
+item or a `const { .. }` block.
+
+### "the trait bound `X: Serialize` is not satisfied" on a `let`
+
+```
+error[E0277]: the trait bound `produce: serde::Serialize` is not satisfied
+```
+
+A template call is missing its `()` (`let r = produce;` instead of
+`let r = produce();`), or a constant's type needs
+`#[derive(serde::Serialize)]`.
 
 ### "the trait `Injectable` is not implemented for ..."
 

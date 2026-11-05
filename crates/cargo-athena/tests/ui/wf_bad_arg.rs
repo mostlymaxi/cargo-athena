@@ -1,5 +1,5 @@
-// A regular variable/const as a #[workflow] call arg is unsupported:
-// only literals, workflow inputs, and prior `let` bindings are allowed.
+// An unknown name in a #[workflow] call arg is rustc's own error: a
+// name that isn't an input or a binding is read as a constant.
 #[cargo_athena::container]
 fn step(x: String) -> String {
     x

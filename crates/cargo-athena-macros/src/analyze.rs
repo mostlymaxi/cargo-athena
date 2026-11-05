@@ -9,19 +9,25 @@
 //! wrappers).
 //!
 //! Strict by design: every statement that isn't `let x = template(args);`,
-//! `template(args);`, or `if`/`else if`/`else` becomes a spanned
-//! `compile_error!`. Argument resolution is equally strict — see
-//! [`expr_to_arg`].
+//! `let x = <constant>;`, `template(args);`, or `if`/`else if`/`else`
+//! becomes a spanned `compile_error!`. Argument resolution is equally
+//! strict: see [`expr_to_arg`].
 
+use proc_macro2::{Group, Span, TokenStream as TokenStream2, TokenTree};
 use quote::quote;
+use syn::spanned::Spanned;
+use syn::visit_mut::VisitMut;
 use syn::{Expr, ItemFn, Path, Stmt};
 
 use crate::conditional::{SynthCtx, SynthWf, synth_if};
-use crate::utils::{fn_args, kebab, unwrap_expr};
+use crate::utils::{fn_args, is_builder_method, is_ctor, kebab, unwrap_expr};
 
 pub(crate) enum Arg {
-    /// Literal/const value passed straight through as an Argo parameter.
+    /// Literal value, JSON-encoded at macro time.
     Lit(String),
+    /// A constant value, serialized in-binary at emit (see
+    /// `node_tokens::value_tokens`).
+    Const(Expr),
     /// Reference to a previous task's output (creates a DAG dependency).
     Ref(String),
     /// Reference to one of the workflow's own input parameters.
@@ -129,19 +135,53 @@ pub(crate) struct Node {
 }
 
 pub(crate) const UNSUPPORTED_ARG: &str = "unsupported argument in a #[workflow] call. \
-Allowed: a literal, a workflow input parameter, a binding from a prior \
-`let x = template(...);`, `.clone()`/`.to_owned()` on a binding/input, or \
-`.to_string()`/`.into()` on a string literal. Computed values, regular \
-variables/consts, other method calls, and other expressions aren't \
-lowered yet.";
-/// Strict: a literal, a previous-task reference, or a workflow-input
-/// reference. Anything else is a hard `compile_error!` (no silent
-/// stringify) — an unmodeled arg would otherwise emit a bogus Argo param.
+Allowed: a literal; a #[workflow] input or a binding from a prior \
+`let x = template(...);` (also `.clone()`, `.to_owned()`, `.field`); a nested \
+template call; or a constant value: literals, `const` items, constant `let` \
+bindings, struct / tuple / array literals, enum variants and tuple structs \
+(`None`, `Some(..)`, `Kind::A(..)`), `.field`, `-`, `.clone()` / `.to_owned()` / \
+`.to_string()` / `.to_vec()`, `.into()` on a string literal, and `const { .. }` \
+blocks. Arithmetic, casts, indexing, macros and other calls aren't lowered: \
+compute the value in a `const` item, a `const { .. }` block or a #[container].";
+
+pub(crate) const CONST_CALL: &str = "a call inside a constant value must be an enum \
+variant or tuple struct (`Some(..)`, `Kind::A(..)`: a name that starts with an \
+uppercase letter). To use a task result, pass it to a #[container] that builds \
+the value. Compute other values in a `const` item or a `const { .. }` block.";
+
+pub(crate) const NESTED_CALL: &str = "a nested template call isn't lowered in a hook \
+or `fan_out` arg. Bind it first (`let x = template(..);`) and pass `x`.";
+
+pub(crate) const CONST_INTO: &str = "`.into()` in a constant value works only on a \
+string literal. Use `.to_string()` for text and `[a, b].to_vec()` for a list.";
+
+pub(crate) const LET_SHAPE: &str = "a #[workflow] `let` must bind a template call \
+(`let x = template(args);`), an `if`, or a constant value (`let k = 3;`, \
+`let cfg = Opts { .. };`). To reuse an input or a task result, pass it directly.";
+
+pub(crate) const CONST_LET_TYPE: &str = "a constant `let` can't have a type \
+annotation. Use a typed literal (`5_000_000_000u64`) or a `const` item.";
+
+fn mixed_const(name: &syn::Ident) -> String {
+    format!(
+        "`{name}` can't be part of a constant value: it is a #[workflow] input, \
+         a task result or the `fan_out` item, and a constant is fixed when the \
+         workflow is emitted. Pass `{name}` on its own, or build the value in a \
+         #[container] that takes `{name}` as an argument."
+    )
+}
+
+/// Strict: a literal, a previous-task reference, a workflow-input
+/// reference, or a constant. Anything else is a hard `compile_error!` (no
+/// silent stringify): an unmodeled arg would otherwise emit a bogus Argo
+/// param.
 pub(crate) fn expr_to_arg(
     e: &Expr,
     bindings: &std::collections::HashMap<String, String>,
     inputs: &std::collections::HashSet<String>,
+    item: Option<&str>,
 ) -> syn::Result<Arg> {
+    let is_flow = |n: &str| bindings.contains_key(n) || inputs.contains(n) || item == Some(n);
     match unwrap_expr(e) {
         // Regime B: every param value is emitted as valid JSON (string
         // -> "v", int -> v, float -> v, bool -> true/false). The run
@@ -173,56 +213,38 @@ pub(crate) fn expr_to_arg(
                 ));
             }
         }),
+        // Type-preserving conversions of a literal stay macro-time.
+        Expr::MethodCall(mc) if mc.args.is_empty() && lit_conversion(mc) => {
+            expr_to_arg(&mc.receiver, bindings, inputs, item)
+        }
+        // Only top-level task args lower a nested call (`push_call`).
+        Expr::Call(_) if call_parts(e).is_some() => Err(syn::Error::new_spanned(e, NESTED_CALL)),
+        c if !flow_root(c).is_some_and(|n| is_flow(&n)) => Ok(Arg::Const(constant(c, &is_flow)?)),
         // Owned-value conversions, emitted identically to the receiver:
-        //  * `.clone()`/`.to_owned()` are type-preserving → allowed on
-        //    any supported receiver. `.clone()` is the explicit fan-out
-        //    marker (Argo copies the output param into each consumer); it
-        //    vanishes in the emit.
+        //  * `.clone()`/`.to_owned()` are type-preserving. `.clone()` is
+        //    the explicit fan-out marker (Argo copies the output param
+        //    into each consumer); it vanishes in the emit.
         //  * `.to_string()`/`.into()` can CHANGE the type, but the emit
-        //    only ever passes the receiver's raw serialized param — so on
-        //    a binding/input that would mismatch the ghost's type and
-        //    break the (de)serialize contract. Restrict them to a string
-        //    literal (where they're an identity for the emit).
+        //    only ever passes the receiver's raw serialized param: on a
+        //    binding/input that would mismatch the ghost's type.
         Expr::MethodCall(mc) if mc.args.is_empty() => match mc.method.to_string().as_str() {
-            "clone" | "to_owned" => expr_to_arg(&mc.receiver, bindings, inputs),
-            "to_string" | "into" => {
-                if matches!(
-                    unwrap_expr(&mc.receiver),
-                    Expr::Lit(syn::ExprLit {
-                        lit: syn::Lit::Str(_),
-                        ..
-                    })
-                ) {
-                    expr_to_arg(&mc.receiver, bindings, inputs)
-                } else {
-                    Err(syn::Error::new_spanned(
-                        mc,
-                        "`.to_string()`/`.into()` in a #[workflow] arg \
-                             is only allowed on a string literal. On a \
-                             binding/input the value already has the right \
-                             serialized type; converting it would mismatch \
-                             the emitted Argo parameter (the raw serialized \
-                             value) and break the (de)serialize contract — \
-                             pass it directly, or `.clone()` to fan out.",
-                    ))
-                }
-            }
+            "clone" | "to_owned" => expr_to_arg(&mc.receiver, bindings, inputs, item),
+            "to_string" | "into" => Err(syn::Error::new_spanned(
+                mc,
+                "`.to_string()`/`.into()` on a #[workflow] input, a task result or \
+                 the `fan_out` item isn't lowered: pass it directly, or `.clone()` \
+                 to fan out.",
+            )),
             _ => Err(syn::Error::new_spanned(mc, UNSUPPORTED_ARG)),
         },
-        Expr::Path(p) if p.path.segments.len() == 1 => {
+        Expr::Path(p) => {
             let name = p.path.segments[0].ident.to_string();
             if let Some(task) = bindings.get(&name) {
                 Ok(Arg::Ref(task.clone()))
             } else if inputs.contains(&name) {
                 Ok(Arg::Input(name))
             } else {
-                Err(syn::Error::new_spanned(
-                    e,
-                    format!(
-                        "`{name}` is not a #[workflow] input or a binding from \
-                         a prior `let = template(...)`. {UNSUPPORTED_ARG}"
-                    ),
-                ))
+                Err(syn::Error::new_spanned(e, UNSUPPORTED_ARG))
             }
         }
         // `a.b.c` — named-field access into a serde value. The base must
@@ -252,22 +274,13 @@ pub(crate) fn expr_to_arg(
                      prior `let = template(...)` binding.",
                 ));
             };
-            if p.path.segments.len() != 1 {
-                return Err(syn::Error::new_spanned(cur, UNSUPPORTED_ARG));
-            }
             let name = p.path.segments[0].ident.to_string();
             let src = if let Some(task) = bindings.get(&name) {
                 JsonSrc::Task(task.clone())
             } else if inputs.contains(&name) {
                 JsonSrc::Input(name)
             } else {
-                return Err(syn::Error::new_spanned(
-                    cur,
-                    format!(
-                        "`{name}` is not a #[workflow] input or a prior \
-                         `let = template(...)` binding. {UNSUPPORTED_ARG}"
-                    ),
-                ));
+                return Err(syn::Error::new_spanned(cur, UNSUPPORTED_ARG));
             };
             Ok(Arg::Json { src, path })
         }
@@ -278,6 +291,97 @@ pub(crate) fn expr_to_arg(
         )),
         other => Err(syn::Error::new_spanned(other, UNSUPPORTED_ARG)),
     }
+}
+
+/// `lit.clone()` / `lit.to_owned()`, or `"s".to_string()`.
+fn lit_conversion(mc: &syn::ExprMethodCall) -> bool {
+    match mc.method.to_string().as_str() {
+        "clone" | "to_owned" => matches!(unwrap_expr(&mc.receiver), Expr::Lit(_)),
+        "to_string" => is_str_lit(&mc.receiver),
+        _ => false,
+    }
+}
+
+fn is_str_lit(e: &Expr) -> bool {
+    matches!(
+        unwrap_expr(e),
+        Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(_),
+            ..
+        })
+    )
+}
+
+/// Single-ident root of a field / index / method / unary chain.
+fn flow_root(e: &Expr) -> Option<String> {
+    match unwrap_expr(e) {
+        Expr::Field(f) => flow_root(&f.base),
+        Expr::Index(i) => flow_root(&i.expr),
+        Expr::MethodCall(m) => flow_root(&m.receiver),
+        Expr::Unary(u) => flow_root(&u.expr),
+        Expr::Path(p) if p.qself.is_none() => p.path.get_ident().map(|i| i.to_string()),
+        _ => None,
+    }
+}
+
+/// Validate a constant and seal it for emit: each value path becomes
+/// `const { P }`, so rustc rejects a non-`Copy` static.
+fn constant(e: &Expr, is_flow: &dyn Fn(&str) -> bool) -> syn::Result<Expr> {
+    let mut out = e.clone();
+    match &mut out {
+        Expr::Lit(_) | Expr::Const(_) => {}
+        Expr::Path(p) => {
+            if p.qself.is_none()
+                && let Some(id) = p.path.get_ident()
+                && is_flow(&id.to_string())
+            {
+                return Err(syn::Error::new_spanned(&*p, mixed_const(id)));
+            }
+            return Ok(syn::parse_quote_spanned!(p.span()=> const { #p }));
+        }
+        Expr::Struct(s) => {
+            for f in &mut s.fields {
+                f.expr = constant(&f.expr, is_flow)?;
+                // Shorthand `Opts { n }` must print as `n: <value>`.
+                f.colon_token.get_or_insert_with(Default::default);
+            }
+            if let Some(r) = &mut s.rest {
+                **r = constant(r, is_flow)?;
+            }
+        }
+        Expr::Tuple(syn::ExprTuple { elems, .. }) | Expr::Array(syn::ExprArray { elems, .. }) => {
+            for x in elems {
+                *x = constant(x, is_flow)?;
+            }
+        }
+        Expr::Call(c) => {
+            if !matches!(&*c.func, Expr::Path(f) if f.qself.is_none() && is_ctor(&f.path)) {
+                return Err(syn::Error::new_spanned(&*c, CONST_CALL));
+            }
+            for x in &mut c.args {
+                *x = constant(x, is_flow)?;
+            }
+        }
+        Expr::MethodCall(m) if m.args.is_empty() && m.turbofish.is_none() => {
+            match m.method.to_string().as_str() {
+                "clone" | "to_owned" | "to_string" | "to_vec" => {
+                    *m.receiver = constant(&m.receiver, is_flow)?;
+                }
+                "into" if is_str_lit(&m.receiver) => {}
+                "into" => return Err(syn::Error::new_spanned(&*m, CONST_INTO)),
+                _ => return Err(syn::Error::new_spanned(&*m, UNSUPPORTED_ARG)),
+            }
+        }
+        Expr::Field(f) => *f.base = constant(&f.base, is_flow)?,
+        Expr::Unary(u) if matches!(u.op, syn::UnOp::Neg(_)) => {
+            *u.expr = constant(&u.expr, is_flow)?;
+        }
+        Expr::Paren(syn::ExprParen { expr, .. }) | Expr::Group(syn::ExprGroup { expr, .. }) => {
+            **expr = constant(expr, is_flow)?;
+        }
+        other => return Err(syn::Error::new_spanned(&*other, UNSUPPORTED_ARG)),
+    }
+    Ok(out)
 }
 
 /// Like `expr_to_arg`, but inside a `fan_out` closure `|it| …`: an
@@ -321,7 +425,7 @@ pub(crate) fn resolve_arg(
             return Ok(Arg::Item { path });
         }
     }
-    expr_to_arg(e, bindings, inputs)
+    expr_to_arg(e, bindings, inputs, item)
 }
 
 /// The tail expression of a closure body (`|x| C(x)` or `|x| { …; C(x) }`).
@@ -368,15 +472,9 @@ pub(crate) fn fan_src(
     bindings: &std::collections::HashMap<String, String>,
     inputs: &std::collections::HashSet<String>,
 ) -> syn::Result<FanSrc> {
-    let Expr::Path(p) = unwrap_expr(recv) else {
-        return Err(syn::Error::new_spanned(
-            recv,
-            "`fan_out` source must be a prior `let` binding or a \
-             #[workflow] input (a list).",
-        ));
-    };
-    if p.path.segments.len() == 1 {
-        let name = p.path.segments[0].ident.to_string();
+    if let Expr::Path(p) = unwrap_expr(recv)
+        && let Some(name) = p.path.get_ident().map(|i| i.to_string())
+    {
         if let Some(task) = bindings.get(&name) {
             return Ok(FanSrc::Task(task.clone()));
         } else if inputs.contains(&name) {
@@ -385,13 +483,16 @@ pub(crate) fn fan_src(
     }
     Err(syn::Error::new_spanned(
         recv,
-        "`fan_out` source must be a prior `let` binding or a #[workflow] \
-         input (a list).",
+        "`fan_out` source must be a task result (`let x = template(..);`) or \
+         a #[workflow] input (a list), not a constant.",
     ))
 }
+
+/// A template call `t(args)`; a constructor call (`Some(3)`) is a constant.
 pub(crate) fn call_parts(e: &Expr) -> Option<(Path, Vec<Expr>)> {
     if let Expr::Call(c) = unwrap_expr(e)
         && let Expr::Path(p) = &*c.func
+        && !(p.qself.is_none() && is_ctor(&p.path))
     {
         return Some((p.path.clone(), c.args.iter().cloned().collect()));
     }
@@ -568,7 +669,7 @@ pub(crate) fn path_leaf(p: &Path) -> String {
 /// don't bother narrowing (returned-binding paths, etc.). Prefer
 /// [`unsupported_stmt_msg`] when you have an `Expr` in hand.
 pub(crate) const UNSUPPORTED_STMT: &str = "unsupported statement in a #[workflow]. \
-Only `let x = template(args);`, `template(args);`, and \
+Only `let x = template(args);`, `let x = <constant>;`, `template(args);`, and \
 `if`/`else if`/`else` are lowered. Anything else is rejected so a step is \
 never silently dropped.";
 
@@ -781,6 +882,97 @@ pub(crate) fn callee_paths(nodes: &[Node], extra: &[Path]) -> Vec<Path> {
         .cloned()
         .collect()
 }
+
+/// A `let` init that lowers to a task (else it's a constant).
+fn is_step(e: &Expr) -> bool {
+    matches!(unwrap_expr(e), Expr::MethodCall(mc)
+        if mc.method == "fan_out" || is_builder_method(&mc.method))
+        || call_parts(e).is_some()
+}
+
+/// Inlines constant `let` bindings: a use of a bound name becomes its
+/// value, located at the use. A nested `let` or closure param shadows,
+/// as in Rust.
+struct Inline(std::collections::HashMap<String, Expr>);
+
+impl VisitMut for Inline {
+    fn visit_expr_mut(&mut self, e: &mut Expr) {
+        if let Expr::Path(p) = e
+            && p.qself.is_none()
+            && let Some(v) = p.path.get_ident().and_then(|i| self.0.get(&i.to_string()))
+        {
+            *e = located_at(v, p.span());
+        } else if let Expr::Closure(c) = e {
+            let outer = self.0.clone();
+            for p in &c.inputs {
+                if let Ok(Some(n)) = local_binding(p) {
+                    self.0.remove(&n);
+                }
+            }
+            self.visit_expr_mut(&mut c.body);
+            self.0 = outer;
+        } else if let Expr::MethodCall(m) = e
+            && m.method == "continue_on"
+        {
+            // Its args are keywords (`failed`), not values.
+            self.visit_expr_mut(&mut m.receiver);
+        } else {
+            syn::visit_mut::visit_expr_mut(self, e);
+        }
+    }
+
+    fn visit_block_mut(&mut self, b: &mut syn::Block) {
+        let outer = self.0.clone();
+        for s in &mut b.stmts {
+            self.visit_stmt_mut(s);
+            if let Stmt::Local(l) = s
+                && let Ok(Some(n)) = local_binding(&l.pat)
+            {
+                self.0.remove(&n);
+            }
+        }
+        self.0 = outer;
+    }
+
+    // Shorthand `Opts { a }` must print as `a: <value>`.
+    fn visit_field_value_mut(&mut self, f: &mut syn::FieldValue) {
+        syn::visit_mut::visit_field_value_mut(self, f);
+        f.colon_token.get_or_insert_with(Default::default);
+    }
+
+    // A returned name stays: "`k` is returned but isn't a binding".
+    fn visit_stmt_mut(&mut self, s: &mut Stmt) {
+        if !matches!(s, Stmt::Expr(Expr::Path(_), _)) {
+            syn::visit_mut::visit_stmt_mut(self, s);
+        }
+    }
+
+    fn visit_expr_return_mut(&mut self, r: &mut syn::ExprReturn) {
+        if !matches!(r.expr.as_deref(), Some(Expr::Path(_))) {
+            syn::visit_mut::visit_expr_return_mut(self, r);
+        }
+    }
+}
+
+/// `e` with every token located at `at` (hygiene kept).
+fn located_at(e: &Expr, at: Span) -> Expr {
+    fn walk(ts: TokenStream2, at: Span) -> TokenStream2 {
+        ts.into_iter()
+            .map(|mut t| {
+                if let TokenTree::Group(g) = &t {
+                    let mut n = Group::new(g.delimiter(), walk(g.stream(), at));
+                    n.set_span(g.span().located_at(at));
+                    t = TokenTree::Group(n);
+                } else {
+                    t.set_span(t.span().located_at(at));
+                }
+                t
+            })
+            .collect()
+    }
+    syn::parse2(walk(quote!(#e), at)).expect("an inlined constant re-parses")
+}
+
 pub(crate) fn analyze_stmts(
     stmts: &[Stmt],
     inputs: &std::collections::HashSet<String>,
@@ -790,6 +982,7 @@ pub(crate) fn analyze_stmts(
     ctx: &mut SynthCtx,
 ) -> syn::Result<(Vec<Node>, Option<String>)> {
     let mut bindings: std::collections::HashMap<String, String> = Default::default();
+    let mut consts: std::collections::HashMap<String, Expr> = Default::default();
     let mut used: std::collections::HashSet<String> = Default::default();
     let mut nodes: Vec<Node> = Vec::new();
     let mut output_task: Option<String> = None;
@@ -801,16 +994,22 @@ pub(crate) fn analyze_stmts(
 
     for (idx, stmt) in stmts.iter().enumerate() {
         let is_last = idx + 1 == stmts.len();
+        let inlined;
+        let stmt = if consts.is_empty() {
+            stmt
+        } else {
+            let mut s = stmt.clone();
+            Inline(consts.clone()).visit_stmt_mut(&mut s);
+            inlined = s;
+            &inlined
+        };
         match stmt {
             Stmt::Local(local) => {
                 let bind = local_binding(&local.pat)?;
-                let init = local.init.as_ref().ok_or_else(|| {
-                    syn::Error::new_spanned(
-                        local,
-                        "a #[workflow] `let` must bind a template call or \
-                         `if`: `let x = template(args);`.",
-                    )
-                })?;
+                let init = local
+                    .init
+                    .as_ref()
+                    .ok_or_else(|| syn::Error::new_spanned(local, LET_SHAPE))?;
                 if init.diverge.is_some() {
                     return Err(syn::Error::new_spanned(
                         local,
@@ -819,6 +1018,24 @@ pub(crate) fn analyze_stmts(
                 }
                 let task = if let Expr::If(ei) = unwrap_expr(&init.expr) {
                     synth_if(ei, true, &bindings, inputs, &mut used, &mut nodes, ctx)?
+                } else if !is_step(&init.expr) {
+                    // A constant `let`: no task, inlined at each use.
+                    if !matches!(
+                        expr_to_arg(&init.expr, &bindings, inputs, None)?,
+                        Arg::Lit(_) | Arg::Const(_)
+                    ) {
+                        return Err(syn::Error::new_spanned(&init.expr, LET_SHAPE));
+                    }
+                    // Inlining drops the annotation, so emit would infer
+                    // the value's type on its own.
+                    if let syn::Pat::Type(t) = &local.pat {
+                        return Err(syn::Error::new_spanned(&t.ty, CONST_LET_TYPE));
+                    }
+                    if let Some(b) = bind {
+                        bindings.remove(&b);
+                        consts.insert(b, (*init.expr).clone());
+                    }
+                    continue;
                 } else {
                     let (base_expr, opts) = peel_builders(&init.expr)?;
                     if let Some((recv, item, callee, raw)) = fan_parts(base_expr) {
@@ -852,6 +1069,7 @@ pub(crate) fn analyze_stmts(
                     }
                 };
                 if let Some(b) = bind {
+                    consts.remove(&b);
                     bindings.insert(b, task);
                 }
             }
@@ -978,9 +1196,9 @@ pub(crate) fn analyze_stmts(
             Stmt::Item(it) => {
                 return Err(syn::Error::new_spanned(
                     it,
-                    "nested items (fn / mod / struct / enum / etc.) aren't \
-                     lowered in a #[workflow] body. Move helpers to the \
-                     surrounding module.",
+                    "nested items (fn / mod / struct / enum / const / static / \
+                     use / etc.) aren't lowered in a #[workflow] body. Move \
+                     them to the surrounding module.",
                 ));
             }
         }
@@ -1099,7 +1317,28 @@ pub(crate) fn retag_refs(
 
 #[cfg(test)]
 mod tests {
-    use super::uniq_task;
+    use super::*;
+    use syn::parse_quote;
+
+    fn arg(e: Expr, inputs: &[&str], binds: &[&str]) -> syn::Result<Arg> {
+        let inputs = inputs.iter().map(|s| s.to_string()).collect();
+        let binds = binds
+            .iter()
+            .map(|s| (s.to_string(), s.to_string()))
+            .collect();
+        expr_to_arg(&e, &binds, &inputs, None)
+    }
+
+    fn nodes(f: ItemFn) -> Vec<Node> {
+        analyze_workflow(&f, "w").map(|r| r.0).expect("analyzes")
+    }
+
+    fn err(f: ItemFn) -> String {
+        analyze_workflow(&f, "w")
+            .err()
+            .expect("rejected")
+            .to_string()
+    }
 
     #[test]
     fn task_names_dedup_and_skip_expr_reserved() {
@@ -1109,5 +1348,152 @@ mod tests {
         assert_eq!(uniq_task(&mut used, "if0"), "if0");
         assert_eq!(uniq_task(&mut used, "contains"), "contains-2");
         assert_eq!(uniq_task(&mut used, "contains"), "contains-3");
+    }
+
+    #[test]
+    fn constant_seals_paths_keeps_ctor_func() {
+        let e: Expr = parse_quote!(Opts {
+            a: MAX,
+            r: Some(cfg::X),
+            t: (1, N),
+            ..Opts::DEFAULT
+        });
+        let got = constant(&e, &|_| false).unwrap();
+        let want: Expr = parse_quote!(Opts {
+            a: const { MAX },
+            r: Some(const { cfg::X }),
+            t: (1, const { N }),
+            ..const { Opts::DEFAULT }
+        });
+        assert_eq!(quote!(#got).to_string(), quote!(#want).to_string());
+    }
+
+    #[test]
+    fn call_parts_skips_ctors() {
+        assert!(call_parts(&parse_quote!(step(1))).is_some());
+        assert!(call_parts(&parse_quote!(m::step(1))).is_some());
+        assert!(call_parts(&parse_quote!(Some(1))).is_none());
+        assert!(call_parts(&parse_quote!(Kind::A(1))).is_none());
+    }
+
+    #[test]
+    fn literal_conversions_stay_macro_time() {
+        for e in [
+            parse_quote!("x".to_string()),
+            parse_quote!("x".clone()),
+            parse_quote!(3.to_owned()),
+        ] {
+            assert!(matches!(arg(e, &[], &[]), Ok(Arg::Lit(_))));
+        }
+        for e in [
+            parse_quote!("x".into()),
+            parse_quote!(-5),
+            parse_quote!(5.to_string()),
+            parse_quote!(MAX),
+        ] {
+            assert!(matches!(arg(e, &[], &[]), Ok(Arg::Const(_))));
+        }
+    }
+
+    #[test]
+    fn flow_in_constant_rejected() {
+        let mixed = "can't be part of a constant value";
+        let e = arg(parse_quote!(Opts { a: n }), &["n"], &[]).err().unwrap();
+        assert!(e.to_string().contains(mixed), "{e}");
+        let e = arg(parse_quote!((t, 1)), &[], &["t"]).err().unwrap();
+        assert!(e.to_string().contains(mixed), "{e}");
+        let e = err(parse_quote!(
+            fn wf() {
+                let l = mk();
+                l.fan_out(|x| s(Opts { a: x }));
+            }
+        ));
+        assert!(e.contains(mixed), "{e}");
+    }
+
+    #[test]
+    fn constant_rejections() {
+        let msg = |e: Expr| arg(e, &[], &[]).err().unwrap().to_string();
+        assert_eq!(msg(parse_quote!(Opts { a: compute() })), CONST_CALL);
+        assert_eq!(msg(parse_quote!(NAME.into())), CONST_INTO);
+        for e in [
+            parse_quote!(MAX * 2),
+            parse_quote!(vec![1]),
+            parse_quote!(A[0]),
+            parse_quote!(X as u64),
+            parse_quote!(Opts { a: &X }),
+        ] {
+            assert_eq!(msg(e), UNSUPPORTED_ARG);
+        }
+    }
+
+    #[test]
+    fn const_let_follows_rust_shadowing() {
+        let n = nodes(parse_quote!(
+            fn wf() {
+                let n = 3;
+                let n = step(n);
+                sink(n);
+            }
+        ));
+        assert!(matches!(&n[0].args[0], Arg::Lit(v) if v == "3"));
+        assert!(matches!(&n[1].args[0], Arg::Ref(t) if t == "step"));
+    }
+
+    #[test]
+    fn const_let_field_and_shorthand() {
+        let n = nodes(parse_quote!(
+            fn wf() {
+                let a = 3;
+                let cfg = Opts { a };
+                step(cfg.a);
+            }
+        ));
+        let Arg::Const(e) = &n[0].args[0] else {
+            panic!("not a constant")
+        };
+        assert_eq!(quote!(#e).to_string(), "Opts { a : 3 } . a");
+    }
+
+    #[test]
+    fn closure_param_shadows_const_let() {
+        let n = nodes(parse_quote!(
+            fn wf() {
+                let x = 3;
+                let l = mk();
+                l.fan_out(|x| step(x));
+            }
+        ));
+        assert!(matches!(&n[1].args[0], Arg::Item { path } if path.is_empty()));
+    }
+
+    #[test]
+    fn inline_follows_scopes() {
+        let mut s: Stmt = parse_quote!(if x > k {
+            let k = mk();
+            a(k).continue_on(failed);
+        } else {
+            l.fan_out(|k| b(k, failed));
+        });
+        let consts = [("k", parse_quote!(3)), ("failed", parse_quote!(4))];
+        Inline(consts.map(|(n, v)| (n.to_string(), v)).into()).visit_stmt_mut(&mut s);
+        let want: Stmt = parse_quote!(if x > 3 {
+            let k = mk();
+            a(k).continue_on(failed);
+        } else {
+            l.fan_out(|k| b(k, 4));
+        });
+        assert_eq!(quote!(#s).to_string(), quote!(#want).to_string());
+    }
+
+    #[test]
+    fn let_alias_rejected() {
+        let e = err(parse_quote!(
+            fn wf(x: u32) {
+                let y = x;
+                step(y);
+            }
+        ));
+        assert_eq!(e, LET_SHAPE);
     }
 }

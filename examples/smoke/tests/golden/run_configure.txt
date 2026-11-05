@@ -1,0 +1,2 @@
+Opts { max_items: 10, name: "svc", speed: Slow(2), tags: ["a", "b"], limit: Some(5000000000) } retries=3 pair=(3000000000, "x")
+30

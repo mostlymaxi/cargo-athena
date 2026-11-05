@@ -36,6 +36,7 @@ const BIN_BOUNDARY_SCHEDULING: &str = env!("CARGO_BIN_EXE_smoke-boundary-schedul
 const BIN_PARALLELISM: &str = env!("CARGO_BIN_EXE_smoke-parallelism");
 const BIN_PVC: &str = env!("CARGO_BIN_EXE_smoke-pvc");
 const BIN_DAEMON: &str = env!("CARGO_BIN_EXE_smoke-daemon");
+const BIN_CONSTS: &str = env!("CARGO_BIN_EXE_smoke-consts");
 
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -244,6 +245,13 @@ fn emit_pipeline_deadline() {
 #[test]
 fn emit_pipeline_daemon() {
     assert_golden("pipeline_daemon.yaml", &run_bin(BIN_DAEMON, &[]));
+}
+
+/// Constant args: `const` items, struct / tuple / enum literals and
+/// constant `let` values, serialized with their serde attributes.
+#[test]
+fn emit_pipeline_consts() {
+    assert_golden("pipeline_consts.yaml", &run_bin(BIN_CONSTS, &[]));
 }
 
 /// `CARGO_ATHENA_DESCRIBE`: the binary reports a `ContainerRunMeta`
@@ -525,4 +533,40 @@ fn run_mode_branchy() {
         &[r#""fast""#],
     );
     assert_golden("run_branchy.txt", &out);
+}
+
+/// Run mode decodes the emitted constant args: feed the `configure`
+/// task's emitted values back as argv.
+#[test]
+fn run_mode_consts_roundtrip() {
+    use cargo_athena::serde_json::{self, Value};
+    let wts: Value =
+        serde_json::from_str(&run_bin(BIN_CONSTS, &[("CARGO_ATHENA_EMIT_JSON", "1")])).unwrap();
+    let root = wts
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["spec"]["entrypoint"] == "cargo-athena-example-smoke-pipeline-consts")
+        .unwrap();
+    let task = root["spec"]["templates"][0]["dag"]["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "configure")
+        .unwrap();
+    let argv: Vec<&str> = task["arguments"]["parameters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["value"].as_str().unwrap())
+        .collect();
+    let out = run_bin_argv(
+        BIN_CONSTS,
+        &[(
+            "CARGO_ATHENA_TEMPLATE",
+            "cargo-athena-example-smoke-configure",
+        )],
+        &argv,
+    );
+    assert_golden("run_configure.txt", &out);
 }

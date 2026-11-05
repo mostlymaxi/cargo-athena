@@ -27,7 +27,8 @@ Exercises every macro attribute (retry, timeouts, mutexes,
 nodeSelector, on_exit, hooks), the conditional shapes
 (value-if, statement-if/else-if/else), `fan_out` over a list, named
 struct-field forwarding (`a.field`), `host!` mounts, S3 artifact ports,
-`secret!`, fragments, nested calls, and `steps` mode.
+`secret!`, fragments, nested calls, constant values (`const` items,
+struct literals, constant `let`), and `steps` mode.
 
 If you want one place to see a pattern in action, this is it.
 
