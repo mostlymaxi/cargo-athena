@@ -7,8 +7,8 @@
 //! produced by re-entering [`crate::analyze::analyze_stmts`].
 //!
 //! - [`WhenExpr`] / [`cond_to_when`]: parse the Rust condition into a
-//!   closed AST; [`render_when`] is the single producer of the Argo
-//!   `when` string (so a malformed expression is unrepresentable).
+//!   closed AST; [`when_tag`] is the single producer of the Argo `when`
+//!   string: one `{{=...}}` tag, so Argo's govaluate only sees a bool.
 //! - [`hoist_cond`]: pre-pass that pulls template-call operands in the
 //!   condition into parent tasks (Rust evaluates conds unconditionally).
 //! - [`synth_if`]: emits the wrapper + arm `SynthWf`s; the returned task
@@ -52,29 +52,16 @@ impl CmpOp {
     }
 }
 
-/// A condition operand. Like `Arg` but literals keep their kind (a
-/// string compares as the JSON-quoted `"v"`, a number/bool bare — proven
-/// on real Argo v4.0.5). Conditions are always resolved *inside* the
-/// synthesized wrapper, where every parent binding/input arrives as a
-/// wrapper input (hoisting + capture remapping happen first) — so the
-/// only non-literal operands are input-rooted.
+/// A condition operand, rendered inside the wrapper (every capture is an input).
 pub(crate) enum WhenOp {
-    /// A wrapper input parameter (a captured parent binding/input).
-    Input(String),
-    /// `a.b.c` named-field access on an input (same lowering as
-    /// `Arg::Json`).
-    Json {
-        input: String,
-        path: Vec<String>,
-    },
-    Str(String),
-    Int(String),
-    Bool(bool),
+    /// Regime-B JSON literal (valid expr-lang).
+    Lit(String),
+    /// Wrapper input with a named-field path (empty = whole value).
+    Input { name: String, path: Vec<String> },
 }
 
-/// Closed, parenthesized-on-render condition AST. The single `render`
-/// (in the `if` synthesis) is the only producer of a `when` string, so a
-/// malformed Argo expression is unrepresentable.
+/// Closed, parenthesized-on-render condition AST; [`when_tag`] is its
+/// only renderer, so a malformed Argo expression is unrepresentable.
 pub(crate) enum WhenExpr {
     Cmp {
         lhs: WhenOp,
@@ -92,37 +79,21 @@ comparisons (== != < <= > >=) and `&&`/`||`/`!` over a #[workflow] input, \
 a prior `let = template(...)` binding, an `a.field` of one, or a literal. \
 Method calls, arithmetic, function calls and casts aren't lowered.";
 
-/// Resolve a single condition operand, preserving literal kind. Reuses
-/// the `expr_to_arg` field/binding/input rules so behaviour matches task
-/// args exactly (incl. `.clone()`/`.to_owned()` passthrough).
+/// Resolve a single condition operand with the exact task-arg rules.
 pub(crate) fn cond_operand(
     e: &Expr,
     bindings: &std::collections::HashMap<String, String>,
     inputs: &std::collections::HashSet<String>,
 ) -> syn::Result<WhenOp> {
-    if let Expr::Lit(syn::ExprLit { lit, .. }) = unwrap_expr(e) {
-        return Ok(match lit {
-            syn::Lit::Str(s) => WhenOp::Str(s.value()),
-            syn::Lit::Int(i) => WhenOp::Int(i.base10_digits().to_string()),
-            syn::Lit::Float(f) => WhenOp::Int(f.base10_digits().to_string()),
-            syn::Lit::Bool(b) => WhenOp::Bool(b.value),
-            other => {
-                return Err(syn::Error::new_spanned(other, UNSUPPORTED_COND));
-            }
-        });
-    }
-    // Non-literal operands share the exact arg rules (binding/input/
-    // .field/.clone); map the resulting `Arg` into a `WhenOp`.
     match expr_to_arg(e, bindings, inputs) {
-        Ok(Arg::Input(n)) => Ok(WhenOp::Input(n)),
+        Ok(Arg::Lit(v)) => Ok(WhenOp::Lit(v)),
+        Ok(Arg::Input(name)) => Ok(WhenOp::Input { name, path: vec![] }),
         Ok(Arg::Json {
-            src: JsonSrc::Input(n),
+            src: JsonSrc::Input(name),
             path,
-        }) => Ok(WhenOp::Json { input: n, path }),
-        // `Arg::Lit` only comes back for a literal, handled above; `Item`
-        // can't occur outside a fan_out closure; `Ref`/task-rooted `Json`
-        // can't occur because conditions are resolved inside the wrapper
-        // with empty bindings (parent bindings arrive as inputs).
+        }) => Ok(WhenOp::Input { name, path }),
+        // `Ref`/task-rooted `Json` can't occur: inside the wrapper
+        // bindings are empty (parent bindings arrive as inputs).
         Ok(_) => Err(syn::Error::new_spanned(e, UNSUPPORTED_COND)),
         // Keep the resolver's own diagnosis (e.g. "`x` is not a
         // #[workflow] input …") — it names the actual problem; append
@@ -361,21 +332,22 @@ pub(crate) fn if_arms(mut e: &syn::ExprIf) -> Vec<(Option<Expr>, syn::Block)> {
 
 pub(crate) fn when_op_str(o: &WhenOp) -> String {
     match o {
-        WhenOp::Input(n) => format!("{{{{inputs.parameters.{n}}}}}"),
-        WhenOp::Json { input, path } => {
+        // expr int literals are i64; a wider one reads as a float.
+        WhenOp::Lit(v) if v.bytes().all(|b| b.is_ascii_digit()) && v.parse::<i64>().is_err() => {
+            format!("{v}.0")
+        }
+        // A raw `}}` would end the tag. An escaped `\` before `u003c`
+        // would be eaten by Argo's `jsonutil.Fix`.
+        WhenOp::Lit(v) => v.replace("\\\\", "\\u005c").replace('}', "\\u007d"),
+        WhenOp::Input { name, path } => {
             let acc: String = path.iter().map(|f| format!("['{f}']")).collect();
-            format!("{{{{=toJSON(fromJSON(inputs.parameters['{input}']){acc})}}}}")
+            format!("fromJSON(inputs.parameters['{name}']){acc}")
         }
-        WhenOp::Str(s) => {
-            format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
-        }
-        WhenOp::Int(s) => s.clone(),
-        WhenOp::Bool(b) => if *b { "true" } else { "false" }.to_string(),
     }
 }
 
-/// The only producer of a `when` string — parenthesized so we never lean
-/// on expr-lang's precedence table (valid-by-construction).
+/// The gate as expr-lang, parenthesized so we never lean on its
+/// precedence table.
 pub(crate) fn render_when(w: &WhenExpr) -> String {
     match w {
         WhenExpr::Cmp { lhs, op, rhs } => {
@@ -388,8 +360,13 @@ pub(crate) fn render_when(w: &WhenExpr) -> String {
             format!("({} || {})", render_when(a), render_when(b))
         }
         WhenExpr::Not(x) => format!("!({})", render_when(x)),
-        WhenExpr::Truthy(o) => format!("({})", when_op_str(o)),
+        WhenExpr::Truthy(o) => when_op_str(o),
     }
+}
+
+/// The `when` string: the whole gate as one expr-lang tag.
+pub(crate) fn when_tag(w: &WhenExpr) -> String {
+    format!("{{{{={}}}}}", render_when(w))
 }
 
 /// `valueFrom.expression` selecting the arm task that Succeeded
@@ -582,7 +559,7 @@ pub(crate) fn synth_if(
             continue_on: None,
             hooks: Vec::new(),
             fan: None,
-            when: gate.as_ref().map(render_when),
+            when: gate.as_ref().map(when_tag),
         });
     }
 
@@ -738,6 +715,63 @@ pub(crate) fn emit_synth(s: &SynthWf) -> TokenStream2 {
                     <#callees as ::cargo_athena::Template>::collect(__out);
                 )*
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tag(c: Expr) -> syn::Result<String> {
+        let inputs = ["s", "xs", "m", "o", "r", "t", "cnt", "flag"]
+            .map(String::from)
+            .into();
+        cond_to_when(&c, &Default::default(), &inputs).map(|w| when_tag(&w))
+    }
+
+    #[test]
+    fn gates_render_as_one_expr_tag() {
+        for (c, want) in [
+            (
+                syn::parse_quote!(cnt > 3),
+                "{{=(fromJSON(inputs.parameters['cnt']) > 3)}}",
+            ),
+            (
+                syn::parse_quote!(s == "it's"),
+                r#"{{=(fromJSON(inputs.parameters['s']) == "it's")}}"#,
+            ),
+            (
+                syn::parse_quote!(m.id == "a\nb"),
+                r#"{{=(fromJSON(inputs.parameters['m'])['id'] == "a\nb")}}"#,
+            ),
+            (
+                syn::parse_quote!(s == "a}}b"),
+                "{{=(fromJSON(inputs.parameters['s']) == \"a\\u007d\\u007db\")}}",
+            ),
+            (
+                syn::parse_quote!(s == "\\u003c\\\""),
+                r#"{{=(fromJSON(inputs.parameters['s']) == "\u005cu003c\u005c\"")}}"#,
+            ),
+            (
+                syn::parse_quote!(t == 'x'),
+                r#"{{=(fromJSON(inputs.parameters['t']) == "x")}}"#,
+            ),
+            (
+                syn::parse_quote!(cnt > 18446744073709551615),
+                "{{=(fromJSON(inputs.parameters['cnt']) > 18446744073709551615.0)}}",
+            ),
+            (
+                syn::parse_quote!(flag),
+                "{{=fromJSON(inputs.parameters['flag'])}}",
+            ),
+            (
+                syn::parse_quote!(!flag && cnt == 0),
+                "{{=(!(fromJSON(inputs.parameters['flag'])) && \
+                 (fromJSON(inputs.parameters['cnt']) == 0))}}",
+            ),
+        ] {
+            assert_eq!(tag(c).unwrap(), want);
         }
     }
 }
