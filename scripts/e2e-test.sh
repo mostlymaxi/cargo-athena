@@ -182,6 +182,7 @@ need 'OK expect_fan_err partial status=Failed' "continue_on fan_out: one failed 
 need 'OK expect_fan_err allfail status=Failed' "continue_on fan_out: all elements failed => Err"
 need 'OK expect_err status=Failed' "continue_on task: failure => Err{status,exit_code}"
 need 'finalize:ok'                 "continue_on task: success => Ok(value)"
+need 'OK check_hook'               "hook arg from a non-ancestor task"
 need 'OK check_nested steps-child' "nested steps child: fan_out + continue_on"
 need 'OK check_nested dag-child'   "nested dag child: fan_out + continue_on"
 need 'OK check_nested if-arm'      "if arm: fan_out + continue_on"
