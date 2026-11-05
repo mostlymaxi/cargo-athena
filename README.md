@@ -62,18 +62,12 @@ and in this repo as [`WORKFLOW.md`](WORKFLOW.md) and [`CONTAINER.md`](CONTAINER.
 
 ## Supported Argo Workflows
 
-Every push to `main` submits the `examples/e2e` workflow to a real
-Argo + MinIO per version and asserts it `Succeeded`. These badges are
-that live result:
+| Argo | e2e |
+|---|---|
+| v4.1 | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v4.1.6.json) |
+| v4.0 | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v4.0.15.json) |
 
-| Argo | Support | e2e |
-|---|---|---|
-| v4.1.6  | maintained (latest minor) | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v4.1.6.json) |
-| v4.0.15 | maintained (n-1 minor)    | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v4.0.15.json) |
-
-Argo 3.x is not supported. See
-[Supported Argo Versions](https://mostlymaxi.github.io/cargo-athena/argo-versions.html)
-for what happens on older versions.
+Argo 3.x is not supported.
 
 ## Contributing
 
