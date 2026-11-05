@@ -77,12 +77,10 @@ cargo athena publish
 cargo athena submit my-crate-pipeline -a seed=hi
 ```
 
-Wait for the run, assert it `Succeeded`. The project's own GitHub
-Actions matrix does exactly this on every push to `main` against
-both supported Argo versions (4.1.6 / 4.0.15) and the badges in
-[Supported Argo Versions](argo-versions.md) are that live result.
+Wait for the run, assert it `Succeeded`.
 
-To reproduce the cluster locally:
+To run a local kind cluster with Argo + MinIO from a clone of this
+repo:
 
 ```sh
 scripts/deploy.sh && scripts/e2e-test.sh && scripts/teardown.sh
