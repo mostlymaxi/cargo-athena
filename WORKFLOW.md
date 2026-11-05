@@ -149,7 +149,9 @@ Nothing is silently dropped.
 
 Each task is named after the template it calls (`fetch`, then
 `fetch-2` for a second call), never after the `let` binding. Each
-`if` / `else` becomes one task named `if` (then `if-2`, …).
+`if` / `else` becomes one task named `if0`, `if1`, …. A template
+named `not`, `or`, `and`, `matches`, `contains` or `nil` starts at
+`-2` (`contains-2`), because Argo can't use those words as task names.
 
 ### Arguments to a template call
 

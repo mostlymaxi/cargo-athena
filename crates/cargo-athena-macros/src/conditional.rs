@@ -611,7 +611,7 @@ pub(crate) fn synth_if(
             }
         })
         .collect();
-    let task = uniq_task(used, "if");
+    let task = uniq_task(used, &format!("if{k}"));
     nodes.push(Node {
         task: task.clone(),
         callee: syn::parse_quote!(#wrap_ident),
