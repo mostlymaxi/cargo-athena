@@ -157,28 +157,17 @@ task '...' errored: configmaps is forbidden: User
 in API group "" in the namespace "argo"
 ```
 
-A task's substituted arguments crossed the 128 KB threshold and Argo
-3.7+ tried to stage them in a per-pod `ConfigMap` (PR #15265). The
-upstream `namespace-install.yaml` grants the controller SA only
-read access on configmaps. Add `create` (and `update/patch/delete`
-for resilience) to the controller's Role - `scripts/deploy.sh` does
-this with `Role/RoleBinding athena-argo-configmaps`.
+A task's arguments are larger than 128 KB, so Argo tried to store them
+in a `ConfigMap`. The upstream `namespace-install.yaml` lets the
+controller only read configmaps. Add `create` (and
+`update/patch/delete`) to the controller's Role - `scripts/deploy.sh`
+does this with `Role/RoleBinding athena-argo-configmaps`.
 
-On Argo 3.6 the offload path doesn't exist at all; arguments over the
-kernel exec `ARG_MAX` (~128 KB) fail with `argument list too long`,
-and the only fix is using `Artifact<T>` for the large value (see
-[Pass a large value between steps](cookbook.md#pass-a-large-value-between-steps)).
+### "failed to resolve {{tasks.X.outputs.*}}" at submit
 
-### "failed to resolve {{tasks.X.outputs.*}}" on Argo ≤ 3.5
-
-cargo-athena emits one `WorkflowTemplate` per template, wired via
-`templateRef`. Argo 3.5 and older can't resolve cross-template task
-output references at submit time, so any multi-step workflow fails
-instantly with this message.
-
-Fixed in Argo 3.6. The emitted YAML is correct and passes 3.6 / 3.7 /
-4.0 unchanged. cargo-athena does not support Argo ≤ 3.5; do not try
-to "fix" by inlining.
+Your cluster runs Argo 3.5 or older, which cannot run a multi-step
+cargo-athena workflow. Upgrade to a
+[supported Argo version](argo-versions.md).
 
 ### Pod CrashLoopBackOff, "exec format error" or "no such file"
 

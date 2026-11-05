@@ -10,7 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLUSTER=athena-e2e
-ARGO_VERSION="${ARGO_VERSION:-v4.0.8}"  # CI overrides per matrix entry
+ARGO_VERSION="${ARGO_VERSION:-v4.1.6}"  # CI overrides per matrix entry
 # ATHENA_E2E_SINGLE=1 → 1-node cluster (hosts without kind cross-node
 # networking, e.g. NixOS default-drop FORWARD). Default is the 3-node split.
 KIND_CFG="$SCRIPT_DIR/kind-cluster.yaml"
@@ -101,15 +101,14 @@ subjects:
   namespace: argo
 EOF
 
-say "controller RBAC for large-args ConfigMap offload (Argo 3.7+)"
+say "controller RBAC for large-args ConfigMap offload"
 # Argo's container-args offload (workflow/controller/workflowpod.go L497+
-# in 4.0.5, gated by PR #15265 since 3.7) creates a ConfigMap holding
+# in 4.0.5) creates a ConfigMap holding
 # the original `c.Args` JSON when their JSON-marshaled size exceeds
 # 128 KB. The upstream `namespace-install.yaml` grants the controller SA
 # only `get/list/watch` on configmaps; without `create` here, any task
 # whose substituted args cross the threshold errors immediately with
 #   "configmaps is forbidden: ... cannot create resource configmaps".
-# 3.6 lacks the offload code entirely (the binding is harmless there).
 kubectl apply -f - <<'EOF'
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

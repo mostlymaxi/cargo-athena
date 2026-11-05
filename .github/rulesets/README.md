@@ -14,8 +14,8 @@ Branch ruleset on the **default branch** (`~DEFAULT_BRANCH`, currently
   **squash/rebase** (`required_linear_history` + `allowed_merge_methods`,
   matching the repo's merge-commit-off setting).
 - **Required status checks** (strict — branch must be up to date):
-  `clippy`, `test`, `build`, and the three blocking e2e legs
-  `e2e (argo v4.0.8 | v3.7.17 | v3.6.19)`. `integration_id: 15368` pins
+  `clippy`, `test`, `build`, and the two blocking e2e legs
+  `e2e (argo v4.1.6 | v4.0.15)`. `integration_id: 15368` pins
   them to the GitHub Actions app.
 - `required_approving_review_count: 0` — deliberate for a solo
   maintainer (a value ≥ 1 would block your own PRs, since GitHub forbids
