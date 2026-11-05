@@ -13,10 +13,6 @@ spec:
   entrypoint: cargo-athena-example-smoke-pipeline-pod-attrs
   templates:
   - name: cargo-athena-example-smoke-pipeline-pod-attrs
-    metadata:
-      annotations:
-        argo.io/wf-tier: '{{workflow.parameters.tier}}'
-        team.athena/owner: platform
     dag:
       tasks:
       - name: run-svc

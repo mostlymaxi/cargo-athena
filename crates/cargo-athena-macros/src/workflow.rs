@@ -23,8 +23,8 @@ use crate::conditional::emit_synth;
 use crate::ghost::ghost_fn;
 use crate::node_tokens::node_tokens;
 use crate::utils::{
-    annotation_key_violation, check_dns1123_name, check_fn_shape, check_yaml_safe_names, fn_args,
-    is_artifact_ty, make_argo_name, scan_body, sig_shim, str_slice,
+    check_dns1123_name, check_fn_shape, check_yaml_safe_names, fn_args, is_artifact_ty,
+    make_argo_name, scan_body, sig_shim, str_slice,
 };
 
 pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -58,19 +58,6 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         && let Err(e) = check_dns1123_name(lit)
     {
         return e.to_compile_error().into();
-    }
-    // `annotations` keys are k8s annotation keys (closed grammar,
-    // rejected at admission otherwise). Literal map keys carry no
-    // token, so the error points at the fn.
-    for k in cfg.annotations.keys() {
-        if let Some(why) = annotation_key_violation(k) {
-            return syn::Error::new(
-                func.sig.ident.span(),
-                format!("`annotations` key `{k}` is not a valid annotation key: {why}"),
-            )
-            .to_compile_error()
-            .into();
-        }
     }
     let steps_mode = cfg.steps.is_set();
 
@@ -462,31 +449,6 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
     };
-    // `annotations` — literal keys + values, lands on
-    // `Template.metadata.annotations` of the dag/steps template. Same
-    // built-then-checked shape as the container side: keep
-    // `metadata: None` (skip-serialized) when the attr is absent so
-    // existing goldens stay byte-identical.
-    let ann_keys: Vec<&String> = cfg.annotations.keys().collect();
-    let ann_vals: Vec<&String> = cfg.annotations.values().collect();
-    let metadata_tokens = quote! {
-        metadata: {
-            let mut __ann: ::std::collections::BTreeMap<
-                ::std::string::String,
-                ::std::string::String,
-            > = ::std::collections::BTreeMap::new();
-            #( __ann.insert(#ann_keys.to_string(), #ann_vals.to_string()); )*
-            if __ann.is_empty() {
-                ::core::option::Option::None
-            } else {
-                ::core::option::Option::Some(::cargo_athena::api::ObjectMeta {
-                    annotations: __ann,
-                    ..::core::default::Default::default()
-                })
-            }
-        },
-    };
-
     // Template-level `retryStrategy` / `timeout` (real WT only — never
     // re-stamped on synthetic `if` wrapper/arm templates).
     let retry_tok = match retry_strategy_tokens(&cfg.retry, ident.span()) {
@@ -543,7 +505,6 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             #( #node_blocks )*
             ::cargo_athena::api::Template {
                 name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
-                #metadata_tokens
                 inputs: #inputs_tokens,
                 steps: __steps,
                 #node_selector_tokens
@@ -563,7 +524,6 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             #( #node_blocks )*
             ::cargo_athena::api::Template {
                 name: <Self as ::cargo_athena::Template>::ARGO_NAME.to_string(),
-                #metadata_tokens
                 inputs: #inputs_tokens,
                 dag: ::core::option::Option::Some(
                     ::cargo_athena::api::DagTemplate { tasks: __tasks }),
