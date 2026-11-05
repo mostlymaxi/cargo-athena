@@ -683,11 +683,17 @@ pub(crate) fn local_binding(pat: &syn::Pat) -> syn::Result<Option<String>> {
     }
 }
 
+/// expr-lang reserved words. Argo evaluates `depends` with bare task
+/// names (`-` -> `_`), so a task named one of these breaks its dependents.
+const EXPR_RESERVED: &[&str] = &[
+    "not", "in", "or", "and", "matches", "contains", "let", "if", "else", "nil", "true", "false",
+];
+
 /// Allocate a kebab task name unique within the workflow.
 pub(crate) fn uniq_task(used: &mut std::collections::HashSet<String>, base: &str) -> String {
     let mut task = kebab(base);
     let mut n = 1;
-    while used.contains(&task) {
+    while used.contains(&task) || EXPR_RESERVED.contains(&task.as_str()) {
         n += 1;
         task = format!("{}-{n}", kebab(base));
     }
@@ -1089,4 +1095,19 @@ pub(crate) fn retag_refs(
         }
     }
     (fan_tasks, fallible)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::uniq_task;
+
+    #[test]
+    fn task_names_dedup_and_skip_expr_reserved() {
+        let mut used = Default::default();
+        assert_eq!(uniq_task(&mut used, "make_list"), "make-list");
+        assert_eq!(uniq_task(&mut used, "make_list"), "make-list-2");
+        assert_eq!(uniq_task(&mut used, "if0"), "if0");
+        assert_eq!(uniq_task(&mut used, "contains"), "contains-2");
+        assert_eq!(uniq_task(&mut used, "contains"), "contains-3");
+    }
 }

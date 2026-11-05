@@ -326,7 +326,7 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-decide-0-0-0
           template: cargo-athena-example-smoke-decide
-      - name: if
+      - name: if0
         dependencies:
         - decide
         arguments:
