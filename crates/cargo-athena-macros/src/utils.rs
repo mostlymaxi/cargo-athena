@@ -1,7 +1,7 @@
 //! Shared helpers used by every attribute-macro entry point.
 //!
 //! - Name/ident munging: [`kebab`], [`crate_ns`], [`make_argo_name`].
-//! - Fn signature shape: [`fn_args`], [`sig_shim`].
+//! - Fn signature shape: [`fn_args`], [`sig_shim`], [`arg_slot`].
 //! - Static body scan: [`BodyScan`], [`scan_body`] — collects every
 //!   `host!`/`load_artifact!`/`save_artifact!`/`secret*!` literal and
 //!   called ident, for the `#[fragment]` resource closure.
@@ -10,7 +10,7 @@
 //!   private form so unattributed call sites fail to compile.
 //! - YAML-1.1 safety: [`yaml_ambiguous`], [`check_yaml_safe_names`].
 //! - Token slices: [`str_slice`], [`secret_slice_tokens`].
-//! - AST navigation: [`unwrap_expr`], [`is_builder_method`].
+//! - AST navigation: [`unwrap_expr`], [`is_builder_method`], [`is_ctor`].
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -23,10 +23,17 @@ pub(crate) use cargo_athena_api::munge::kebab;
 /// as an inherent fn on the identity struct. Lets the `#[workflow]` ghost
 /// type-check data flow (`Callee::__athena_sig(args)`) while the public
 /// identity stays a unit struct (the wormhole). `pub` + `#[doc(hidden)]`
-/// so it resolves cross-crate/module exactly like the type path.
+/// so it resolves cross-crate/module exactly like the type path. Plus
+/// one type slot per arg ([`arg_slot`]) that types a constant arg at
+/// emit.
 pub(crate) fn sig_shim(ident: &syn::Ident, func: &ItemFn) -> TokenStream2 {
     let inputs = &func.sig.inputs;
     let output = &func.sig.output;
+    let (slots, tys): (Vec<_>, Vec<_>) = fn_args(func)
+        .into_iter()
+        .enumerate()
+        .map(|(i, (_, ty))| (arg_slot(i), ty))
+        .unzip();
     quote! {
         impl #ident {
             #[doc(hidden)]
@@ -34,8 +41,20 @@ pub(crate) fn sig_shim(ident: &syn::Ident, func: &ItemFn) -> TokenStream2 {
             pub fn __athena_sig(#inputs) #output {
                 ::core::unimplemented!("athena ghost: never executed")
             }
+            #(
+                // `fn(T)`: elided lifetimes stay legal (higher-ranked).
+                #[doc(hidden)]
+                #[allow(dead_code, clippy::all)]
+                pub fn #slots() -> ::core::marker::PhantomData<fn(#tys)> {
+                    ::core::marker::PhantomData
+                }
+            )*
         }
     }
+}
+
+pub(crate) fn arg_slot(i: usize) -> syn::Ident {
+    quote::format_ident!("__athena_arg{i}")
 }
 
 /// `(ident, type)` for each non-receiver fn argument.
@@ -863,6 +882,15 @@ pub(crate) fn is_builder_method(m: &syn::Ident) -> bool {
     )
 }
 
+/// An uppercase last segment marks a constructor (`Some(..)`,
+/// `Kind::A(..)`), not a template call. The ghost asserts it.
+pub(crate) fn is_ctor(p: &syn::Path) -> bool {
+    use syn::ext::IdentExt;
+    p.segments
+        .last()
+        .is_some_and(|s| s.ident.unraw().to_string().starts_with(char::is_uppercase))
+}
+
 pub(crate) fn unwrap_expr(e: &Expr) -> &Expr {
     match e {
         Expr::Paren(p) => unwrap_expr(&p.expr),
@@ -880,6 +908,17 @@ pub(crate) fn unwrap_expr(e: &Expr) -> &Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ctor_is_uppercase_last_segment() {
+        let p = |s: &str| syn::parse_str::<syn::Path>(s).unwrap();
+        for c in ["Some", "Kind::A", "r#Foo"] {
+            assert!(is_ctor(&p(c)), "{c}");
+        }
+        for f in ["step", "m::step", "Opts::new"] {
+            assert!(!is_ctor(&p(f)), "{f}");
+        }
+    }
 
     #[test]
     fn dns1123_subdomain_shapes() {

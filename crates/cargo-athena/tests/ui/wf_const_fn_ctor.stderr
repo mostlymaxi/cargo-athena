@@ -1,0 +1,7 @@
+error[E0532]: expected a pattern, found a function call
+  --> tests/ui/wf_const_fn_ctor.rs:15:12
+   |
+15 |     take_n(Now());
+   |            ^^^ not a tuple struct or tuple variant
+   |
+   = note: function calls are not allowed in patterns: <https://doc.rust-lang.org/book/ch19-00-patterns.html>

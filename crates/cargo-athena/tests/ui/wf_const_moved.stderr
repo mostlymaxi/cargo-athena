@@ -1,0 +1,21 @@
+error[E0382]: use of moved value: `s`
+  --> tests/ui/wf_const_moved.rs:17:7
+   |
+15 |     let s = "x".to_string();
+   |         - move occurs because `s` has type `std::string::String`, which does not implement the `Copy` trait
+16 |     a(s);
+   |       - value moved here
+17 |     b(s);
+   |       ^ value used here after move
+   |
+note: consider changing this parameter type in method `__athena_sig` to borrow instead if owning the value isn't necessary
+  --> tests/ui/wf_const_moved.rs:4:9
+   |
+ 3 | #[cargo_athena::container]
+   | -------------------------- in this method
+ 4 | fn a(s: String) {
+   |         ^^^^^^ this parameter takes ownership of the value
+help: consider cloning the value if the performance cost is acceptable
+   |
+16 |     a(s.clone());
+   |        ++++++++

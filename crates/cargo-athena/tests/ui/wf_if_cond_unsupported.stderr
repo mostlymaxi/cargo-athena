@@ -1,4 +1,4 @@
-error: unsupported argument in a #[workflow] call. Allowed: a literal, a workflow input parameter, a binding from a prior `let x = template(...);`, `.clone()`/`.to_owned()` on a binding/input, or `.to_string()`/`.into()` on a string literal. Computed values, regular variables/consts, other method calls, and other expressions aren't lowered yet.
+error: unsupported argument in a #[workflow] call. Allowed: a literal; a #[workflow] input or a binding from a prior `let x = template(...);` (also `.clone()`, `.to_owned()`, `.field`); a nested template call; or a constant value: literals, `const` items, constant `let` bindings, struct / tuple / array literals, enum variants and tuple structs (`None`, `Some(..)`, `Kind::A(..)`), `.field`, `-`, `.clone()` / `.to_owned()` / `.to_string()` / `.to_vec()`, `.into()` on a string literal, and `const { .. }` blocks. Arithmetic, casts, indexing, macros and other calls aren't lowered: compute the value in a `const` item, a `const { .. }` block or a #[container].
   --> tests/ui/wf_if_cond_unsupported.rs:15:8
    |
 15 |     if s.len() > 0 {

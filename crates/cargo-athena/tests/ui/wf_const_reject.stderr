@@ -1,0 +1,83 @@
+error: `k` can't be part of a constant value: it is a #[workflow] input, a task result or the `fan_out` item, and a constant is fixed when the workflow is emitted. Pass `k` on its own, or build the value in a #[container] that takes `k` as an argument.
+  --> tests/ui/wf_const_reject.rs:43:22
+   |
+43 |     take_n(Opts { a: k }.a);
+   |                      ^
+
+error: `t` can't be part of a constant value: it is a #[workflow] input, a task result or the `fan_out` item, and a constant is fixed when the workflow is emitted. Pass `t` on its own, or build the value in a #[container] that takes `t` as an argument.
+  --> tests/ui/wf_const_reject.rs:50:16
+   |
+50 |     take_pair((t, 1));
+   |                ^
+
+error: `x` can't be part of a constant value: it is a #[workflow] input, a task result or the `fan_out` item, and a constant is fixed when the workflow is emitted. Pass `x` on its own, or build the value in a #[container] that takes `x` as an argument.
+  --> tests/ui/wf_const_reject.rs:57:36
+   |
+57 |     l.fan_out(|x| take_n(Opts { a: x }.a));
+   |                                    ^
+
+error: a call inside a constant value must be an enum variant or tuple struct (`Some(..)`, `Kind::A(..)`: a name that starts with an uppercase letter). To use a task result, pass it to a #[container] that builds the value. Compute other values in a `const` item or a `const { .. }` block.
+  --> tests/ui/wf_const_reject.rs:63:22
+   |
+63 |     take_n(Opts { a: compute() }.a);
+   |                      ^^^^^^^^^
+
+error: `.into()` in a constant value works only on a string literal. Use `.to_string()` for text and `[a, b].to_vec()` for a list.
+  --> tests/ui/wf_const_reject.rs:69:10
+   |
+69 |     take(NAME.into());
+   |          ^^^^^^^^^^^
+
+error: unsupported argument in a #[workflow] call. Allowed: a literal; a #[workflow] input or a binding from a prior `let x = template(...);` (also `.clone()`, `.to_owned()`, `.field`); a nested template call; or a constant value: literals, `const` items, constant `let` bindings, struct / tuple / array literals, enum variants and tuple structs (`None`, `Some(..)`, `Kind::A(..)`), `.field`, `-`, `.clone()` / `.to_owned()` / `.to_string()` / `.to_vec()`, `.into()` on a string literal, and `const { .. }` blocks. Arithmetic, casts, indexing, macros and other calls aren't lowered: compute the value in a `const` item, a `const { .. }` block or a #[container].
+  --> tests/ui/wf_const_reject.rs:75:12
+   |
+75 |     take_n(MAX * 2);
+   |            ^^^^^^^
+
+error: unsupported argument in a #[workflow] call. Allowed: a literal; a #[workflow] input or a binding from a prior `let x = template(...);` (also `.clone()`, `.to_owned()`, `.field`); a nested template call; or a constant value: literals, `const` items, constant `let` bindings, struct / tuple / array literals, enum variants and tuple structs (`None`, `Some(..)`, `Kind::A(..)`), `.field`, `-`, `.clone()` / `.to_owned()` / `.to_string()` / `.to_vec()`, `.into()` on a string literal, and `const { .. }` blocks. Arithmetic, casts, indexing, macros and other calls aren't lowered: compute the value in a `const` item, a `const { .. }` block or a #[container].
+  --> tests/ui/wf_const_reject.rs:81:12
+   |
+81 |     take_v(vec![1]);
+   |            ^^^^^^^
+
+error: nested items (fn / mod / struct / enum / const / static / use / etc.) aren't lowered in a #[workflow] body. Move them to the surrounding module.
+  --> tests/ui/wf_const_reject.rs:87:5
+   |
+87 |     const N: u32 = 3;
+   |     ^^^^^^^^^^^^^^^^^
+
+error: a #[workflow] `let` must bind a template call (`let x = template(args);`), an `if`, or a constant value (`let k = 3;`, `let cfg = Opts { .. };`). To reuse an input or a task result, pass it directly.
+  --> tests/ui/wf_const_reject.rs:94:13
+   |
+94 |     let m = k;
+   |             ^
+
+error: `fan_out` source must be a task result (`let x = template(..);`) or a #[workflow] input (a list), not a constant.
+   --> tests/ui/wf_const_reject.rs:102:5
+    |
+102 |     l.fan_out(|x| take_n(x));
+    |     ^
+
+error: a nested template call isn't lowered in a hook or `fan_out` arg. Bind it first (`let x = template(..);`) and pass `x`.
+   --> tests/ui/wf_const_reject.rs:108:30
+    |
+108 |     take_n(1).on_exit(take_n(mk()));
+    |                              ^^^^
+
+error: a constant `let` can't have a type annotation. Use a typed literal (`5_000_000_000u64`) or a `const` item.
+   --> tests/ui/wf_const_reject.rs:114:14
+    |
+114 |     let big: u64 = 5_000_000_000;
+    |              ^^^
+
+error: `k` is returned but isn't a binding from a `let = template(...)`.
+   --> tests/ui/wf_const_reject.rs:122:5
+    |
+122 |     k
+    |     ^
+
+error: unsupported argument in a #[workflow] call. Allowed: a literal; a #[workflow] input or a binding from a prior `let x = template(...);` (also `.clone()`, `.to_owned()`, `.field`); a nested template call; or a constant value: literals, `const` items, constant `let` bindings, struct / tuple / array literals, enum variants and tuple structs (`None`, `Some(..)`, `Kind::A(..)`), `.field`, `-`, `.clone()` / `.to_owned()` / `.to_string()` / `.to_vec()`, `.into()` on a string literal, and `const { .. }` blocks. Arithmetic, casts, indexing, macros and other calls aren't lowered: compute the value in a `const` item, a `const { .. }` block or a #[container].
+   --> tests/ui/wf_const_reject.rs:129:12
+    |
+129 |     take_n(k * 2);
+    |            ^^^^^

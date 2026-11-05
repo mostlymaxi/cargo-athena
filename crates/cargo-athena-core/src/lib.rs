@@ -65,6 +65,23 @@ pub fn __athena_fallible<T>(_: T) -> Result<T, ArgoError> {
     unimplemented!("athena ghost: never executed")
 }
 
+/// Ghost-only: a bare-path constant `let` must be `Serialize`, so a
+/// template missing `()` fails.
+#[doc(hidden)]
+pub fn __athena_value<T: ::serde::Serialize>(v: T) -> T {
+    v
+}
+
+/// Emit-time JSON of a constant `#[workflow]` arg; `slot` (a callee's
+/// `__athena_argN()`) fixes its type.
+#[doc(hidden)]
+pub fn __athena_const<T: ::serde::Serialize>(
+    _slot: ::core::marker::PhantomData<fn(T)>,
+    v: T,
+) -> String {
+    serde_json::to_string(&v).expect("serialize a constant #[workflow] argument")
+}
+
 /// Marker for types that may be injected into a `#[container]`
 /// attribute (`image = "repo:" + tag`). Restricted to `String`/`str`
 /// and the primitive numbers: their `serde_json` form, unwrapped at

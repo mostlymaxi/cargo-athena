@@ -113,7 +113,7 @@ pub(crate) fn cond_operand(
     }
     // Non-literal operands share the exact arg rules (binding/input/
     // .field/.clone); map the resulting `Arg` into a `WhenOp`.
-    match expr_to_arg(e, bindings, inputs) {
+    match expr_to_arg(e, bindings, inputs, None) {
         Ok(Arg::Input(n)) => Ok(WhenOp::Input(n)),
         Ok(Arg::Json {
             src: JsonSrc::Input(n),

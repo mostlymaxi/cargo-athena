@@ -1,0 +1,5 @@
+error[E0507]: cannot move out of static item `IMG`
+  --> tests/ui/wf_const_static.rs:14:10
+   |
+14 |     take(IMG.clone());
+   |          ^^^ move occurs because `IMG` has type `LazyLock<std::string::String>`, which does not implement the `Copy` trait
