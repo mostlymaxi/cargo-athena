@@ -15,6 +15,9 @@
 //!   wrappers) with a closed-grammar numeric condition,
 //! * a **nested call** `note(echo(..))`,
 //! * **struct-field access** `m.id` (`{{=toJSON(fromJSON(..)['id'])}}`),
+//! * **constant values** (`const` items, struct / tuple / enum literals,
+//!   constant `let` + `.field`) decoded and asserted in-pod, and a
+//!   `const` in an `if` condition,
 //! * **attribute injection** on four leaf-template fields:
 //!   `image = "busybox:" + tag` (real pullable tag),
 //!   `service_account = "defa" + suffix` (resolves to `default` SA),
@@ -474,6 +477,48 @@ pub fn cleanup() {
     println!("cleanup ran");
 }
 
+// --- constant values ------------------------------------------------------
+
+pub const E2E_RETRIES: u32 = 5;
+pub const E2E_MIN: i64 = 2;
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Level {
+    Low,
+    High { boost: u8 },
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Limits {
+    pub max_retries: u32,
+    #[serde(rename = "id")]
+    pub name: String,
+    pub level: Level,
+    pub tags: Vec<String>,
+    pub cap: Option<u64>,
+}
+
+/// Asserts the constant args the workflow emitted decode in-pod.
+#[container]
+pub fn check_consts(l: Limits, retries: u32, tup: (i64, String), cap: Option<u64>) {
+    let want = Limits {
+        max_retries: 5,
+        name: "e2e".to_string(),
+        level: Level::High { boost: 2 },
+        tags: vec!["x".to_string()],
+        cap: Some(5_000_000_000),
+    };
+    assert_eq!(l, want, "constant struct mis-decoded");
+    assert_eq!(
+        (retries, tup, cap),
+        (5, (-3, "p".to_string()), None),
+        "constant args mis-decoded"
+    );
+    println!("OK check_consts");
+}
+
 /// The whole feature matrix in one DAG. `node_selector_if_root` lands
 /// on every pod in the run (via WorkflowSpec.NodeSelector — the only
 /// nodeSelector tier that reaches nested sub-workflows' pods);
@@ -543,6 +588,19 @@ pub fn pipeline(input_blob: String) {
         note("zero".to_string());
     } else {
         note(chosen); // statement-if
+    }
+
+    // Constant args: serialized at emit, decoded + asserted in-pod.
+    let lim = Limits {
+        max_retries: E2E_RETRIES,
+        name: "e2e".to_string(),
+        level: Level::High { boost: 2 },
+        tags: ["x".to_string()].to_vec(),
+        cap: Some(5_000_000_000),
+    };
+    check_consts(lim.clone(), lim.max_retries, (-3, "p".into()), None);
+    if cnt > E2E_MIN {
+        note("const-gate".to_string()); // const in a condition
     }
 
     // Nested fan_out / continue_on consumers (see `check_nested`).
