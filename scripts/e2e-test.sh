@@ -243,11 +243,12 @@ echo "emulate returned: $EMU"
 
 say "CLI gate: submit (kube path)"
 # `cargo athena submit` against the kube API (kubeconfig current-context
-# = this kind cluster). Templates already applied above; --skip-binary-
-# check because MinIO is only reachable by its in-cluster DNS here.
-SUBWF=$( cd "$ROOT" && cargo run -q -p cargo-athena --bin cargo-athena -- \
+# = this kind cluster). Templates already applied above. Its binary
+# check uses env keys via the port-forward (publish used the file).
+SUBWF=$( cd "$ROOT" && AWS_ACCESS_KEY_ID=athena AWS_SECRET_ACCESS_KEY=athena12345 \
+  AWS_ENDPOINT_URL_S3=http://127.0.0.1:9000 cargo run -q -p cargo-athena --bin cargo-athena -- \
   athena submit -w cargo-athena-example-e2e-finalize-wf \
-  --package "$PKG" --bin "$BIN" -n "$NS" --skip-binary-check -y \
+  --package "$PKG" --bin "$BIN" -n "$NS" -y \
   2>/dev/null | tail -1 )
 echo "submit created: $SUBWF"
 [ -n "$SUBWF" ] || { echo "FAIL: submit printed no workflow name"; exit 1; }
