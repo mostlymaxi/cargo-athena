@@ -30,6 +30,8 @@ mod init;
 mod ls;
 #[path = "../pkg.rs"]
 mod pkg;
+#[path = "../s3creds.rs"]
+mod s3creds;
 #[path = "../style.rs"]
 mod style;
 #[path = "../submit.rs"]
@@ -173,7 +175,7 @@ enum Cmd {
     /// Check publish/submit prerequisites
     ///
     /// Preflights every prereq for `publish` / `submit` (cargo-zigbuild,
-    /// zig, rustup targets, athena.toml, AWS creds, optional S3 reach).
+    /// zig, rustup targets, athena.toml, S3 credentials, optional S3 reach).
     /// Reports each as green/red with a fix hint. Exit 0 on all-pass.
     Doctor(doctor::DoctorArgs),
 }
@@ -424,8 +426,8 @@ fn build(
 /// baked `version_tag`, so the upload and the emitted YAML can't drift —
 /// and a dev binary never overwrites a release tarball.
 ///
-/// `AWS_ENDPOINT_URL` can override the endpoint at upload time without
-/// changing what `emit` injects.
+/// `AWS_ENDPOINT_URL_S3` (or `AWS_ENDPOINT_URL`) can override the endpoint
+/// at upload time without changing what `emit` injects.
 fn artifact_s3(cfg: &AthenaConfig, krate: &str, tag: &str, bin: &str) -> (S3Ref, String) {
     let key = cargo_athena::api::munge::binary_key(krate, tag, bin);
     let s3 = S3Ref::from_repo(&cfg.artifact_repository.s3, key);
@@ -556,8 +558,8 @@ fn build_tarball(
 /// Default: `build_tarball` (cross-compile + package) then upload.
 /// `--tarball F`: skip the build and upload `F` verbatim (build-once /
 /// upload-many — a CI artifact, or the kind e2e dogfood). Upload goes
-/// through the shared `emulate::s3_put` (`object_store`, `AWS_*` creds;
-/// `AWS_ENDPOINT_URL` overrides the endpoint) — same path as
+/// through the shared `emulate::s3_put` (`object_store` + the S3 credential
+/// chain; `AWS_ENDPOINT_URL_S3` overrides the endpoint), the same path as
 /// `submit`/`emulate`.
 fn publish(
     package: Option<&str>,

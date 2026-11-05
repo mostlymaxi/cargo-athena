@@ -19,8 +19,9 @@ required-features = ["cli"]
 # only needs the proc macros + runtime; `cargo add cargo-athena
 # --no-default-features` (or `default-features = false` in Cargo.toml)
 # drops the entire CLI dependency tree: clap, object_store, tokio,
-# **kube**, and reqwest. The bin (`cargo install cargo-athena`) keeps
-# `cli` on by default; only the *library* dependency should disable it.
+# **kube**, reqwest, and aws-config. The bin (`cargo install
+# cargo-athena`) keeps `cli` on by default; only the *library*
+# dependency should disable it.
 default = ["cli"]
 cli = [
     "dep:clap",
@@ -35,6 +36,11 @@ cli = [
     "dep:indicatif",
     "dep:console",
     "dep:futures",
+    "dep:aws-config",
+    "dep:aws-credential-types",
+    "dep:aws-smithy-http-client",
+    "dep:async-trait",
+    "tokio/sync",
 ]
 # Enable `async fn` bodies on `#[container]` (driven by Tokio). Pulls
 # a minimal `tokio` (workspace features = ["rt", "net", "time"]) and
@@ -59,6 +65,10 @@ etcetera = { workspace = true, optional = true }
 indicatif = { workspace = true, optional = true }
 console = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
+aws-config = { workspace = true, optional = true }
+aws-credential-types = { workspace = true, optional = true }
+aws-smithy-http-client = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
 
 [dev-dependencies]
 # trybuild builds tests/ui/*.rs as crates that depend on this package, so

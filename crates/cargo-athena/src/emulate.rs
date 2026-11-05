@@ -772,20 +772,9 @@ pub(crate) fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
             b = b.with_endpoint(url);
         }
     }
-    // Credentials: the standard AWS env vars below, else object_store's
-    // ambient fallback (EC2 IMDS / ECS task role / IRSA web-identity).
-    // object_store does NOT parse `~/.aws/credentials` or `AWS_PROFILE`
-    // — the shared-config file is unsupported here (not the AWS SDK).
-    if let Ok(v) = std::env::var("AWS_ACCESS_KEY_ID") {
-        b = b.with_access_key_id(v);
-    }
-    if let Ok(v) = std::env::var("AWS_SECRET_ACCESS_KEY") {
-        b = b.with_secret_access_key(v);
-    }
-    if let Ok(v) = std::env::var("AWS_SESSION_TOKEN") {
-        b = b.with_token(v);
-    }
-    b.build()
+    let creds = crate::s3creds::S3Credentials::new(&s3.region);
+    b.with_credentials(std::sync::Arc::new(creds))
+        .build()
         .unwrap_or_else(|e| die(&format!("S3 client for bucket {:?}: {e}", s3.bucket)))
 }
 
@@ -815,7 +804,7 @@ pub(crate) fn s3_exists(s3: &S3Ref) -> bool {
         Err(object_store::Error::NotFound { .. }) => false,
         Err(e) => die(&format!(
             "could not check s3://{}/{} ({e}).\n  Check the endpoint, \
-             AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, and that the bucket exists.",
+             your S3 credentials (`cargo athena doctor`), and that the bucket exists.",
             s3.bucket, s3.key
         )),
     }
