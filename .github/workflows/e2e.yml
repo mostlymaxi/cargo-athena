@@ -84,17 +84,11 @@ jobs:
       fail-fast: false
       matrix:
         # Argo maintains only the 2 most recent minors (release policy:
-        # docs/releases.md): v4.0 + v3.7 are the support target. v3.6 is
-        # our minimum supported version, kept green as a hard gate even
-        # though EOL. Argo <= 3.5 is unsupported and intentionally NOT in
-        # the matrix: its validator can't resolve {{tasks.X.outputs.*}}
-        # across a templateRef boundary, which athena's one-WT-per-
-        # #[container]/#[workflow] "wormhole" design requires. All legs
-        # are blocking. All = latest patch.
+        # docs/releases.md), and those are exactly what we support. All
+        # legs are blocking. All = latest patch.
         argo:
-          - v4.0.8    # maintained (latest minor)
-          - v3.7.17   # maintained (n-1 minor)
-          - v3.6.19   # minimum supported (EOL, hard gate)
+          - v4.1.6    # maintained (latest minor)
+          - v4.0.15   # maintained (n-1 minor)
     runs-on: ubuntu-latest
     name: e2e (argo ${{ matrix.argo }})
     # `secrets` isn't a valid context in a step `if:`; job-level env can

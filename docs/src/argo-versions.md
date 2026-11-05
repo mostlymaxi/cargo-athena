@@ -6,36 +6,22 @@ matrix is therefore not a claim - it is a continuously verified result.
 
 | Argo | Support |
 |---|---|
-| **v4.0.8** | maintained (latest minor) |
-| **v3.7.17** | maintained (n-1 minor) |
-| **v3.6.19** | minimum supported (EOL, hard-gated) |
+| **v4.1.6** | maintained (latest minor) |
+| **v4.0.15** | maintained (n-1 minor) |
 
-Argo Workflows maintains the two most recent minors; cargo-athena tracks
-that plus the minimum that still works. All three are **blocking** CI
-jobs (no `continue-on-error`).
+Argo Workflows maintains the two most recent minors, and cargo-athena
+supports exactly those. Both are **blocking** CI jobs (no
+`continue-on-error`).
 
-## Why ≤ 3.5 is unsupported
+## Older versions
 
-cargo-athena emits **one `WorkflowTemplate` per template**, wired via
-`templateRef`. Argo's submit-time validator before 3.6 cannot resolve
-`{{tasks.X.outputs.*}}` across a `templateRef` boundary, so any
-multi-step workflow fails instantly with
-`failed to resolve {{tasks.a.outputs.…}}`.
+Argo 3.x is not supported.
 
-This was **fixed in Argo 3.6**: the emitted YAML is correct and passes
-3.6/3.7/4.0 unchanged. Older versions *may* still work for trivial
-cases; use at your own risk.
-
-## What's degraded on 3.6
-
-The args-offload feature (Argo PR #15265) shipped in 3.7. On 3.6 the
-controller does not stage large arguments via ConfigMap, so any task
-whose substituted `args[]` cross the kernel exec `ARG_MAX` (~128 KB
-combined) fails with `argument list too long`. Use `Artifact<T>` for
-any parameter that may exceed that threshold if you need to run on
-3.6. 3.7 and 4.0 are unaffected: the controller stages large args
-automatically; cargo-athena's runtime reads the offloaded value back
-transparently.
+- **3.6 and 3.7** are not tested. Most workflows may still run, but on
+  3.6 any task whose arguments are larger than about 128 KB fails with
+  `argument list too long`.
+- **3.5 and older** cannot run a multi-step cargo-athena workflow. The
+  submit fails at once with `failed to resolve {{tasks.X.outputs.…}}`.
 
 ## Live badges
 

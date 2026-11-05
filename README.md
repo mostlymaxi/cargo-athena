@@ -68,13 +68,12 @@ that live result:
 
 | Argo | Support | e2e |
 |---|---|---|
-| v4.0.8  | maintained (latest minor) | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v4.0.8.json) |
-| v3.7.17 | maintained (n-1 minor)    | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v3.7.17.json) |
-| v3.6.19 | minimum supported (EOL)   | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v3.6.19.json) |
+| v4.1.6  | maintained (latest minor) | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v4.1.6.json) |
+| v4.0.15 | maintained (n-1 minor)    | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v4.0.15.json) |
 
-Argo ≤ 3.5 is unsupported (cross-templateRef output resolution was
-fixed in 3.6); older versions may still work for trivial cases, use
-at your own risk.
+Argo 3.x is not supported. See
+[Supported Argo Versions](https://mostlymaxi.github.io/cargo-athena/argo-versions.html)
+for what happens on older versions.
 
 ## Contributing
 

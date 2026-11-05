@@ -43,6 +43,44 @@
         version =
           (fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
 
+        # nixpkgs' argo-workflows lags (3.6); pin the upstream CLI binary
+        # to the newest Argo the e2e matrix tests.
+        argoVersion = "v4.1.6";
+        argoAsset =
+          {
+            x86_64-linux = {
+              os = "linux-amd64";
+              hash = "sha256-iF+IajONfnwP1KaBFSdw+1TfGEf4/FXq7XiNZhwDBOA=";
+            };
+            aarch64-linux = {
+              os = "linux-arm64";
+              hash = "sha256-wRmWqVMpKI68xR5YMK001h7WhNUoAlGChZYwVZn5K/U=";
+            };
+            x86_64-darwin = {
+              os = "darwin-amd64";
+              hash = "sha256-/97MfFktPih4IQxY//dBLoC1TVqx0OJaFWwZ9ghLMFo=";
+            };
+            aarch64-darwin = {
+              os = "darwin-arm64";
+              hash = "sha256-DJXFOsIuFfJGW7zbrf5i6W9A7M9wy9K5NG4hJmeOKeQ=";
+            };
+          }
+          .${system};
+        argoCli = pkgs.stdenvNoCC.mkDerivation {
+          pname = "argo";
+          version = argoVersion;
+          src = pkgs.fetchurl {
+            url = "https://github.com/argoproj/argo-workflows/releases/download/${argoVersion}/argo-${argoAsset.os}.gz";
+            inherit (argoAsset) hash;
+          };
+          dontUnpack = true;
+          installPhase = ''
+            install -d $out/bin
+            gunzip -c $src > $out/bin/argo
+            chmod +x $out/bin/argo
+          '';
+        };
+
         ciPackages = [ rustToolchain ]; # test / clippy / publish
         crossTools = [
           # static-musl cross-compilation for `cargo athena build`.
@@ -54,7 +92,7 @@
           # Podman daemon (not a nix package — provided by the host).
           pkgs.kind
           pkgs.kubectl
-          pkgs.argo-workflows
+          argoCli
           pkgs.minio-client
           pkgs.jq
         ];
