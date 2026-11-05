@@ -1,0 +1,5 @@
+error: `annotations` key `workflows.argoproj.io/node-id` is not a valid annotation key: the `workflows.argoproj.io/` prefix is Argo's
+ --> tests/ui/ctr_annotation_reserved_prefix.rs:3:4
+  |
+3 | fn f() {}
+  |    ^
