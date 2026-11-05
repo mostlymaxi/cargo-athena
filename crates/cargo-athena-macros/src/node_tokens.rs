@@ -24,22 +24,19 @@ use quote::quote;
 
 use crate::analyze::{Arg, FanSrc, HookWhen, JsonSrc, Node};
 
-/// `g` = task `t`'s scope node, nil-safe (hooks can see missing tasks).
-fn task_node(scope: &str, t: &str) -> String {
-    format!("let g = {scope}?.['{t}']; ")
+/// `{{=…}}` over task `t`'s scope node `g`. Nil `g` yields nil, which
+/// makes Argo defer the tag: its child-template pass has `<scope>.name`
+/// but no sibling tasks in scope, and would bake in the fallback.
+fn on_task(scope: &str, t: &str, body: &str) -> String {
+    format!("{{{{=let g = {scope}?.['{t}']; g == nil ? nil : ({body})}}}}")
 }
 
-/// `s` = `t`'s aggregated `return`, degraded to `"[]"` when the group
-/// failed / was skipped / is absent. `p` can be the STRING `"[]"`
-/// (all children failed), hence the `type` gate before indexing.
-fn agg_value(scope: &str, t: &str) -> String {
-    format!(
-        "{}let p = g?.outputs?.parameters; \
-         let r = (type(p) == \"map\" ? p?.['return'] : nil) ?? \"[]\"; \
-         let s = r == \"\" || r == \"null\" ? \"[]\" : r; ",
-        task_node(scope, t)
-    )
-}
+/// `s` = `g`'s aggregated `return`, degraded to `"[]"` when the group
+/// failed / was skipped. `p` can be the STRING `"[]"` (all children
+/// failed), hence the `type` gate before indexing.
+const AGG: &str = "let p = g?.outputs?.parameters; \
+                   let r = (type(p) == \"map\" ? p?.['return'] : nil) ?? \"[]\"; \
+                   let s = r == \"\" || r == \"null\" ? \"[]\" : r; ";
 
 /// Kind-aware re-norm: Argo re-stringifies scalar elements but keeps
 /// object/array elements native — decode only the strings.
@@ -116,18 +113,21 @@ pub(crate) fn arg_value(arg: &Arg, steps: bool) -> (String, Option<String>) {
         }
         // Fan-out aggregate: guarded lookup + kind-aware re-norm.
         Arg::FanAgg(t) => (
-            format!("{{{{={}toJSON({RENORM})}}}}", agg_value(task_scope, t)),
+            on_task(task_scope, t, &format!("{AGG}toJSON({RENORM})")),
             dep(t),
         ),
         // `.continue_on` binding: serde-tagged `Result<T, ArgoError>`.
         Arg::RefFallible(t) => (
-            format!(
-                "{{{{={}let c = g?.outputs?.exitCode; \
-                 g?.status == \"Succeeded\" \
-                 ? toJSON({{'Ok': fromJSON(g?.outputs?.parameters?.['return'] ?? \"null\")}}) \
-                 : {err}}}}}",
-                task_node(task_scope, t),
-                err = argo_err("c == nil ? nil : int(c)")
+            on_task(
+                task_scope,
+                t,
+                &format!(
+                    "let c = g?.outputs?.exitCode; \
+                     g?.status == \"Succeeded\" \
+                     ? toJSON({{'Ok': fromJSON(g?.outputs?.parameters?.['return'] ?? \"null\")}}) \
+                     : {err}",
+                    err = argo_err("c == nil ? nil : int(c)")
+                ),
             ),
             dep(t),
         ),
@@ -143,14 +143,17 @@ pub(crate) fn arg_value(arg: &Arg, steps: bool) -> (String, Option<String>) {
                 FanSrc::Input(i) => format!("inputs?.parameters?.['{i}']"),
             };
             (
-                format!(
-                    "{{{{={}let q = {src_val} ?? \"[]\"; \
-                     let n = q == \"\" || q == \"null\" ? \"[]\" : q; \
-                     len(fromJSON(s)) == len(fromJSON(n)) \
-                     ? toJSON({{'Ok': {RENORM}}}) \
-                     : {err}}}}}",
-                    agg_value(task_scope, task),
-                    err = argo_err("nil")
+                on_task(
+                    task_scope,
+                    task,
+                    &format!(
+                        "{AGG}let q = {src_val} ?? \"[]\"; \
+                         let n = q == \"\" || q == \"null\" ? \"[]\" : q; \
+                         len(fromJSON(s)) == len(fromJSON(n)) \
+                         ? toJSON({{'Ok': {RENORM}}}) \
+                         : {err}",
+                        err = argo_err("nil")
+                    ),
                 ),
                 dep(task),
             )
@@ -526,18 +529,19 @@ mod tests {
         let (v, d) = arg_value(&Arg::FanAgg("caps".to_string()), false);
         assert_eq!(
             v,
-            "{{=let g = tasks?.['caps']; \
+            "{{=let g = tasks?.['caps']; g == nil ? nil : (\
              let p = g?.outputs?.parameters; \
              let r = (type(p) == \"map\" ? p?.['return'] : nil) ?? \"[]\"; \
              let s = r == \"\" || r == \"null\" ? \"[]\" : r; \
-             toJSON(map(fromJSON(s), { type(#) == \"string\" ? fromJSON(#) : # }))}}"
+             toJSON(map(fromJSON(s), { type(#) == \"string\" ? fromJSON(#) : # })))}}"
         );
         assert_eq!(d, Some("caps".to_string()));
     }
 
     #[test]
     fn fanagg_steps_no_dep() {
-        let (_, d) = arg_value(&Arg::FanAgg("caps".to_string()), true);
+        let (v, d) = arg_value(&Arg::FanAgg("caps".to_string()), true);
+        assert!(v.starts_with("{{=let g = steps?.['caps']; g == nil ? nil : ("));
         assert_eq!(d, None);
     }
 
@@ -546,12 +550,12 @@ mod tests {
         let (v, d) = arg_value(&Arg::RefFallible("risky".to_string()), false);
         assert_eq!(
             v,
-            "{{=let g = tasks?.['risky']; \
+            "{{=let g = tasks?.['risky']; g == nil ? nil : (\
              let c = g?.outputs?.exitCode; \
              g?.status == \"Succeeded\" \
              ? toJSON({'Ok': fromJSON(g?.outputs?.parameters?.['return'] ?? \"null\")}) \
              : toJSON({'Err': {'status': g?.status ?? \"Failed\", \
-             'exit_code': c == nil ? nil : int(c)} })}}"
+             'exit_code': c == nil ? nil : int(c)} }))}}"
         );
         assert_eq!(d, Some("risky".to_string()));
     }
@@ -567,7 +571,7 @@ mod tests {
         );
         assert_eq!(
             v,
-            "{{=let g = tasks?.['caps']; \
+            "{{=let g = tasks?.['caps']; g == nil ? nil : (\
              let p = g?.outputs?.parameters; \
              let r = (type(p) == \"map\" ? p?.['return'] : nil) ?? \"[]\"; \
              let s = r == \"\" || r == \"null\" ? \"[]\" : r; \
@@ -575,7 +579,7 @@ mod tests {
              let n = q == \"\" || q == \"null\" ? \"[]\" : q; \
              len(fromJSON(s)) == len(fromJSON(n)) \
              ? toJSON({'Ok': map(fromJSON(s), { type(#) == \"string\" ? fromJSON(#) : # })}) \
-             : toJSON({'Err': {'status': g?.status ?? \"Failed\", 'exit_code': nil} })}}"
+             : toJSON({'Err': {'status': g?.status ?? \"Failed\", 'exit_code': nil} }))}}"
         );
         assert_eq!(d, Some("caps".to_string()));
     }

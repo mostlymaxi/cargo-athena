@@ -24,6 +24,8 @@
 //! * **`save_artifact!` + `load_artifact!`** round-trip through MinIO
 //!   (ordered by a threaded data-dep),
 //! * **per-task builders** `.continue_on` + `.on_exit`,
+//! * fan_out + continue_on consumed inside **nested** workflows (steps
+//!   child of a steps parent, DAG child, `if` arm),
 //! * **`#[workflow(node_selector=…)]`** (cascades onto every pod) +
 //!   **`on_exit_if_root`** (whole-workflow exit handler),
 //! * default image (busybox) + explicit `#[container(image=…)]`,
@@ -409,6 +411,53 @@ pub fn expect_fan_ok(r: Result<Vec<String>, cargo_athena::ArgoError>) {
     println!("OK expect_fan_ok");
 }
 
+// --- nested fan_out / continue_on ------------------------------------------
+//
+// Argo pre-substitutes a called template's body with the CALLER's
+// `steps.name` / `tasks.name` in scope. Every input here succeeds, so a
+// value baked in early (`[]`, `Err`, `Ok([])`) fails an assert.
+
+#[container]
+pub fn check_nested(
+    tag: String,
+    caps: Vec<String>,
+    full: Result<Vec<String>, cargo_athena::ArgoError>,
+    r: Result<String, cargo_athena::ArgoError>,
+) {
+    let abc = ["A", "B", "C"];
+    assert_eq!(caps, abc, "{tag}: fan_out aggregate");
+    assert_eq!(full.expect("continue_on fan_out"), abc, "{tag}");
+    assert_eq!(r.expect("continue_on task"), "ok", "{tag}");
+    println!("OK check_nested {tag}");
+}
+
+#[workflow(steps)]
+pub fn nested_steps_child() {
+    let l1 = make_list();
+    let caps = l1.fan_out(|x| upper(x));
+    let l2 = make_list();
+    let full = l2.fan_out(|x| upper(x)).continue_on(failed);
+    let r = risky().continue_on(failed);
+    check_nested("steps-child".to_string(), caps, full, r);
+}
+
+/// Steps caller: `steps.name` in the child's pre-substitution scope.
+#[workflow(steps)]
+pub fn nested_steps_parent() {
+    nested_steps_child();
+}
+
+/// Called from the DAG `pipeline`: `tasks.name` in scope.
+#[workflow]
+pub fn nested_dag_child() {
+    let l1 = make_list();
+    let caps = l1.fan_out(|x| upper(x));
+    let l2 = make_list();
+    let full = l2.fan_out(|x| upper(x)).continue_on(failed);
+    let r = risky().continue_on(failed);
+    check_nested("dag-child".to_string(), caps, full, r);
+}
+
 /// `on_exit_if_root` handler (whole-workflow) AND a per-task
 /// `.on_exit(cleanup)` target — both should run.
 #[container]
@@ -483,6 +532,19 @@ pub fn pipeline(input_blob: String) {
         note("zero".to_string());
     } else {
         note(chosen); // statement-if
+    }
+
+    // Nested fan_out / continue_on consumers (see `check_nested`).
+    nested_steps_parent();
+    nested_dag_child();
+    if cnt > 2 {
+        // An if-arm is a DAG sub-workflow called from the wrapper DAG.
+        let l4 = make_list();
+        let caps4 = l4.fan_out(|x| upper(x));
+        let l5 = make_list();
+        let full5 = l5.fan_out(|x| upper(x)).continue_on(failed);
+        let r5 = risky().continue_on(failed);
+        check_nested("if-arm".to_string(), caps4, full5, r5);
     }
 
     let m = make_meta();
