@@ -19,10 +19,10 @@ use crate::attrs::{
     timeout_tokens, tolerations_if_root_const_tokens, ttl_const_tokens,
 };
 use crate::utils::{
-    annotation_key_violation, check_dns1123_name, check_fn_shape, check_yaml_safe_names,
-    env_var_name_violation, fn_arg_injects, fn_args, func_without_inject_args, is_artifact_ty,
-    label_value_violation, make_argo_name, scan_body, secret_slice_tokens, sig_shim, str_slice,
-    strip_inject_attrs, with_host_rewritten,
+    check_dns1123_name, check_fn_shape, check_yaml_safe_names, env_var_name_violation,
+    fn_arg_injects, fn_args, func_without_inject_args, is_artifact_ty, make_argo_name,
+    pod_meta_violation, scan_body, secret_slice_tokens, sig_shim, str_slice, strip_inject_attrs,
+    with_host_rewritten,
 };
 
 pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -43,7 +43,7 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         return e.to_compile_error().into();
     }
     // `env` keys become k8s env-var names, `annotations` keys k8s
-    // annotation keys — both have closed grammars the API server
+    // annotation/label keys — closed grammars the API server
     // enforces at admission; reject at compile time instead. Map keys
     // are plain strings (no token to span), so these point at the fn.
     for k in cfg.env.keys() {
@@ -56,38 +56,17 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             .into();
         }
     }
-    for k in cfg.annotations.keys() {
-        if let Some(why) = annotation_key_violation(k) {
-            return syn::Error::new(
-                func.sig.ident.span(),
-                format!("`annotations` key `{k}` is not a valid annotation key: {why}"),
-            )
-            .to_compile_error()
-            .into();
-        }
-    }
-    // Label keys share the annotation-key grammar. Argo copies template
-    // labels over its own, so its prefix would break pod tracking.
-    for (k, v) in &cfg.labels {
-        let why = annotation_key_violation(k)
-            .or_else(|| {
-                k.starts_with("workflows.argoproj.io/")
-                    .then(|| "the `workflows.argoproj.io/` prefix is Argo's".to_string())
-            })
-            .map(|why| format!("`labels` key `{k}` is not a valid label key: {why}"))
-            .or_else(|| match v {
-                syn::Expr::Lit(syn::ExprLit {
-                    lit: syn::Lit::Str(s),
-                    ..
-                }) => label_value_violation(&s.value()).map(|why| {
-                    format!("`labels` value for `{k}` is not a valid label value: {why}")
-                }),
-                _ => None,
-            });
-        if let Some(msg) = why {
-            return syn::Error::new(func.sig.ident.span(), msg)
-                .to_compile_error()
-                .into();
+    let metas = [
+        ("annotations", false, &cfg.annotations),
+        ("labels", true, &cfg.labels),
+    ];
+    for (attr, label, map) in metas {
+        for (k, v) in map {
+            if let Some(msg) = pod_meta_violation(attr, label, k, v) {
+                return syn::Error::new(func.sig.ident.span(), msg)
+                    .to_compile_error()
+                    .into();
+            }
         }
     }
     // `host_mount` paths: k8s requires absolute paths for both sides,
