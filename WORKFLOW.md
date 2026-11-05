@@ -37,7 +37,6 @@ All are optional.
 | `steps` | Emit an Argo `steps:` (sequential) template instead of the default data-dependency `dag:`. |
 | `boundary_node_selector = { … }` | A `nodeSelector` constraint on pods whose immediate enclosing dag/steps is this template. Does NOT cascade through nested sub-workflows. Literal only. See [Node selector](#node-selector). |
 | `node_selector_if_root = { … }` | Default `nodeSelector` for every pod in the submitted run. **Root-only**. Values support `"lit" + arg` / `"lit" + arg.field` injection of the workflow's own arguments. |
-| `annotations = { "k" = "v" }` | Template-level annotations on the dag/steps template. Literal keys and values; keys are checked as valid annotation keys. |
 | `on_exit_if_root = t` | Whole-workflow exit handler that fires only when *this* template is the workflow you submit. Distinct from the per-task `.on_exit(t)` builder. |
 | `retry(limit, policy, backoff)` | Template-level retry. `limit` is required (`unlimited` means no cap); `policy` ∈ `Always` / `OnFailure` / `OnError` / `OnTransientError`; `backoff` is seconds or a [humantime](https://docs.rs/humantime) string. |
 | `ttl_if_root(after_completion, after_success, after_failure)` | GC the finished Workflow after the given duration. At least one of the three is required. **Root-only.** |
