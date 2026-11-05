@@ -524,10 +524,7 @@ pub fn run_svc(tag: String, zone: String) {
     println!("run_svc tag={tag} zone={zone}");
 }
 
-#[workflow(annotations = {
-    "team.athena/owner" = "platform",
-    "argo.io/wf-tier" = "{{workflow.parameters.tier}}",
-})]
+#[workflow]
 pub fn pipeline_pod_attrs() {
     run_svc("42".to_string(), "east".to_string());
 }

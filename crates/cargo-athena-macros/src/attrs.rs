@@ -516,13 +516,6 @@ pub(crate) struct WorkflowArgs {
     /// `#[container]`-only (Argo no-ops on dag/steps), so this is the
     /// only way to time-bound a `#[workflow]`.
     pub(crate) active_deadline_if_root: Option<syn::Expr>,
-    /// `annotations = { "key" = "value" }` — template-level annotations
-    /// on the dag/steps template. **Literal strings only** (keys *and*
-    /// values), same reason as `#[workflow(node_selector)]`: a workflow
-    /// has no args to inject from, and template-scoped templating
-    /// doesn't cascade. Drop in `{{workflow.parameters.X}}` as a
-    /// literal value if you need a dynamic annotation.
-    pub(crate) annotations: std::collections::BTreeMap<String, String>,
     /// `mutexes = [{ name = "x", namespace = "ns" }, …]` — template-level
     /// `Template.synchronization.mutexes` on this dag/steps template.
     /// See `ContainerArgs::mutexes`; same shape, same injection scope
