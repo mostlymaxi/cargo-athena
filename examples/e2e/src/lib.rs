@@ -12,7 +12,8 @@
 //!   (workflow→container across the `templateRef` wormhole),
 //! * **`.fan_out`** → Argo `withParam`, aggregate consumed as `Vec`,
 //! * **value-`if`** + **statement `if`/`else`** (synthesized `when`
-//!   wrappers) with a closed-grammar numeric condition,
+//!   wrappers) with a closed-grammar numeric condition, plus a gate
+//!   over odd strings and `bool` predicate containers,
 //! * a **nested call** `note(echo(..))`,
 //! * **struct-field access** `m.id` (`{{=toJSON(fromJSON(..)['id'])}}`),
 //! * **attribute injection** on four leaf-template fields:
@@ -263,6 +264,29 @@ pub fn left(x: i64) -> String {
 #[container]
 pub fn right(x: i64) -> String {
     format!("R{x}")
+}
+
+/// Values a naive gate mangles: quotes, escapes, `<&>`, a date, an exponent.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct Odd {
+    pub s: String,
+    pub d: String,
+    pub f: f64,
+}
+
+#[container]
+pub fn make_odd() -> Odd {
+    Odd {
+        s: "it's <a> & \"b\"\n".to_string(),
+        d: "2024-01-02".to_string(),
+        f: 1e16,
+    }
+}
+
+/// A `bool` predicate: how a condition tests a `continue_on` result.
+#[container]
+pub fn did_fail(r: Result<String, cargo_athena::ArgoError>) -> bool {
+    r.is_err()
 }
 
 // --- struct-field access ---------------------------------------------------
@@ -556,6 +580,22 @@ pub fn pipeline(input_blob: String) {
         let full5 = l5.fan_out(|x| upper(x)).continue_on(failed);
         let r5 = risky().continue_on(failed);
         check_nested("if-arm".to_string(), caps4, full5, r5);
+    }
+
+    // Odd strings and numbers in a gate, plus `bool` predicates; a wrong
+    // gate fails.
+    let io = make_odd();
+    let i_err = risky_fail().continue_on(failed);
+    if io.s == "it's <a> & \"b\"\n"
+        && io.s != "a}}b"
+        && io.d != "2024-01-02 00:00"
+        && io.f == 1e16
+        && is_even("yy".to_string())
+        && did_fail(i_err)
+    {
+        note("if-gates".to_string());
+    } else {
+        always_fail("if-gates".to_string());
     }
 
     let m = make_meta();
