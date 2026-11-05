@@ -42,7 +42,7 @@ inputs:
     description: "Run `cargo athena doctor` preflight before building (fails fast with fix hints)."
     default: "true"
   access-key:
-    description: "S3 access key. Maps to AWS_ACCESS_KEY_ID. Omit to use ambient identity (IMDS / ECS / IRSA)."
+    description: "S3 access key. Maps to AWS_ACCESS_KEY_ID. Omit to use the runner's standard credential chain (shared credentials file, web identity, instance role)."
     default: ""
   secret-key:
     description: "S3 secret key. Maps to AWS_SECRET_ACCESS_KEY."
@@ -54,7 +54,7 @@ inputs:
     description: >
       Optional S3 endpoint for the uploader (e.g. https://<acct>.r2.cloudflarestorage.com).
       Default: the endpoint in athena.toml. Set only to override it for CI (split-horizon).
-      Maps to AWS_ENDPOINT_URL.
+      Maps to AWS_ENDPOINT_URL_S3.
     default: ""
 
 outputs:
@@ -162,7 +162,7 @@ runs:
         if [ -n "${IN_ACCESS_KEY}" ];    then export AWS_ACCESS_KEY_ID="${IN_ACCESS_KEY}"; fi
         if [ -n "${IN_SECRET_KEY}" ];    then export AWS_SECRET_ACCESS_KEY="${IN_SECRET_KEY}"; fi
         if [ -n "${IN_SESSION_TOKEN}" ]; then export AWS_SESSION_TOKEN="${IN_SESSION_TOKEN}"; fi
-        if [ -n "${IN_ENDPOINT}" ];      then export AWS_ENDPOINT_URL="${IN_ENDPOINT}"; fi
+        if [ -n "${IN_ENDPOINT}" ];      then export AWS_ENDPOINT_URL_S3="${IN_ENDPOINT}"; fi
 
         common=()
         if [ -n "${IN_CONFIG}" ]; then common+=(--config "${IN_CONFIG}"); fi
