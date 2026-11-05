@@ -316,7 +316,7 @@ spec:
   - name: cargo-athena-example-smoke-pipeline-if
     dag:
       tasks:
-      - name: cnt
+      - name: decide
         arguments:
           parameters:
           - name: seed
@@ -324,34 +324,34 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-decide-0-0-0
           template: cargo-athena-example-smoke-decide
-      - name: m
+      - name: make-meta
         arguments: {}
         templateRef:
           name: cargo-athena-example-smoke-make-meta-0-0-0
           template: cargo-athena-example-smoke-make-meta
-      - name: chosen
+      - name: if
         dependencies:
-        - cnt
+        - decide
         arguments:
           parameters:
           - name: cnt
-            value: '{{tasks.cnt.outputs.parameters.return}}'
+            value: '{{tasks.decide.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-smoke-pipeline-if-if0-0-0-0
           template: cargo-athena-example-smoke-pipeline-if-if0
-      - name: if
+      - name: if-2
         dependencies:
-        - chosen
-        - cnt
-        - m
+        - decide
+        - if
+        - make-meta
         arguments:
           parameters:
           - name: cnt
-            value: '{{tasks.cnt.outputs.parameters.return}}'
+            value: '{{tasks.decide.outputs.parameters.return}}'
           - name: chosen
-            value: '{{tasks.chosen.outputs.parameters.return}}'
+            value: '{{tasks.if.outputs.parameters.return}}'
           - name: m
-            value: '{{tasks.m.outputs.parameters.return}}'
+            value: '{{tasks.make-meta.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-smoke-pipeline-if-if1-0-0-0
           template: cargo-athena-example-smoke-pipeline-if-if1

@@ -288,10 +288,10 @@ spec:
       parameters:
       - name: return
         valueFrom:
-          parameter: '{{tasks.clean.outputs.parameters.return}}'
+          parameter: '{{tasks.transform.outputs.parameters.return}}'
     dag:
       tasks:
-      - name: raw
+      - name: fetch
         arguments:
           parameters:
           - name: url
@@ -299,13 +299,13 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-fetch-0-0-0
           template: cargo-athena-example-smoke-fetch
-      - name: clean
+      - name: transform
         dependencies:
-        - raw
+        - fetch
         arguments:
           parameters:
           - name: data
-            value: '{{tasks.raw.outputs.parameters.return}}'
+            value: '{{tasks.fetch.outputs.parameters.return}}'
           - name: factor
             value: '2'
         templateRef:
@@ -313,11 +313,11 @@ spec:
           template: cargo-athena-example-smoke-transform
       - name: publish
         dependencies:
-        - clean
+        - transform
         arguments:
           parameters:
           - name: report
-            value: '{{tasks.clean.outputs.parameters.return}}'
+            value: '{{tasks.transform.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-smoke-publish-0-0-0
           template: cargo-athena-example-smoke-publish
@@ -349,7 +349,7 @@ spec:
   - name: cargo-athena-example-smoke-pipeline
     dag:
       tasks:
-      - name: a
+      - name: ingest
         arguments:
           parameters:
           - name: source
@@ -365,7 +365,7 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-branchy-0-0-0
           template: cargo-athena-example-smoke-branchy
-      - name: t
+      - name: transform
         arguments:
           parameters:
           - name: data
@@ -377,14 +377,14 @@ spec:
           template: cargo-athena-example-smoke-transform
       - name: combine
         dependencies:
-        - a
-        - t
+        - ingest
+        - transform
         arguments:
           parameters:
           - name: lhs
-            value: '{{tasks.a.outputs.parameters.return}}'
+            value: '{{tasks.ingest.outputs.parameters.return}}'
           - name: rhs
-            value: '{{tasks.t.outputs.parameters.return}}'
+            value: '{{tasks.transform.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-smoke-combine-0-0-0
           template: cargo-athena-example-smoke-combine

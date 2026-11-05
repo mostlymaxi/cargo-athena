@@ -318,7 +318,7 @@ spec:
   - name: cargo-athena-example-smoke-pipeline-fanout-if
     dag:
       tasks:
-      - name: cnt
+      - name: decide
         arguments:
           parameters:
           - name: seed
@@ -328,11 +328,11 @@ spec:
           template: cargo-athena-example-smoke-decide
       - name: if
         dependencies:
-        - cnt
+        - decide
         arguments:
           parameters:
           - name: cnt
-            value: '{{tasks.cnt.outputs.parameters.return}}'
+            value: '{{tasks.decide.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-smoke-pipeline-fanout-if-if0-0-0-0
           template: cargo-athena-example-smoke-pipeline-fanout-if-if0
@@ -416,14 +416,14 @@ spec:
       - name: cnt
     dag:
       tasks:
-      - name: a
+      - name: make-list
         arguments: {}
         templateRef:
           name: cargo-athena-example-smoke-make-list-0-0-0
           template: cargo-athena-example-smoke-make-list
-      - name: b
+      - name: caps
         dependencies:
-        - a
+        - make-list
         arguments:
           parameters:
           - name: s
@@ -433,14 +433,14 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-caps-0-0-0
           template: cargo-athena-example-smoke-caps
-        withParam: '{{tasks.a.outputs.parameters.return}}'
+        withParam: '{{tasks.make-list.outputs.parameters.return}}'
       - name: summarize
         dependencies:
-        - b
+        - caps
         arguments:
           parameters:
           - name: items
-            value: '{{=let g = tasks?.[''b'']; g == nil ? nil : (let p = g?.outputs?.parameters; let r = (type(p) == "map" ? p?.[''return''] : nil) ?? "[]"; let s = r == "" || r == "null" ? "[]" : r; toJSON(map(fromJSON(s), { type(#) == "string" ? fromJSON(#) : # })))}}'
+            value: '{{=let g = tasks?.[''caps'']; g == nil ? nil : (let p = g?.outputs?.parameters; let r = (type(p) == "map" ? p?.[''return''] : nil) ?? "[]"; let s = r == "" || r == "null" ? "[]" : r; toJSON(map(fromJSON(s), { type(#) == "string" ? fromJSON(#) : # })))}}'
         templateRef:
           name: cargo-athena-example-smoke-summarize-0-0-0
           template: cargo-athena-example-smoke-summarize

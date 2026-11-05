@@ -147,6 +147,10 @@ arbitrary method calls, `let` with non-ident/tuple patterns,
 `let … else`) is a **hard `compile_error!`** with a spanned message.
 Nothing is silently dropped.
 
+Each task is named after the template it calls (`fetch`, then
+`fetch-2` for a second call), never after the `let` binding. An `if`
+task is named `if`.
+
 ### Arguments to a template call
 
 | Form | Semantics |

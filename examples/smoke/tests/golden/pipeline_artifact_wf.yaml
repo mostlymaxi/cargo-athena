@@ -98,18 +98,18 @@ spec:
   - name: cargo-athena-example-smoke-pipeline-artifact-wf
     dag:
       tasks:
-      - name: m
+      - name: sub-returning-artifact
         arguments: {}
         templateRef:
           name: cargo-athena-example-smoke-sub-returning-artifact-0-0-0
           template: cargo-athena-example-smoke-sub-returning-artifact
       - name: sub-consuming-artifact
         dependencies:
-        - m
+        - sub-returning-artifact
         arguments:
           artifacts:
           - name: m
-            from: '{{tasks.m.outputs.artifacts.return}}'
+            from: '{{tasks.sub-returning-artifact.outputs.artifacts.return}}'
         templateRef:
           name: cargo-athena-example-smoke-sub-consuming-artifact-0-0-0
           template: cargo-athena-example-smoke-sub-consuming-artifact

@@ -88,18 +88,18 @@ spec:
   - name: cargo-athena-example-smoke-pipeline-inject
     dag:
       tasks:
-      - name: m
+      - name: make-meta
         arguments: {}
         templateRef:
           name: cargo-athena-example-smoke-make-meta-0-0-0
           template: cargo-athena-example-smoke-make-meta
       - name: tag-meta
         dependencies:
-        - m
+        - make-meta
         arguments:
           parameters:
           - name: m
-            value: '{{tasks.m.outputs.parameters.return}}'
+            value: '{{tasks.make-meta.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-smoke-tag-meta-0-0-0
           template: cargo-athena-example-smoke-tag-meta

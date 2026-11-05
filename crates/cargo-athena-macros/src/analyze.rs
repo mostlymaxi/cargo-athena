@@ -812,21 +812,12 @@ pub(crate) fn analyze_stmts(
                     ));
                 }
                 let task = if let Expr::If(ei) = unwrap_expr(&init.expr) {
-                    synth_if(
-                        ei,
-                        bind.as_deref(),
-                        true,
-                        &bindings,
-                        inputs,
-                        &mut used,
-                        &mut nodes,
-                        ctx,
-                    )?
+                    synth_if(ei, true, &bindings, inputs, &mut used, &mut nodes, ctx)?
                 } else {
                     let (base_expr, opts) = peel_builders(&init.expr)?;
                     if let Some((recv, item, callee, raw)) = fan_parts(base_expr) {
                         let fsrc = fan_src(&recv, &bindings, inputs)?;
-                        let base = bind.clone().unwrap_or_else(|| path_leaf(&callee));
+                        let base = path_leaf(&callee);
                         push_call(
                             callee,
                             raw,
@@ -847,7 +838,7 @@ pub(crate) fn analyze_stmts(
                                 syn::Error::new_spanned(&init.expr, NOT_A_TEMPLATE_CALL)
                             }
                         })?;
-                        let base = bind.clone().unwrap_or_else(|| path_leaf(&callee));
+                        let base = path_leaf(&callee);
                         push_call(
                             callee, raw, &base, opts, None, None, &mut used, &mut nodes, &bindings,
                             inputs,
@@ -861,9 +852,7 @@ pub(crate) fn analyze_stmts(
             Stmt::Expr(expr, semi) => {
                 if let Expr::If(ei) = unwrap_expr(expr) {
                     let value = is_last && semi.is_none() && want_output;
-                    let task = synth_if(
-                        ei, None, value, &bindings, inputs, &mut used, &mut nodes, ctx,
-                    )?;
+                    let task = synth_if(ei, value, &bindings, inputs, &mut used, &mut nodes, ctx)?;
                     if value {
                         output_task = Some(task);
                     }
@@ -889,7 +878,7 @@ pub(crate) fn analyze_stmts(
                     })?;
                     if let Expr::If(ei) = unwrap_expr(target) {
                         output_task = Some(synth_if(
-                            ei, None, true, &bindings, inputs, &mut used, &mut nodes, ctx,
+                            ei, true, &bindings, inputs, &mut used, &mut nodes, ctx,
                         )?);
                     } else {
                         let (base_expr, opts) = peel_builders(target)?;
