@@ -56,6 +56,9 @@ spec:
   templates:
   - name: cargo-athena-example-smoke-run-svc
     metadata:
+      labels:
+        team.athena/owner: platform
+        trace.athena/run: run-{{=fromJSON(inputs.parameters['tag'])}}
       annotations:
         team.athena/owner: platform
         trace.athena/run: run-{{=fromJSON(inputs.parameters['tag'])}}
