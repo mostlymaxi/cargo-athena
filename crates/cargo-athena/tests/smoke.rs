@@ -211,3 +211,26 @@ fn steps_mode_emits_sequential_steps_not_dag() {
     assert!(!wt.contains("dag:"), "steps mode must not emit dag:\n{wt}");
     assert!(yaml.contains("{{steps.prep.outputs.parameters.return}}"));
 }
+
+#[workflow]
+fn named() {
+    let g = prep("a".to_string());
+    prep("b".to_string());
+    sink(g);
+}
+
+#[test]
+fn tasks_are_named_after_the_callee() {
+    let yaml = emit::<named>();
+    for t in ["prep", "prep-2", "sink"] {
+        assert!(
+            yaml.contains(&format!("- name: {t}\n")),
+            "missing task `{t}`:\n{yaml}"
+        );
+    }
+    assert!(
+        !yaml.contains("- name: g\n"),
+        "task named after a binding:\n{yaml}"
+    );
+    assert!(yaml.contains("{{tasks.prep.outputs.parameters.return}}"));
+}
