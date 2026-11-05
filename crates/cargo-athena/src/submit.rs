@@ -158,7 +158,14 @@ impl KubeApi {
     fn new() -> Self {
         let rt = crate::emulate::rt();
         let client = rt
-            .block_on(kube::Client::try_default())
+            .block_on(async {
+                let mut cfg = kube::Config::infer().await.map_err(|e| e.to_string())?;
+                // kube 4+ retries every request (a retried create can start a
+                // second Workflow) and has no read timeout; keep 0.99's.
+                cfg.default_retry = false;
+                cfg.read_timeout = Some(std::time::Duration::from_secs(295));
+                kube::Client::try_from(cfg).map_err(|e| e.to_string())
+            })
             .unwrap_or_else(|e| {
                 die(&format!(
                     "no Kubernetes config ({e}). Set up kubeconfig/in-cluster, \
