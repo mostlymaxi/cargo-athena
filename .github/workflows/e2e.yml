@@ -107,6 +107,10 @@ jobs:
           sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
                       /usr/share/dotnet /opt/hostedtoolcache/CodeQL
           df -h /
+      # All pods share the runner kernel's inotify limits (default 128
+      # instances); Argo 4.1's executor and kind both need more.
+      - name: Raise inotify limits
+        run: sudo sysctl -w fs.inotify.max_user_instances=512 fs.inotify.max_user_watches=524288
       - uses: DeterminateSystems/nix-installer-action@v16
         with:
           # Trust the cachix substituter at the *system* nix.conf level
