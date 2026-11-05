@@ -28,7 +28,8 @@ done
 kubectl config use-context "kind-$CLUSTER" >/dev/null
 
 PF=""
-cleanup() { [ -n "$PF" ] && kill "$PF" 2>/dev/null || true; }
+CREDS=""
+cleanup() { [ -n "$PF" ] && kill "$PF" 2>/dev/null || true; [ -n "$CREDS" ] && rm -f "$CREDS" || true; }
 
 # On any failure after the cluster is up, dump why: the controller's
 # verdict (.status.message + per-node messages), the live Workflow,
@@ -77,12 +78,14 @@ kubectl -n "$NS" port-forward svc/minio 9000:9000 >/dev/null 2>&1 &
 PF=$!
 until (exec 3<>/dev/tcp/127.0.0.1/9000) 2>/dev/null; do sleep 1; done
 mc alias set athena-e2e http://127.0.0.1:9000 athena athena12345 >/dev/null
-# Dogfood `publish` instead of a hardcoded `mc cp`: it derives the key
-# from the SAME athena.toml `emit` uses (no key drift). athena.toml's
-# endpoint is the in-cluster MinIO DNS (what the pods resolve);
-# AWS_ENDPOINT_URL points this runner-side upload at the port-forward.
-( cd "$ROOT" && AWS_ACCESS_KEY_ID=athena AWS_SECRET_ACCESS_KEY=athena12345 \
-    AWS_ENDPOINT_URL=http://127.0.0.1:9000 \
+# Dogfood `publish` (same key as `emit`) with a shared credentials file.
+# athena.toml's endpoint is the in-cluster MinIO DNS (what pods resolve);
+# AWS_ENDPOINT_URL_S3 points this runner-side upload at the port-forward.
+CREDS=$(mktemp)
+printf '[athena-e2e]\naws_access_key_id = athena\naws_secret_access_key = athena12345\n' > "$CREDS"
+( cd "$ROOT" && env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+    AWS_SHARED_CREDENTIALS_FILE="$CREDS" AWS_PROFILE=athena-e2e \
+    AWS_ENDPOINT_URL_S3=http://127.0.0.1:9000 \
     cargo run -q -p cargo-athena --bin cargo-athena -- athena publish \
       --package "$PKG" --bin "$BIN" --tarball "$TARBALL" )
 
