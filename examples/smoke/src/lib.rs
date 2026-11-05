@@ -877,3 +877,101 @@ pub fn pipeline_daemon() {
     daemon_server();
     daemon_probe();
 }
+
+// --- constant values (const items, literals, constant `let`) --------------
+
+pub const MAX_RETRIES: u32 = 3;
+pub const LIMIT: i64 = 1;
+pub const DRY_RUN: bool = false;
+pub static WAVES: u32 = 2;
+
+pub mod defaults {
+    pub const NAME: &str = "svc";
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Speed {
+    Fast,
+    Slow(u32),
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Opts {
+    pub max_items: u32,
+    #[serde(rename = "label")]
+    pub name: String,
+    pub speed: Speed,
+    pub tags: Vec<String>,
+    pub limit: Option<u64>,
+}
+
+impl Opts {
+    pub const SMALL: Opts = Opts {
+        max_items: 1,
+        name: String::new(),
+        speed: Speed::Fast,
+        tags: Vec::new(),
+        limit: None,
+    };
+}
+
+#[container]
+pub fn configure(o: Opts, retries: u32, pair: (u64, String)) -> u32 {
+    println!("{o:?} retries={retries} pair={pair:?}");
+    o.max_items * retries
+}
+
+#[container]
+pub fn pick_speed() -> Speed {
+    Speed::Fast
+}
+
+#[workflow]
+pub fn consts_sub(o: Opts, waves: u32) {
+    configure(o, waves, (1, "sub".to_string()));
+}
+
+/// Constants are serialized with serde when the workflow is emitted
+/// (serde renames apply); a constant `let` makes no task.
+#[workflow]
+pub fn pipeline_consts(count: i64) {
+    let retries = MAX_RETRIES;
+    let floor = 0;
+    let base = Opts {
+        max_items: 10,
+        name: defaults::NAME.to_string(),
+        speed: Speed::Slow(2),
+        tags: ["a".to_string(), "b".to_string()].to_vec(),
+        limit: Some(5_000_000_000),
+    };
+    let r = configure(base.clone(), retries, (3_000_000_000, "x".into()));
+    configure(
+        Opts {
+            max_items: const { MAX_RETRIES * 2 },
+            ..Opts::SMALL
+        },
+        MAX_RETRIES,
+        (7, "seven".to_string()),
+    )
+    .on_exit(note(base.name.clone()));
+    let l = make_list();
+    let c = l.fan_out(|x| caps(x, defaults::NAME.to_string()));
+    summarize(c);
+    if count > LIMIT && r > floor {
+        note(base.name);
+    }
+    consts_sub(Opts::SMALL, WAVES).on_exit(consts_sub(
+        Opts {
+            tags: ["t".to_string()].to_vec(),
+            ..Opts::SMALL
+        },
+        1,
+    ));
+    let s = pick_speed();
+    if DRY_RUN || s == Speed::Fast || count > -2 {
+        let retries = 9;
+        note(retries.to_string());
+    }
+}
