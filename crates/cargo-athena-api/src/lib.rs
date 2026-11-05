@@ -433,6 +433,9 @@ argo! {
         pub key: String,
         pub access_key_secret: Option<SecretKeySelector>,
         pub secret_key_secret: Option<SecretKeySelector>,
+        /// Argo `addressingStyle` (Argo 4.1+): `""` (auto), `"path"`, or
+        /// `"virtual-hosted"`. Argo 4.0 CRDs reject the key.
+        pub addressing_style: String,
     }
 
     pub struct ArchiveStrategy {

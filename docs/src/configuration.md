@@ -51,7 +51,25 @@ The `cargo athena` CLI does not use `access_key_secret` /
 | `bucket` | Bucket name. |
 | `region` | S3 region. |
 | `insecure` | `true` for plain HTTP (e.g. local MinIO). |
+| `virtual_host` | `true` for virtual-hosted-style addressing (`https://<bucket>.<endpoint>/<key>`). Needs Argo v4.1 or later. Default `false`. See the note below. |
 | `access_key_secret` / `secret_key_secret` | Kubernetes `{ name, key }` secret selectors for credentials. |
+
+> `virtual_host` sets the addressing style of the `cargo athena` S3
+> client (`publish`, `submit`, `emulate`, `doctor`). It also sets Argo's
+> `addressingStyle` on every artifact in the pod. Set it only for a
+> provider that rejects path-style requests. Keep it unset for MinIO and
+> most S3-compatible stores.
+>
+> When `virtual_host` is `false`, the CLI uses path-style
+> (`https://<endpoint>/<bucket>/<key>`). In the pod, Argo selects the
+> style: virtual-hosted for AWS, Google Cloud Storage, and Alibaba Cloud
+> OSS endpoints, and path-style for all other endpoints.
+>
+> Do not set `virtual_host` on Argo v4.0, because v4.0 does not have the
+> `addressingStyle` field. With the default Argo v4.0 install,
+> `kubectl apply` and `cargo athena submit` reject the WorkflowTemplate.
+> With `--argo-server`, `submit` does not fail, but Argo removes the field.
+> See [supported versions](argo-versions.md).
 
 The binary tarball's object key is `{crate}/<tag>/{bin}.tar.gz`, where
 `<tag>` is the build-time [version tag](cli.md#versioning) - the kebab of
