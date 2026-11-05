@@ -1,0 +1,5 @@
+error: `pod_labels_if_root` value for `team` is not a valid label value: it contains ` ` (allowed: alphanumeric, `-`, `_`, `.`)
+ --> tests/ui/wf_pod_labels_if_root_bad_value.rs:3:4
+  |
+3 | fn f() {}
+  |    ^

@@ -503,6 +503,15 @@ pub(crate) struct WorkflowArgs {
     /// is empirically inert at WorkflowSpec scope on v4.0.5). Keys are
     /// literal-only.
     pub(crate) node_selector_if_root: std::collections::BTreeMap<String, syn::Expr>,
+    /// `pod_labels_if_root = { "k" = "lit" + arg, … }` →
+    /// `WorkflowSpec.podMetadata.labels`: every pod in the run. Same
+    /// injection scope as `node_selector_if_root`. `#[workflow]`-only:
+    /// Argo also merges a WT's `podMetadata` into its own template when
+    /// it is `templateRef`'d, which for a container would be its pod.
+    pub(crate) pod_labels_if_root: std::collections::BTreeMap<String, syn::Expr>,
+    /// `pod_annotations_if_root = { … }` → `WorkflowSpec.podMetadata
+    /// .annotations`. Same rules as `pod_labels_if_root`.
+    pub(crate) pod_annotations_if_root: std::collections::BTreeMap<String, syn::Expr>,
     pub(crate) on_exit_if_root: Option<syn::Path>,
     /// Template-level `retryStrategy` (`limit` required when present).
     pub(crate) retry: Option<RetryArgs>,
