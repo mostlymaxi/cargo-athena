@@ -64,10 +64,10 @@ and in this repo as [`WORKFLOW.md`](WORKFLOW.md) and [`CONTAINER.md`](CONTAINER.
 
 | Argo | e2e |
 |---|---|
-| v4.1 | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v4.1.6.json) |
-| v4.0 | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v4.0.15.json) |
+| v4.1.6 | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v4.1.6.json) |
+| v4.0.15 | ![](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mostlymaxi/6c34ed5be0444407c50ccf4597acba1f/raw/athena-argo-v4.0.15.json) |
 
-Argo 3.x is not supported.
+Argo 3.7 and 3.6 probably still work, but they are no longer tested or supported. Argo 3.5 and older do not work.
 
 ## Contributing
 
