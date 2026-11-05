@@ -41,8 +41,6 @@ tar = "0.4"
 flate2 = "1"
 
 # protobuf / serialization
-prost = "0.13"
-prost-build = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_norway = "0.9"
