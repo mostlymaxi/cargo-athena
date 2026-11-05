@@ -3,6 +3,7 @@
 //!   * non-(de)serializable `#[container]` I/O,
 //!   * strict `#[workflow]` body: only template calls — loops/macros/
 //!     method-calls/unsupported args/unresolved returns are hard errors,
+//!   * `if` comparisons on types Argo can't compare like Rust,
 //!   * `#[fragment]`/regular fns aren't `Template`s (type-system gate).
 //!
 //! Refresh expected output with:

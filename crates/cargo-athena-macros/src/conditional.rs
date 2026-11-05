@@ -40,6 +40,27 @@ pub(crate) enum CmpOp {
 }
 
 impl CmpOp {
+    pub(crate) fn of(op: &syn::BinOp) -> Option<CmpOp> {
+        use syn::BinOp::*;
+        Some(match op {
+            Eq(_) => CmpOp::Eq,
+            Ne(_) => CmpOp::Ne,
+            Lt(_) => CmpOp::Lt,
+            Le(_) => CmpOp::Le,
+            Gt(_) => CmpOp::Gt,
+            Ge(_) => CmpOp::Ge,
+            _ => return None,
+        })
+    }
+
+    /// The bounded ghost fn in `cargo_athena::__athena_cmp`.
+    pub(crate) fn ghost(self) -> &'static str {
+        match self {
+            CmpOp::Eq | CmpOp::Ne => "cmp_eq",
+            _ => "cmp_ord",
+        }
+    }
+
     fn argo(self) -> &'static str {
         match self {
             CmpOp::Eq => "==",
@@ -116,16 +137,7 @@ pub(crate) fn cond_to_when(
     match unwrap_expr(e) {
         Expr::Binary(b) => {
             use syn::BinOp::*;
-            let op = match b.op {
-                Eq(_) => Some(CmpOp::Eq),
-                Ne(_) => Some(CmpOp::Ne),
-                Lt(_) => Some(CmpOp::Lt),
-                Le(_) => Some(CmpOp::Le),
-                Gt(_) => Some(CmpOp::Gt),
-                Ge(_) => Some(CmpOp::Ge),
-                _ => None,
-            };
-            if let Some(op) = op {
+            if let Some(op) = CmpOp::of(&b.op) {
                 return Ok(WhenExpr::Cmp {
                     lhs: cond_operand(&b.left, bindings, inputs)?,
                     op,
@@ -214,7 +226,7 @@ pub(crate) fn hoist_cond(
             use syn::BinOp::*;
             let mut nb = b.clone();
             let (l, r) = match b.op {
-                Eq(_) | Ne(_) | Lt(_) | Le(_) | Gt(_) | Ge(_) => (
+                _ if CmpOp::of(&b.op).is_some() => (
                     hoist_operand(&b.left, used, nodes, bindings, inputs, seen, cond_binds)?,
                     hoist_operand(&b.right, used, nodes, bindings, inputs, seen, cond_binds)?,
                 ),
