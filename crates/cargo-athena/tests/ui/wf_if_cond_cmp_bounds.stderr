@@ -1,0 +1,207 @@
+error[E0277]: `HashSet<std::string::String>` can't be compared with `==`/`!=` in an `if` condition
+  --> tests/ui/wf_if_cond_cmp_bounds.rs:30:8
+   |
+30 |     if a == b {
+   |        ^ - required by a bound introduced by this call
+   |        |
+   |        not a string, `char`, `bool` or number
+   |
+   = help: the trait `cargo_athena::__athena_cmp::CmpEq` is not implemented for `HashSet<std::string::String>`
+   = note: for other types, return a `bool` from a #[container] and call it in the condition
+   = help: the following other types implement trait `cargo_athena::__athena_cmp::CmpEq`:
+             &str
+             bool
+             char
+             f32
+             f64
+             i128
+             i16
+             i32
+           and $N others
+note: required by a bound in `cargo_athena::__athena_cmp::cmp_eq`
+  --> $WORKSPACE/crates/cargo-athena-core/src/lib.rs
+   |
+   |     pub fn cmp_eq<L: PartialEq<R> + CmpEq, R: CmpEq>(_: &L, _: &R) -> bool {
+   |                                     ^^^^^ required by this bound in `cmp_eq`
+
+error[E0277]: `HashSet<std::string::String>` can't be compared with `==`/`!=` in an `if` condition
+  --> tests/ui/wf_if_cond_cmp_bounds.rs:30:13
+   |
+30 |     if a == b {
+   |          -  ^ not a string, `char`, `bool` or number
+   |          |
+   |          required by a bound introduced by this call
+   |
+   = help: the trait `cargo_athena::__athena_cmp::CmpEq` is not implemented for `HashSet<std::string::String>`
+   = note: for other types, return a `bool` from a #[container] and call it in the condition
+   = help: the following other types implement trait `cargo_athena::__athena_cmp::CmpEq`:
+             &str
+             bool
+             char
+             f32
+             f64
+             i128
+             i16
+             i32
+           and $N others
+note: required by a bound in `cargo_athena::__athena_cmp::cmp_eq`
+  --> $WORKSPACE/crates/cargo-athena-core/src/lib.rs
+   |
+   |     pub fn cmp_eq<L: PartialEq<R> + CmpEq, R: CmpEq>(_: &L, _: &R) -> bool {
+   |                                               ^^^^^ required by this bound in `cmp_eq`
+
+error[E0277]: `Duration` can't be compared with `==`/`!=` in an `if` condition
+  --> tests/ui/wf_if_cond_cmp_bounds.rs:39:8
+   |
+39 |     if a != b {
+   |        ^ - required by a bound introduced by this call
+   |        |
+   |        not a string, `char`, `bool` or number
+   |
+   = help: the trait `cargo_athena::__athena_cmp::CmpEq` is not implemented for `Duration`
+   = note: for other types, return a `bool` from a #[container] and call it in the condition
+   = help: the following other types implement trait `cargo_athena::__athena_cmp::CmpEq`:
+             &str
+             bool
+             char
+             f32
+             f64
+             i128
+             i16
+             i32
+           and $N others
+note: required by a bound in `cargo_athena::__athena_cmp::cmp_eq`
+  --> $WORKSPACE/crates/cargo-athena-core/src/lib.rs
+   |
+   |     pub fn cmp_eq<L: PartialEq<R> + CmpEq, R: CmpEq>(_: &L, _: &R) -> bool {
+   |                                     ^^^^^ required by this bound in `cmp_eq`
+
+error[E0277]: `Duration` can't be compared with `==`/`!=` in an `if` condition
+  --> tests/ui/wf_if_cond_cmp_bounds.rs:39:13
+   |
+39 |     if a != b {
+   |          -  ^ not a string, `char`, `bool` or number
+   |          |
+   |          required by a bound introduced by this call
+   |
+   = help: the trait `cargo_athena::__athena_cmp::CmpEq` is not implemented for `Duration`
+   = note: for other types, return a `bool` from a #[container] and call it in the condition
+   = help: the following other types implement trait `cargo_athena::__athena_cmp::CmpEq`:
+             &str
+             bool
+             char
+             f32
+             f64
+             i128
+             i16
+             i32
+           and $N others
+note: required by a bound in `cargo_athena::__athena_cmp::cmp_eq`
+  --> $WORKSPACE/crates/cargo-athena-core/src/lib.rs
+   |
+   |     pub fn cmp_eq<L: PartialEq<R> + CmpEq, R: CmpEq>(_: &L, _: &R) -> bool {
+   |                                               ^^^^^ required by this bound in `cmp_eq`
+
+error[E0277]: `bool` can't be ordered in an `if` condition
+  --> tests/ui/wf_if_cond_cmp_bounds.rs:47:8
+   |
+47 |     if f < true {
+   |        ^ - required by a bound introduced by this call
+   |        |
+   |        not a string, `char` or number
+   |
+   = help: the trait `cargo_athena::__athena_cmp::CmpOrd` is not implemented for `bool`
+   = note: for other types, return a `bool` from a #[container] and call it in the condition
+   = help: the following other types implement trait `cargo_athena::__athena_cmp::CmpOrd`:
+             &str
+             char
+             f32
+             f64
+             i128
+             i16
+             i32
+             i64
+           and $N others
+note: required by a bound in `cargo_athena::__athena_cmp::cmp_ord`
+  --> $WORKSPACE/crates/cargo-athena-core/src/lib.rs
+   |
+   |     pub fn cmp_ord<L: PartialOrd<R> + CmpOrd, R: CmpOrd>(_: &L, _: &R) -> bool {
+   |                                       ^^^^^^ required by this bound in `cmp_ord`
+
+error[E0277]: `bool` can't be ordered in an `if` condition
+  --> tests/ui/wf_if_cond_cmp_bounds.rs:47:12
+   |
+47 |     if f < true {
+   |          - ^^^^ not a string, `char` or number
+   |          |
+   |          required by a bound introduced by this call
+   |
+   = help: the trait `cargo_athena::__athena_cmp::CmpOrd` is not implemented for `bool`
+   = note: for other types, return a `bool` from a #[container] and call it in the condition
+   = help: the following other types implement trait `cargo_athena::__athena_cmp::CmpOrd`:
+             &str
+             char
+             f32
+             f64
+             i128
+             i16
+             i32
+             i64
+           and $N others
+note: required by a bound in `cargo_athena::__athena_cmp::cmp_ord`
+  --> $WORKSPACE/crates/cargo-athena-core/src/lib.rs
+   |
+   |     pub fn cmp_ord<L: PartialOrd<R> + CmpOrd, R: CmpOrd>(_: &L, _: &R) -> bool {
+   |                                                  ^^^^^^ required by this bound in `cmp_ord`
+
+error[E0277]: `Option<Option<std::string::String>>` can't be compared with `==`/`!=` in an `if` condition
+  --> tests/ui/wf_if_cond_cmp_bounds.rs:61:8
+   |
+61 |     if a == b {
+   |        ^ - required by a bound introduced by this call
+   |        |
+   |        not a string, `char`, `bool` or number
+   |
+   = help: the trait `cargo_athena::__athena_cmp::CmpEq` is not implemented for `Option<Option<std::string::String>>`
+   = note: for other types, return a `bool` from a #[container] and call it in the condition
+   = help: the following other types implement trait `cargo_athena::__athena_cmp::CmpEq`:
+             &str
+             bool
+             char
+             f32
+             f64
+             i128
+             i16
+             i32
+           and $N others
+note: required by a bound in `cargo_athena::__athena_cmp::cmp_eq`
+  --> $WORKSPACE/crates/cargo-athena-core/src/lib.rs
+   |
+   |     pub fn cmp_eq<L: PartialEq<R> + CmpEq, R: CmpEq>(_: &L, _: &R) -> bool {
+   |                                     ^^^^^ required by this bound in `cmp_eq`
+
+error[E0277]: `Option<Option<std::string::String>>` can't be compared with `==`/`!=` in an `if` condition
+  --> tests/ui/wf_if_cond_cmp_bounds.rs:61:13
+   |
+61 |     if a == b {
+   |          -  ^ not a string, `char`, `bool` or number
+   |          |
+   |          required by a bound introduced by this call
+   |
+   = help: the trait `cargo_athena::__athena_cmp::CmpEq` is not implemented for `Option<Option<std::string::String>>`
+   = note: for other types, return a `bool` from a #[container] and call it in the condition
+   = help: the following other types implement trait `cargo_athena::__athena_cmp::CmpEq`:
+             &str
+             bool
+             char
+             f32
+             f64
+             i128
+             i16
+             i32
+           and $N others
+note: required by a bound in `cargo_athena::__athena_cmp::cmp_eq`
+  --> $WORKSPACE/crates/cargo-athena-core/src/lib.rs
+   |
+   |     pub fn cmp_eq<L: PartialEq<R> + CmpEq, R: CmpEq>(_: &L, _: &R) -> bool {
+   |                                               ^^^^^ required by this bound in `cmp_eq`

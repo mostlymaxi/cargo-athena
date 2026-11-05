@@ -375,7 +375,7 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-pipeline-fanout-if-if0-arm0-0-0-0
           template: cargo-athena-example-smoke-pipeline-fanout-if-if0-arm0
-        when: ({{inputs.parameters.cnt}} > 3)
+        when: '{{=(fromJSON(inputs.parameters[''cnt'']) > 3)}}'
       - name: arm1
         arguments:
           parameters:
@@ -384,7 +384,7 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-pipeline-fanout-if-if0-arm1-0-0-0
           template: cargo-athena-example-smoke-pipeline-fanout-if-if0-arm1
-        when: '!(({{inputs.parameters.cnt}} > 3))'
+        when: '{{=!((fromJSON(inputs.parameters[''cnt'']) > 3))}}'
   volumeClaimTemplates:
   - metadata:
       name: cargo-athena-example-smoke-buildcache

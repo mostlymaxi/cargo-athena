@@ -119,9 +119,9 @@ Real `if` / `else` / `else if`; a value-`if` selects the taken branch:
 ```rust,ignore
 #[workflow]
 fn gated() {
-    let n = decide("hello".to_string());
-    let chosen = if n > 3 { left(n) } else { right(n) };  // value-if
-    if n == 0 {
+    let count = decide("hello".to_string());
+    let chosen = if count > 3 { left(count) } else { right(count) };  // value-if
+    if count == 0 {
         note("zero".to_string());
     } else {
         note(chosen);
@@ -130,7 +130,25 @@ fn gated() {
 ```
 
 Conditions are a closed grammar (`== != < <= > >=`, `&& || !` over
-bindings / inputs / `a.field` / literals / nested calls).
+bindings / inputs / `a.field` / literals / nested calls). Comparisons
+work on strings, `char` and numbers, and `==` / `!=` also on `bool`.
+To test anything else,
+call a `#[container]` that returns `bool`:
+
+```rust,ignore
+#[container]
+fn has_tags(tags: Vec<String>) -> bool {
+    !tags.is_empty()
+}
+
+#[workflow]
+fn release() {
+    let tags = list_tags();
+    if has_tags(tags.clone()) {
+        deploy(tags);
+    }
+}
+```
 
 ## Pass only one field of a struct
 
@@ -288,6 +306,9 @@ fn resilient() {
         .on_exit(cleanup);     // runs when *this task* finishes
 }
 ```
+
+To branch on the result instead, pass it to a `#[container]` that
+returns `bool` (for example `r.is_err()`) and call that in the `if`.
 
 For a single hook that runs once when the whole workflow ends, see
 [Whole-workflow cleanup](#whole-workflow-cleanup) below.

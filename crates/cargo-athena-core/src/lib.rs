@@ -65,6 +65,38 @@ pub fn __athena_fallible<T>(_: T) -> Result<T, ArgoError> {
     unimplemented!("athena ghost: never executed")
 }
 
+/// Ghost-only: `l == r` / `l < r` in an `if` condition type-checks as
+/// `cmp_eq(&l, &r)` / `cmp_ord(&l, &r)`: only types Argo compares like Rust.
+#[doc(hidden)]
+pub mod __athena_cmp {
+    #[diagnostic::on_unimplemented(
+        message = "`{Self}` can't be compared with `==`/`!=` in an `if` condition",
+        label = "not a string, `char`, `bool` or number",
+        note = "for other types, return a `bool` from a #[container] and call it in the condition"
+    )]
+    pub trait CmpEq {}
+    #[diagnostic::on_unimplemented(
+        message = "`{Self}` can't be ordered in an `if` condition",
+        label = "not a string, `char` or number",
+        note = "for other types, return a `bool` from a #[container] and call it in the condition"
+    )]
+    pub trait CmpOrd {}
+
+    macro_rules! scalar {
+        ($($t:ty),*) => { $( impl CmpEq for $t {} impl CmpOrd for $t {} )* };
+    }
+    scalar!(String, &str, char, i8, i16, i32, i64, i128, isize);
+    scalar!(u8, u16, u32, u64, u128, usize, f32, f64);
+    impl CmpEq for bool {}
+
+    pub fn cmp_eq<L: PartialEq<R> + CmpEq, R: CmpEq>(_: &L, _: &R) -> bool {
+        unimplemented!("athena ghost: never executed")
+    }
+    pub fn cmp_ord<L: PartialOrd<R> + CmpOrd, R: CmpOrd>(_: &L, _: &R) -> bool {
+        unimplemented!("athena ghost: never executed")
+    }
+}
+
 /// Marker for types that may be injected into a `#[container]`
 /// attribute (`image = "repo:" + tag`). Restricted to `String`/`str`
 /// and the primitive numbers: their `serde_json` form, unwrapped at

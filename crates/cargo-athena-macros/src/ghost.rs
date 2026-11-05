@@ -4,14 +4,16 @@
 //! [`ghost_fn`] emits a hidden, never-called fn that mirrors the body
 //! with builder chains reduced to their receiver plus one statement per
 //! hook target call, and every `C(args)` rewritten to
-//! `C::__athena_sig(args)`, so rustc fully type-checks arg/arity/field/
-//! return flow on the analyzed body — a bad `a.field`, wrong type, or
-//! consuming a non-returning `#[workflow]` becomes a compile error.
+//! `C::__athena_sig(args)` (and each `if` comparison `l == r` to a
+//! bounded `__athena_cmp` fn), so rustc fully type-checks arg/arity/
+//! field/return flow on the analyzed body: a bad `a.field`, wrong type,
+//! or consuming a non-returning `#[workflow]` becomes a compile error.
 
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{format_ident, quote};
-use syn::{Expr, ItemFn, visit_mut::VisitMut};
+use quote::{format_ident, quote, quote_spanned};
+use syn::{Expr, ItemFn, spanned::Spanned, visit_mut::VisitMut};
 
+use crate::conditional::CmpOp;
 use crate::utils::{is_builder_method, unwrap_expr};
 
 /// A hook target `t` / `t(args)` as the call the ghost type-checks — a
@@ -30,7 +32,8 @@ fn hook_call(e: &Expr) -> Option<Expr> {
 /// reduce builder chains to their receiver — keeping each hook target
 /// as its own `let _ = t(args);` statement so hooks are checked exactly
 /// like task calls — and rewrite every template call `C(args)` →
-/// `C::__athena_sig(args)`. The result is faithful Rust (move semantics
+/// `C::__athena_sig(args)`, and each condition comparison to its
+/// bounded `__athena_cmp` fn. The result is faithful Rust (move semantics
 /// intact — fan-out needs an explicit `.clone()`, which mirrors Argo
 /// copying the output param into each consumer, and a hook arg is one
 /// more consumer), so rustc enforces arg/field/return types on the
@@ -78,6 +81,17 @@ impl VisitMut for GhostRewrite {
             p.path
                 .segments
                 .push(syn::PathSegment::from(format_ident!("__athena_sig")));
+        }
+        // Only `if` conditions hold comparisons: bound them to types Argo compares like Rust.
+        if let Expr::Binary(b) = e
+            && let Some(op) = CmpOp::of(&b.op)
+        {
+            // Spanned so errors underline the operand, not the macro.
+            let (s, l, r) = (b.op.span(), &b.left, &b.right);
+            let f = format_ident!("{}", op.ghost(), span = s);
+            let l = quote_spanned!(l.span()=> &#l);
+            let r = quote_spanned!(r.span()=> &#r);
+            *e = syn::parse_quote_spanned!(s=> ::cargo_athena::__athena_cmp::#f(#l, #r));
         }
         syn::visit_mut::visit_expr_mut(self, e);
         // After recursion so the wrapper's inner call isn't re-visited.
