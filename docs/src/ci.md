@@ -54,8 +54,8 @@ Pass your storage credentials as repository secrets:
 
 Do **not** put credentials in `athena.toml` (its
 `*_secret` entries are Kubernetes Secret references for the in-cluster side).
-The action reads creds only from these inputs. Omit `access-key`/`secret-key`
-entirely to use the runner's ambient identity (instance role / IRSA).
+Omit `access-key`/`secret-key` to use the runner's own credentials (see
+[S3 credentials](cli.md#s3-credentials)).
 
 ## Inputs
 
