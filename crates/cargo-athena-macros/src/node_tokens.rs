@@ -16,8 +16,8 @@
 //! the helper is pure-string so its output is unit-testable without
 //! macro expansion.
 //!
-//! Hooks never produce a DAG dep (they're fired by status, not data
-//! flow), so the hook callsite drops the second tuple element.
+//! A hook arg's dep lands on the hooked task: Argo scopes a DAG hook
+//! to that task's ancestors.
 
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
@@ -264,9 +264,16 @@ pub(crate) fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
     // `.on_success`/`.on_failure`/`.on_error`/`.hook_if(...)` ->
     // auto-keyed `hook1`,`hook2`,… in source order. Hook templates
     // resolve via the wormhole like callees; hook args reuse the same
-    // `arg_value` lowering as task args (it has all the kinds covered),
-    // but the dep half is dropped — hooks add no DAG dependency.
+    // `arg_value` lowering as task args (it has all the kinds covered).
     let mut hook_n: u32 = 0;
+    // A DAG hook only sees the hooked task's ancestors, so each task a
+    // hook arg refs becomes a dep of the hooked task.
+    let hook_deps: Vec<String> = node
+        .hooks
+        .iter()
+        .flat_map(|h| &h.args)
+        .filter_map(|a| arg_value(a, steps).1)
+        .collect();
     // Argo expression scope: a sibling node is `tasks['x']` in a dag,
     // `steps['x']` in a steps workflow. Bracket form (NOT `tasks.x`) so
     // hyphenated kebab task names resolve.
@@ -307,8 +314,6 @@ pub(crate) fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                 }
             });
             let arg_pushes = h.args.iter().enumerate().map(|(i, a)| {
-                // Hooks never push deps — same value template as task
-                // args, just discard the dep half.
                 let (value, _) = arg_value(a, steps);
                 quote! {
                     __hp.push(::cargo_athena::api::Parameter {
@@ -404,6 +409,7 @@ pub(crate) fn node_tokens(node: &Node, steps: bool) -> TokenStream2 {
                 ::std::vec::Vec::new();
             #fan_dep
             #( #arg_stmts )*
+            #( __deps.push(#hook_deps.to_string()); )*
             __deps.sort();
             __deps.dedup();
             let __continue_on = #continue_on_tok;

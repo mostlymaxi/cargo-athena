@@ -50,6 +50,12 @@ fn seq() {
     sink(p);
 }
 
+#[workflow]
+fn hooked() {
+    let s = prep("x".to_string());
+    prep("y".to_string()).on_success(sink(s));
+}
+
 fn emit<T: Template>() -> String {
     emit_tagged::<T>(None)
 }
@@ -233,4 +239,27 @@ fn tasks_are_named_after_the_callee() {
         "task named after a binding:\n{yaml}"
     );
     assert!(yaml.contains("{{tasks.prep.outputs.parameters.return}}"));
+}
+
+#[test]
+fn hook_arg_ref_is_a_dep_of_the_hooked_task() {
+    // A DAG hook only sees the hooked task's ancestors.
+    let yaml = emit::<hooked>();
+    let wt = yaml
+        .split("---")
+        .find(|d| d.contains(&format!("name: {}", <hooked as Template>::ARGO_NAME)))
+        .expect("hooked WorkflowTemplate");
+    let src = wt
+        .split("{{tasks.")
+        .nth(1)
+        .and_then(|s| s.split('.').next())
+        .expect("hook arg ref");
+    let task = wt
+        .split("\n      - name: ")
+        .find(|t| t.contains("hooks:"))
+        .expect("hooked task");
+    assert!(
+        task.contains(&format!("dependencies:\n        - {src}\n")),
+        "hooked task must depend on `{src}`:\n{wt}"
+    );
 }

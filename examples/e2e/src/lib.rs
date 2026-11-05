@@ -457,6 +457,13 @@ pub fn nested_dag_child() {
     check_nested("dag-child".to_string(), caps, full, r);
 }
 
+/// Hook target fed by a task that is not an ancestor of the hooked task.
+#[container]
+pub fn check_hook(v: String) {
+    assert_eq!(v, "stamped", "hook arg from a non-ancestor task");
+    println!("OK check_hook");
+}
+
 /// `on_exit_if_root` handler (whole-workflow) AND a per-task
 /// `.on_exit(cleanup)` target — both should run.
 #[container]
@@ -557,6 +564,9 @@ pub fn pipeline(input_blob: String) {
 
     let r = risky().continue_on(failed, error);
     finalize(r).on_exit(cleanup); // per-task exit hook
+
+    let st = stamp();
+    produce().on_success(check_hook(st)); // hook arg: not an ancestor
 
     // Multi-KB parameter round-trip: producer writes blob -> Argo
     // captures it as outputs.parameters.return -> consumer receives
