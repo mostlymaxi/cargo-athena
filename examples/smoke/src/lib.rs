@@ -499,6 +499,7 @@ pub fn pipeline_secrets() {
 ///   hostPath mounts with chosen mount paths (the safe-by-construction
 ///   `host!` always lands under `/athena/mounts/<munged>` instead).
 /// * `annotations = { k = "lit" + arg, … }` — pod template annotations.
+/// * `labels = { k = "lit" + arg, … }` — pod labels.
 #[container(
     image = "ghcr.io/acme/svc:" + tag,
     privileged = true,
@@ -511,6 +512,10 @@ pub fn pipeline_secrets() {
         { host_path = "/etc/ca-certs", mount_path = "/certs", read_only = true },
     ],
     annotations = {
+        "team.athena/owner" = "platform",
+        "trace.athena/run"  = "run-" + tag,  // injected
+    },
+    labels = {
         "team.athena/owner" = "platform",
         "trace.athena/run"  = "run-" + tag,  // injected
     },

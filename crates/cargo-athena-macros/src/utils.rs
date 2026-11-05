@@ -519,6 +519,30 @@ pub(crate) fn annotation_key_violation(key: &str) -> Option<String> {
     None
 }
 
+/// Why `v` is not a valid k8s label value (empty, or <= 63 chars that
+/// start/end alphanumeric with `-`/`_`/`.` inside), or `None` if it is.
+pub(crate) fn label_value_violation(v: &str) -> Option<String> {
+    if v.is_empty() {
+        return None;
+    }
+    if v.len() > 63 {
+        return Some(format!("it is {} chars (max 63)", v.len()));
+    }
+    let alnum = |c: char| c.is_ascii_alphanumeric();
+    if !v.starts_with(alnum) || !v.ends_with(alnum) {
+        return Some("it must start and end alphanumeric".to_string());
+    }
+    if let Some(c) = v
+        .chars()
+        .find(|c| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')))
+    {
+        return Some(format!(
+            "it contains `{c}` (allowed: alphanumeric, `-`, `_`, `.`)"
+        ));
+    }
+    None
+}
+
 /// Reject fn shapes the macros cannot lower, with the error spanned at
 /// the offending piece instead of surfacing as a rustc error inside a
 /// hidden generated item. Generics are structurally unsupported (the
@@ -863,6 +887,12 @@ mod tests {
         assert!(annotation_key_violation("UPPER.Prefix/x").is_some());
         assert!(annotation_key_violation("-edge").is_some());
         assert!(annotation_key_violation(&"a".repeat(64)).is_some());
+
+        assert!(label_value_violation("").is_none());
+        assert!(label_value_violation("v1.2_x-y").is_none());
+        assert!(label_value_violation("-edge").is_some());
+        assert!(label_value_violation("has space").is_some());
+        assert!(label_value_violation(&"a".repeat(64)).is_some());
     }
 
     #[test]
