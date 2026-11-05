@@ -543,6 +543,36 @@ pub(crate) fn label_value_violation(v: &str) -> Option<String> {
     None
 }
 
+/// Why a pod `labels` / `annotations` entry of `attr` is invalid, or
+/// `None`. Argo applies these over its own `workflows.argoproj.io/` pod
+/// metadata, so that prefix is rejected. Literal label values are
+/// checked too; injected ones only exist at runtime.
+pub(crate) fn pod_meta_violation(
+    attr: &str,
+    label: bool,
+    k: &str,
+    v: &syn::Expr,
+) -> Option<String> {
+    let what = if label { "label" } else { "annotation" };
+    let key_why = annotation_key_violation(k).or_else(|| {
+        k.starts_with("workflows.argoproj.io/")
+            .then(|| "the `workflows.argoproj.io/` prefix is Argo's".to_string())
+    });
+    if let Some(why) = key_why {
+        return Some(format!(
+            "`{attr}` key `{k}` is not a valid {what} key: {why}"
+        ));
+    }
+    match v {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(s),
+            ..
+        }) if label => label_value_violation(&s.value())
+            .map(|why| format!("`{attr}` value for `{k}` is not a valid label value: {why}")),
+        _ => None,
+    }
+}
+
 /// Reject fn shapes the macros cannot lower, with the error spanned at
 /// the offending piece instead of surfacing as a rustc error inside a
 /// hidden generated item. Generics are structurally unsupported (the
