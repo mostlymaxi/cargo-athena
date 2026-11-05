@@ -543,10 +543,23 @@ pub(crate) fn label_value_violation(v: &str) -> Option<String> {
     None
 }
 
+/// Pod labels/annotations Argo sets before applying user metadata
+/// (workflowpod.go v4.1.6), so a user value would overwrite them. Other
+/// `workflows.argoproj.io/` keys (`kill-cmd-*`, `progress`) are inputs.
+const ARGO_POD_KEYS: &[&str] = &[
+    "workflows.argoproj.io/workflow",
+    "workflows.argoproj.io/completed",
+    "workflows.argoproj.io/on-exit",
+    "workflows.argoproj.io/controller-instanceid",
+    "workflows.argoproj.io/node-name",
+    "workflows.argoproj.io/node-id",
+    "workflows.argoproj.io/pod-gc-strategy",
+    "kubectl.kubernetes.io/default-container",
+];
+
 /// Why a pod `labels` / `annotations` entry of `attr` is invalid, or
-/// `None`. Argo applies these over its own `workflows.argoproj.io/` pod
-/// metadata, so that prefix is rejected. Literal label values are
-/// checked too; injected ones only exist at runtime.
+/// `None`. Literal label values are checked too, unless they hold a
+/// `{{…}}` Argo tag; injected ones only exist at runtime.
 pub(crate) fn pod_meta_violation(
     attr: &str,
     label: bool,
@@ -555,8 +568,9 @@ pub(crate) fn pod_meta_violation(
 ) -> Option<String> {
     let what = if label { "label" } else { "annotation" };
     let key_why = annotation_key_violation(k).or_else(|| {
-        k.starts_with("workflows.argoproj.io/")
-            .then(|| "the `workflows.argoproj.io/` prefix is Argo's".to_string())
+        ARGO_POD_KEYS
+            .contains(&k)
+            .then(|| "Argo sets it on every pod".to_string())
     });
     if let Some(why) = key_why {
         return Some(format!(
@@ -567,7 +581,7 @@ pub(crate) fn pod_meta_violation(
         syn::Expr::Lit(syn::ExprLit {
             lit: syn::Lit::Str(s),
             ..
-        }) if label => label_value_violation(&s.value())
+        }) if label && !s.value().contains("{{") => label_value_violation(&s.value())
             .map(|why| format!("`{attr}` value for `{k}` is not a valid label value: {why}")),
         _ => None,
     }
@@ -923,6 +937,15 @@ mod tests {
         assert!(label_value_violation("-edge").is_some());
         assert!(label_value_violation("has space").is_some());
         assert!(label_value_violation(&"a".repeat(64)).is_some());
+
+        let lit = |s: &str| syn::parse_str::<syn::Expr>(&format!("{s:?}")).unwrap();
+        let v = |label, k, s| pod_meta_violation("x", label, k, &lit(s));
+        assert!(v(true, "workflows.argoproj.io/workflow", "x").is_some());
+        assert!(v(false, "workflows.argoproj.io/node-id", "x").is_some());
+        assert!(v(false, "kubectl.kubernetes.io/default-container", "x").is_some());
+        assert!(v(false, "workflows.argoproj.io/kill-cmd-istio-proxy", "[]").is_none());
+        assert!(v(true, "run", "{{workflow.name}}").is_none());
+        assert!(v(true, "run", "has space").is_some());
     }
 
     #[test]

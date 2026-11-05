@@ -1,5 +1,0 @@
-error: `labels` key `workflows.argoproj.io/workflow` is not a valid label key: the `workflows.argoproj.io/` prefix is Argo's
- --> tests/ui/ctr_label_reserved_prefix.rs:4:4
-  |
-4 | fn f() {}
-  |    ^
