@@ -21,8 +21,8 @@ use crate::attrs::{
 use crate::utils::{
     annotation_key_violation, check_dns1123_name, check_fn_shape, check_yaml_safe_names,
     env_var_name_violation, fn_arg_injects, fn_args, func_without_inject_args, is_artifact_ty,
-    make_argo_name, scan_body, secret_slice_tokens, sig_shim, str_slice, strip_inject_attrs,
-    with_host_rewritten,
+    label_value_violation, make_argo_name, scan_body, secret_slice_tokens, sig_shim, str_slice,
+    strip_inject_attrs, with_host_rewritten,
 };
 
 pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -64,6 +64,30 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             )
             .to_compile_error()
             .into();
+        }
+    }
+    // Label keys share the annotation-key grammar. Argo copies template
+    // labels over its own, so its prefix would break pod tracking.
+    for (k, v) in &cfg.labels {
+        let why = annotation_key_violation(k)
+            .or_else(|| {
+                k.starts_with("workflows.argoproj.io/")
+                    .then(|| "the `workflows.argoproj.io/` prefix is Argo's".to_string())
+            })
+            .map(|why| format!("`labels` key `{k}` is not a valid label key: {why}"))
+            .or_else(|| match v {
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(s),
+                    ..
+                }) => label_value_violation(&s.value()).map(|why| {
+                    format!("`labels` value for `{k}` is not a valid label value: {why}")
+                }),
+                _ => None,
+            });
+        if let Some(msg) = why {
+            return syn::Error::new(func.sig.ident.span(), msg)
+                .to_compile_error()
+                .into();
         }
     }
     // `host_mount` paths: k8s requires absolute paths for both sides,
@@ -472,6 +496,25 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     let ann_keys: Vec<&String> = cfg.annotations.keys().collect();
     let ann_vals: Vec<String> = match cfg
         .annotations
+        .values()
+        .map(|e| {
+            inject_lower(
+                e,
+                &argset,
+                &mut inject_ops,
+                "inputs.parameters",
+                "container",
+            )
+        })
+        .collect::<syn::Result<Vec<_>>>()
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    // `labels = { … }`: `Template.metadata.labels`, same shape.
+    let label_keys: Vec<&String> = cfg.labels.keys().collect();
+    let label_vals: Vec<String> = match cfg
+        .labels
         .values()
         .map(|e| {
             inject_lower(
@@ -927,11 +970,17 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                     ::std::string::String,
                 > = ::std::collections::BTreeMap::new();
                 #( __ann.insert(#ann_keys.to_string(), #ann_vals.to_string()); )*
-                let __metadata = if __ann.is_empty() {
+                let mut __labels: ::std::collections::BTreeMap<
+                    ::std::string::String,
+                    ::std::string::String,
+                > = ::std::collections::BTreeMap::new();
+                #( __labels.insert(#label_keys.to_string(), #label_vals.to_string()); )*
+                let __metadata = if __ann.is_empty() && __labels.is_empty() {
                     ::core::option::Option::None
                 } else {
                     ::core::option::Option::Some(::cargo_athena::api::ObjectMeta {
                         annotations: __ann,
+                        labels: __labels,
                         ..::core::default::Default::default()
                     })
                 };

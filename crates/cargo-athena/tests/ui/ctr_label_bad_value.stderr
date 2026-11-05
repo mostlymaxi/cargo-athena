@@ -1,0 +1,5 @@
+error: `labels` value for `team` is not a valid label value: it contains ` ` (allowed: alphanumeric, `-`, `_`, `.`)
+ --> tests/ui/ctr_label_bad_value.rs:3:4
+  |
+3 | fn f() {}
+  |    ^

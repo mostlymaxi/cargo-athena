@@ -14,7 +14,7 @@
 //!   duration-bearing attribute (int seconds or humantime string).
 //! - [`inject_lower`] — lowers `"lit" + arg + arg.field` attribute values
 //!   to Argo `{{=fromJSON(...)}}` template strings; shared by container
-//!   (image/sa/node_selector/env/annotations) and workflow
+//!   (image/sa/node_selector/env/annotations/labels) and workflow
 //!   (node_selector_if_root) attrs.
 
 use proc_macro::TokenStream;
@@ -334,6 +334,9 @@ pub(crate) struct ContainerArgs {
     /// Literal keys, injectable values (same grammar as `env` /
     /// `node_selector`).
     pub(crate) annotations: std::collections::BTreeMap<String, syn::Expr>,
+    /// `labels = { "key" = "lit" + arg, … }` — pod labels. Same grammar
+    /// as `annotations`.
+    pub(crate) labels: std::collections::BTreeMap<String, syn::Expr>,
     /// `privileged = true` — K8s `securityContext.privileged: true` on
     /// this container. Off by default; opt in only when you genuinely
     /// need host devices / kernel-level access (mounting NVIDIA gear,
