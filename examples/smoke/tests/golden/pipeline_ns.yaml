@@ -99,7 +99,7 @@ spec:
       - name: env
     dag:
       tasks:
-      - name: raw
+      - name: fetch
         arguments:
           parameters:
           - name: url
@@ -109,11 +109,11 @@ spec:
           template: cargo-athena-example-smoke-fetch
       - name: transform
         dependencies:
-        - raw
+        - fetch
         arguments:
           parameters:
           - name: data
-            value: '{{tasks.raw.outputs.parameters.return}}'
+            value: '{{tasks.fetch.outputs.parameters.return}}'
           - name: factor
             value: '3'
         templateRef:

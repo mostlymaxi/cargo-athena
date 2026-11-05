@@ -96,7 +96,7 @@ spec:
   - name: cargo-athena-example-smoke-pipeline-returns
     dag:
       tasks:
-      - name: r
+      - name: sub-pipeline
         arguments:
           parameters:
           - name: seed
@@ -106,11 +106,11 @@ spec:
           template: cargo-athena-example-smoke-sub-pipeline
       - name: publish
         dependencies:
-        - r
+        - sub-pipeline
         arguments:
           parameters:
           - name: report
-            value: '{{tasks.r.outputs.parameters.return}}'
+            value: '{{tasks.sub-pipeline.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-smoke-publish-0-0-0
           template: cargo-athena-example-smoke-publish
@@ -257,7 +257,7 @@ spec:
           parameter: '{{tasks.transform.outputs.parameters.return}}'
     dag:
       tasks:
-      - name: fetched
+      - name: fetch
         arguments:
           parameters:
           - name: url
@@ -267,11 +267,11 @@ spec:
           template: cargo-athena-example-smoke-fetch
       - name: transform
         dependencies:
-        - fetched
+        - fetch
         arguments:
           parameters:
           - name: data
-            value: '{{tasks.fetched.outputs.parameters.return}}'
+            value: '{{tasks.fetch.outputs.parameters.return}}'
           - name: factor
             value: '7'
         templateRef:

@@ -209,5 +209,5 @@ fn steps_mode_emits_sequential_steps_not_dag() {
         .expect("seq WorkflowTemplate");
     assert!(wt.contains("steps:"), "expected steps body:\n{wt}");
     assert!(!wt.contains("dag:"), "steps mode must not emit dag:\n{wt}");
-    assert!(yaml.contains("{{steps.p.outputs.parameters.return}}"));
+    assert!(yaml.contains("{{steps.prep.outputs.parameters.return}}"));
 }

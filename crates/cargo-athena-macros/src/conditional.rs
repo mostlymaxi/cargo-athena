@@ -12,8 +12,7 @@
 //! - [`hoist_cond`]: pre-pass that pulls template-call operands in the
 //!   condition into parent tasks (Rust evaluates conds unconditionally).
 //! - [`synth_if`]: emits the wrapper + arm `SynthWf`s; the returned task
-//!   name is what the parent dag/steps consumes (binding for value-`if`,
-//!   side-effect task for stmt-`if`).
+//!   name is what the parent dag/steps consumes.
 //! - [`emit_synth`]: lowers one `SynthWf` to a hidden
 //!   `struct + impl Template` (Workflow-kind) — force-linked via the
 //!   parent's `collect`.
@@ -415,7 +414,6 @@ pub(crate) fn select_expr(arms: &[String]) -> String {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn synth_if(
     ei: &syn::ExprIf,
-    bind: Option<&str>,
     value: bool,
     bindings: &std::collections::HashMap<String, String>,
     inputs: &std::collections::HashSet<String>,
@@ -603,7 +601,6 @@ pub(crate) fn synth_if(
     });
 
     // Parent calls the wrapper exactly like a returning sub-workflow.
-    let base = bind.map(str::to_string).unwrap_or_else(|| "if".into());
     let parent_args = captures
         .iter()
         .map(|n| {
@@ -614,7 +611,7 @@ pub(crate) fn synth_if(
             }
         })
         .collect();
-    let task = uniq_task(used, &base);
+    let task = uniq_task(used, "if");
     nodes.push(Node {
         task: task.clone(),
         callee: syn::parse_quote!(#wrap_ident),

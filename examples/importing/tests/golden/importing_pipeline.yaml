@@ -167,7 +167,7 @@ spec:
   - name: cargo-athena-example-importing-importing-pipeline
     dag:
       tasks:
-      - name: n
+      - name: consumer-step
         arguments:
           parameters:
           - name: note
@@ -192,11 +192,11 @@ spec:
           template: cargo-athena-example-importing-module-pipeline
       - name: finalize
         dependencies:
-        - n
+        - consumer-step
         arguments:
           parameters:
           - name: x
-            value: '{{tasks.n.outputs.parameters.return}}'
+            value: '{{tasks.consumer-step.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-importing-finalize-0-0-0
           template: cargo-athena-example-importing-finalize
@@ -304,7 +304,7 @@ spec:
   - name: cargo-athena-example-importing-module-pipeline
     dag:
       tasks:
-      - name: s
+      - name: local-step
         arguments:
           parameters:
           - name: tag
@@ -314,11 +314,11 @@ spec:
           template: cargo-athena-example-importing-local-step
       - name: finalize
         dependencies:
-        - s
+        - local-step
         arguments:
           parameters:
           - name: x
-            value: '{{tasks.s.outputs.parameters.return}}'
+            value: '{{tasks.local-step.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-importing-finalize-0-0-0
           template: cargo-athena-example-importing-finalize
@@ -623,10 +623,10 @@ spec:
       parameters:
       - name: return
         valueFrom:
-          parameter: '{{tasks.clean.outputs.parameters.return}}'
+          parameter: '{{tasks.transform.outputs.parameters.return}}'
     dag:
       tasks:
-      - name: raw
+      - name: fetch
         arguments:
           parameters:
           - name: url
@@ -634,13 +634,13 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-fetch-0-0-0
           template: cargo-athena-example-smoke-fetch
-      - name: clean
+      - name: transform
         dependencies:
-        - raw
+        - fetch
         arguments:
           parameters:
           - name: data
-            value: '{{tasks.raw.outputs.parameters.return}}'
+            value: '{{tasks.fetch.outputs.parameters.return}}'
           - name: factor
             value: '2'
         templateRef:
@@ -648,11 +648,11 @@ spec:
           template: cargo-athena-example-smoke-transform
       - name: publish
         dependencies:
-        - clean
+        - transform
         arguments:
           parameters:
           - name: report
-            value: '{{tasks.clean.outputs.parameters.return}}'
+            value: '{{tasks.transform.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-smoke-publish-0-0-0
           template: cargo-athena-example-smoke-publish
@@ -684,7 +684,7 @@ spec:
   - name: cargo-athena-example-smoke-pipeline
     dag:
       tasks:
-      - name: a
+      - name: ingest
         arguments:
           parameters:
           - name: source
@@ -700,7 +700,7 @@ spec:
         templateRef:
           name: cargo-athena-example-smoke-branchy-0-0-0
           template: cargo-athena-example-smoke-branchy
-      - name: t
+      - name: transform
         arguments:
           parameters:
           - name: data
@@ -712,14 +712,14 @@ spec:
           template: cargo-athena-example-smoke-transform
       - name: combine
         dependencies:
-        - a
-        - t
+        - ingest
+        - transform
         arguments:
           parameters:
           - name: lhs
-            value: '{{tasks.a.outputs.parameters.return}}'
+            value: '{{tasks.ingest.outputs.parameters.return}}'
           - name: rhs
-            value: '{{tasks.t.outputs.parameters.return}}'
+            value: '{{tasks.transform.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-smoke-combine-0-0-0
           template: cargo-athena-example-smoke-combine

@@ -242,7 +242,7 @@ spec:
   - name: cargo-athena-example-smoke-pipeline-hooks
     dag:
       tasks:
-      - name: raw
+      - name: fetch
         arguments:
           parameters:
           - name: url
@@ -253,23 +253,23 @@ spec:
         continueOn:
           error: true
           failed: true
-      - name: ok
+      - name: recover
         dependencies:
-        - raw
+        - fetch
         arguments:
           parameters:
           - name: data
-            value: '{{=let g = tasks?.[''raw'']; g == nil ? nil : (let c = g?.outputs?.exitCode; g?.status == "Succeeded" ? toJSON({''Ok'': fromJSON(g?.outputs?.parameters?.[''return''] ?? "null")}) : toJSON({''Err'': {''status'': g?.status ?? "Failed", ''exit_code'': c == nil ? nil : int(c)} }))}}'
+            value: '{{=let g = tasks?.[''fetch'']; g == nil ? nil : (let c = g?.outputs?.exitCode; g?.status == "Succeeded" ? toJSON({''Ok'': fromJSON(g?.outputs?.parameters?.[''return''] ?? "null")}) : toJSON({''Err'': {''status'': g?.status ?? "Failed", ''exit_code'': c == nil ? nil : int(c)} }))}}'
         templateRef:
           name: cargo-athena-example-smoke-recover-0-0-0
           template: cargo-athena-example-smoke-recover
       - name: transform
         dependencies:
-        - ok
+        - recover
         arguments:
           parameters:
           - name: data
-            value: '{{tasks.ok.outputs.parameters.return}}'
+            value: '{{tasks.recover.outputs.parameters.return}}'
           - name: factor
             value: '9'
         templateRef:

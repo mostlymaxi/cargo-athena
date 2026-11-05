@@ -98,28 +98,28 @@ spec:
   - name: cargo-athena-example-smoke-pipeline-artifact-clone
     dag:
       tasks:
-      - name: m
+      - name: make-meta-artifact
         arguments: {}
         templateRef:
           name: cargo-athena-example-smoke-make-meta-artifact-0-0-0
           template: cargo-athena-example-smoke-make-meta-artifact
       - name: use-meta-artifact
         dependencies:
-        - m
+        - make-meta-artifact
         arguments:
           artifacts:
           - name: m
-            from: '{{tasks.m.outputs.artifacts.return}}'
+            from: '{{tasks.make-meta-artifact.outputs.artifacts.return}}'
         templateRef:
           name: cargo-athena-example-smoke-use-meta-artifact-0-0-0
           template: cargo-athena-example-smoke-use-meta-artifact
       - name: use-meta-artifact-2
         dependencies:
-        - m
+        - make-meta-artifact
         arguments:
           artifacts:
           - name: m
-            from: '{{tasks.m.outputs.artifacts.return}}'
+            from: '{{tasks.make-meta-artifact.outputs.artifacts.return}}'
         templateRef:
           name: cargo-athena-example-smoke-use-meta-artifact-0-0-0
           template: cargo-athena-example-smoke-use-meta-artifact
