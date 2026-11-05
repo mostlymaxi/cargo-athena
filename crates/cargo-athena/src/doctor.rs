@@ -115,18 +115,20 @@ pub fn doctor(args: DoctorArgs) {
         }
     }
 
-    // ---- AWS credentials --------------------------------------------------
-    let aws_env = std::env::var("AWS_ACCESS_KEY_ID").is_ok()
-        && std::env::var("AWS_SECRET_ACCESS_KEY").is_ok();
-    if aws_env {
-        check_pass("AWS credentials", "AWS_ACCESS_KEY_ID set");
-        passed += 1;
-    } else {
-        check_warn(
-            "AWS credentials",
-            "AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY not set (will rely on ambient identity: IMDS / ECS / IRSA)",
-        );
-        warned += 1;
+    // ---- S3 credentials ---------------------------------------------------
+    let region = cfg
+        .as_ref()
+        .map_or("", |c| c.artifact_repository.s3.region.as_str());
+    let creds = crate::s3creds::S3Credentials::new(region);
+    match crate::emulate::rt().block_on(creds.resolve()) {
+        Ok(_) => {
+            check_pass("S3 credentials", "found");
+            passed += 1;
+        }
+        Err(e) => {
+            check_warn("S3 credentials", &e);
+            warned += 1;
+        }
     }
 
     // ---- live S3 (opt-in) -------------------------------------------------
@@ -148,7 +150,7 @@ pub fn doctor(args: DoctorArgs) {
                         "S3 reachable",
                         &e,
                         Some(
-                            "verify athena.toml endpoint + AWS_* env (or AWS_ENDPOINT_URL for port-forward)",
+                            "verify athena.toml endpoint and S3 credentials (or AWS_ENDPOINT_URL_S3 for port-forward)",
                         ),
                     );
                     failed += 1;
@@ -197,14 +199,19 @@ fn check_pass(name: &str, detail: &str) {
 }
 
 fn check_fail(name: &str, msg: &str, fix: Option<&str>) {
-    eprintln!("  {name:.<W$} {err} {msg}", err = style::err());
+    eprintln!("  {name:.<W$} {err} {}", hang(msg), err = style::err());
     if let Some(fix) = fix {
         eprintln!("  {:>W$}      fix: {fix}", "");
     }
 }
 
 fn check_warn(name: &str, msg: &str) {
-    eprintln!("  {name:.<W$} {warn} {msg}", warn = style::warn());
+    eprintln!("  {name:.<W$} {warn} {}", hang(msg), warn = style::warn());
+}
+
+/// Indents a multi-line message's later lines to the value column.
+fn hang(msg: &str) -> String {
+    msg.replace('\n', &format!("\n{:1$}", "", W + 5))
 }
 
 // ---- implementations ------------------------------------------------------
