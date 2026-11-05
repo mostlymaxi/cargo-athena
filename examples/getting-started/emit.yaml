@@ -81,7 +81,7 @@ spec:
   - name: cargo-athena-example-getting-started-pipeline
     dag:
       tasks:
-      - name: raw
+      - name: fetch
         arguments:
           parameters:
           - name: url
@@ -89,13 +89,13 @@ spec:
         templateRef:
           name: cargo-athena-example-getting-started-fetch-0-0-0
           template: cargo-athena-example-getting-started-fetch
-      - name: summary
+      - name: summarize
         dependencies:
-        - raw
+        - fetch
         arguments:
           parameters:
           - name: data
-            value: '{{tasks.raw.outputs.parameters.return}}'
+            value: '{{tasks.fetch.outputs.parameters.return}}'
           - name: top_n
             value: '3'
         templateRef:
@@ -103,11 +103,11 @@ spec:
           template: cargo-athena-example-getting-started-summarize
       - name: publish
         dependencies:
-        - summary
+        - summarize
         arguments:
           parameters:
           - name: report
-            value: '{{tasks.summary.outputs.parameters.return}}'
+            value: '{{tasks.summarize.outputs.parameters.return}}'
         templateRef:
           name: cargo-athena-example-getting-started-publish-0-0-0
           template: cargo-athena-example-getting-started-publish
