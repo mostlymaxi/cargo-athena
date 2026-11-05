@@ -41,6 +41,10 @@ The S3-compatible bucket holding both the binary tarball and every
 `load_artifact!` / `save_artifact!` object. Emitted into each container
 template as an Argo `s3{}` artifact source.
 
+The `cargo athena` CLI does not use `access_key_secret` /
+`secret_key_secret`. For its credentials, see
+[S3 credentials](cli.md#s3-credentials).
+
 | Key | Meaning |
 |---|---|
 | `endpoint` | S3 endpoint (host:port). |

@@ -96,25 +96,14 @@ to your terminal: scroll up.
 
 ### S3 credentials / endpoint issues
 
-cargo-athena reads the standard `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY`, and (if used) `AWS_SESSION_TOKEN` env vars,
-plus the ambient cloud identity (EC2 IMDS, ECS task role, IRSA web
-identity).
-
-**Not read:** `~/.aws/credentials` and `AWS_PROFILE`. The S3 client is
-`object_store`, not the AWS SDK, and the shared-config file is
-unsupported. If you rely on a profile, export the credentials before
-running:
-
-```sh
-eval "$(aws configure export-credentials --profile prod --format env)"
-cargo athena publish
-```
+Run `cargo athena doctor --check-s3`. It shows if credentials are
+found and if the bucket answers. For where credentials come from, see
+[S3 credentials](cli.md#s3-credentials).
 
 For a custom endpoint (MinIO, self-hosted), `athena.toml` sets the
 endpoint pods use. To override it just for the upload from your
 machine (e.g. port-forwarded MinIO from outside the cluster), set
-`AWS_ENDPOINT_URL` for that one command. `emit` still bakes the
+`AWS_ENDPOINT_URL_S3` for that one command. `emit` still bakes the
 config's endpoint into the YAML, so pods always hit the in-cluster
 address.
 

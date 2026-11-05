@@ -38,6 +38,47 @@ it is discovered automatically (`$ATHENA_CONFIG`, the nearest
 with no per-repo config. See [`athena.toml`](configuration.md) for the
 full precedence order.
 
+## S3 credentials
+
+`publish`, `submit`, `emulate`, `prune`, and `doctor` use the bucket in
+`athena.toml`. They look for credentials in these places, in this
+order:
+
+1. The `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` env vars, plus
+   `AWS_SESSION_TOKEN` for temporary credentials.
+2. A profile in `~/.aws/credentials` or `~/.aws/config`: the default
+   profile, or the one `AWS_PROFILE` names. Profiles with static keys,
+   SSO, a credential process, or an assumed role all work.
+3. Web identity, for example EKS IRSA.
+4. The ECS task role or EKS Pod Identity.
+5. The EC2 instance role.
+
+`AWS_SHARED_CREDENTIALS_FILE` and `AWS_CONFIG_FILE` change where the
+files are. If `AWS_PROFILE` names a profile that does not exist, the
+next source is used.
+
+The same files work for MinIO, R2, Ceph, and other S3-compatible
+stores:
+
+```ini
+# ~/.aws/credentials
+[minio]
+aws_access_key_id = <access-key>
+aws_secret_access_key = <secret-key>
+```
+
+```sh
+AWS_PROFILE=minio cargo athena publish
+```
+
+The region and endpoint come from `athena.toml`, never from a profile.
+To reach the bucket at a different address from your machine (for
+example a port-forward), set `AWS_ENDPOINT_URL_S3` for that command.
+`AWS_ENDPOINT_URL` also works, but not with SSO, an assumed role, or
+web identity.
+
+Run `cargo athena doctor` to check that credentials are found.
+
 ## Versioning
 
 Every emitted `WorkflowTemplate` carries a **version tag** in its name
@@ -138,8 +179,8 @@ cargo athena doctor --check-s3   # also try a live HEAD on the bucket
 
 Checks: `athena.toml` parses, `cargo-zigbuild` and `zig` are
 installed, the rustup targets in `athena.toml [bootstrap].targets`
-are present, and `AWS_*` env credentials are set (warning, not
-fatal, since IMDS / IRSA cover the ambient case). With `--check-s3`,
+are present, and [S3 credentials](#s3-credentials) are found (a
+warning, not a failure). With `--check-s3`,
 also confirms the configured bucket actually responds.
 
 Exit code is 0 on all-pass, 1 if anything failed.
@@ -213,10 +254,7 @@ Requires the Zig cross toolchain: `cargo install cargo-zigbuild` and
 [`zig`](https://ziglang.org/download/). `publish` checks for both up
 front and tells you what's missing.
 
-S3 credentials come from `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
-(plus `AWS_SESSION_TOKEN` if you use it), or from instance-role
-identity (EC2 IMDS / ECS task role / IRSA). The shared
-`~/.aws/credentials` file is **not** read.
+For S3 credentials, see [S3 credentials](#s3-credentials).
 
 Flags:
 - `--target T` (repeatable) - override the `athena.toml` target matrix.
@@ -226,7 +264,7 @@ Flags:
   and the S3 key.
 - `--print` - dry run: resolve and print the destination key (and the
   resolved tag), no build or upload.
-- `AWS_ENDPOINT_URL` env var - override the endpoint for this upload
+- `AWS_ENDPOINT_URL_S3` env var - override the endpoint for this upload
   only (port-forward / public-vs-in-cluster split).
 
 ## `build`

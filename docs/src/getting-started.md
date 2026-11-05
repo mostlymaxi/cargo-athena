@@ -39,7 +39,7 @@ try to publish:
 
 ```sh
 cargo athena doctor
-# checks cargo-zigbuild, zig, rustup targets, athena.toml, AWS creds
+# checks cargo-zigbuild, zig, rustup targets, athena.toml, S3 credentials
 ```
 
 **No toolchain needed for `emit` or `submit`** - those don't compile
@@ -125,9 +125,9 @@ cargo athena submit my-pipeline-pipeline
 
 `submit` runs the safe-deploy preflight for you (type-check the args,
 confirm the binary is uploaded, register every WorkflowTemplate with a
-y/N on drift) and then creates the run. S3 credentials come from the
-standard AWS env vars or instance-role identity. See
-[the CLI page](cli.md#submit) for the steps in full and the `-y`,
+y/N on drift) and then creates the run. See
+[S3 credentials](cli.md#s3-credentials) for where credentials come from,
+and [the CLI page](cli.md#submit) for the steps in full and the `-y`,
 `--update`, and `--argo-server` flags.
 
 > **Automate it.** To build and publish from GitHub Actions without
