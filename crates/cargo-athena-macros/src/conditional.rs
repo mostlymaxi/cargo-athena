@@ -97,8 +97,22 @@ pub(crate) enum WhenExpr {
 }
 pub(crate) const UNSUPPORTED_COND: &str = "unsupported `if` condition. Allowed: \
 comparisons (== != < <= > >=) and `&&`/`||`/`!` over a #[workflow] input, \
-a prior `let = template(...)` binding, an `a.field` of one, or a literal. \
-Method calls, arithmetic, function calls and casts aren't lowered.";
+a prior `let = template(...)` binding, an `a.field` of one, a literal, or a \
+template call. Methods, arithmetic and casts aren't lowered: test the value in \
+a #[container] that returns `bool` and call it in the condition.";
+
+/// The first method under `.clone()`/`.to_owned()`, unless it is a
+/// literal conversion (`"x".to_string()`).
+fn cond_method(e: &Expr) -> Option<&syn::ExprMethodCall> {
+    let Expr::MethodCall(mc) = unwrap_expr(e) else {
+        return None;
+    };
+    match mc.method.to_string().as_str() {
+        "clone" | "to_owned" if mc.args.is_empty() => cond_method(&mc.receiver),
+        "to_string" | "into" if matches!(unwrap_expr(&mc.receiver), Expr::Lit(_)) => None,
+        _ => Some(mc),
+    }
+}
 
 /// Resolve a single condition operand with the exact task-arg rules.
 pub(crate) fn cond_operand(
@@ -106,6 +120,17 @@ pub(crate) fn cond_operand(
     bindings: &std::collections::HashMap<String, String>,
     inputs: &std::collections::HashSet<String>,
 ) -> syn::Result<WhenOp> {
+    if let Some(mc) = cond_method(e) {
+        return Err(syn::Error::new_spanned(
+            mc,
+            format!(
+                "`.{}()` isn't lowered in an `if` condition. Test the value in a \
+                 #[container] that returns `bool` and call it in the condition: \
+                 `if check(x) {{ .. }}`.",
+                mc.method
+            ),
+        ));
+    }
     match expr_to_arg(e, bindings, inputs) {
         Ok(Arg::Lit(v)) => Ok(WhenOp::Lit(v)),
         Ok(Arg::Input(name)) => Ok(WhenOp::Input { name, path: vec![] }),
