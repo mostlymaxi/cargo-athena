@@ -524,8 +524,14 @@ pub fn run_svc(tag: String, zone: String) {
     println!("run_svc tag={tag} zone={zone}");
 }
 
-#[workflow]
-pub fn pipeline_pod_attrs() {
+/// `pod_labels_if_root` / `pod_annotations_if_root` → `spec.podMetadata`:
+/// every pod in the run when this is the submitted root.
+#[workflow(
+    pod_labels_if_root = { "team.athena/owner" = "platform", "tier" = tier },
+    pod_annotations_if_root = { "trace.athena/tier" = "tier-" + tier },
+)]
+pub fn pipeline_pod_attrs(tier: String) {
+    // `tier` is consumed by the injections above.
     run_svc("42".to_string(), "east".to_string());
 }
 

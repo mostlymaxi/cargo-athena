@@ -469,6 +469,12 @@ pub trait Template {
     /// workflow attrs have no injectable args (see `#[workflow(node
     /// _selector)]` for the rationale).
     const NODE_SELECTOR_IF_ROOT: &'static [(&'static str, &'static str)] = &[];
+    /// Root-only `WorkflowSpec.podMetadata.labels`, from
+    /// `#[workflow(pod_labels_if_root = { … })]`: every pod in the run.
+    const POD_LABELS_IF_ROOT: &'static [(&'static str, &'static str)] = &[];
+    /// Root-only `WorkflowSpec.podMetadata.annotations`, from
+    /// `#[workflow(pod_annotations_if_root = { … })]`.
+    const POD_ANNOTATIONS_IF_ROOT: &'static [(&'static str, &'static str)] = &[];
     /// Root-only `WorkflowSpec.synchronization.mutexes`, from
     /// `#[…(mutexes_if_root = [{ name = …, namespace = … }])]`. Each
     /// entry is `(name, namespace)`, already lowered to its final YAML
@@ -1862,6 +1868,9 @@ pub struct Collector {
     /// onto that WT's `spec.nodeSelector` (the only nodeSelector knob
     /// Argo cascades over every pod in the run, root-only).
     node_selector_if_root: HashMap<String, Vec<(String, String)>>,
+    /// `<argo name> -> spec.podMetadata` from `pod_labels_if_root` /
+    /// `pod_annotations_if_root`.
+    pod_metadata_if_root: HashMap<String, api::ObjectMeta>,
     /// `<argo name> -> mutexes` for every template declaring
     /// `#[…(mutexes_if_root = […])]`. Each entry is `(name, namespace)`
     /// already lowered to the final YAML form (literal, or
@@ -1916,6 +1925,7 @@ impl Collector {
             pod_gc: HashMap::new(),
             active_deadline: HashMap::new(),
             node_selector_if_root: HashMap::new(),
+            pod_metadata_if_root: HashMap::new(),
             mutexes_if_root: HashMap::new(),
             tolerations_if_root: HashMap::new(),
             affinity_if_root: HashMap::new(),
@@ -1984,6 +1994,21 @@ impl Collector {
                     .iter()
                     .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
                     .collect(),
+            );
+        }
+        if !T::POD_LABELS_IF_ROOT.is_empty() || !T::POD_ANNOTATIONS_IF_ROOT.is_empty() {
+            let pairs = |p: &[(&str, &str)]| {
+                p.iter()
+                    .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                    .collect()
+            };
+            self.pod_metadata_if_root.insert(
+                T::ARGO_NAME.to_string(),
+                api::ObjectMeta {
+                    labels: pairs(T::POD_LABELS_IF_ROOT),
+                    annotations: pairs(T::POD_ANNOTATIONS_IF_ROOT),
+                    ..Default::default()
+                },
             );
         }
         if !T::MUTEXES_IF_ROOT.is_empty() {
@@ -2136,6 +2161,9 @@ impl Collector {
             for (k, v) in ns {
                 spec.node_selector.insert(k.clone(), v.clone());
             }
+        }
+        if let Some(pm) = self.pod_metadata_if_root.get(name) {
+            spec.pod_metadata = Some(pm.clone());
         }
         if let Some(mtx) = self.mutexes_if_root.get(name) {
             let sync = spec
