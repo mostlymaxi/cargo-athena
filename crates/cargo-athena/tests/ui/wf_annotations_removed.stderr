@@ -1,0 +1,5 @@
+error: unknown field `annotations`
+ --> tests/ui/wf_annotations_removed.rs:3:26
+  |
+3 | #[cargo_athena::workflow(annotations = { "k" = "v" })]
+  |                          ^^^^^^^^^^^
