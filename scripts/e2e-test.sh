@@ -161,13 +161,17 @@ say "feature-matrix assertions"
 # The mega pipeline Succeeding already proves every feature ran; these
 # assert the *observable effect* of the trickier ones from pod logs.
 WF=$(argo get -n "$NS" @latest -o json | jq -r '.metadata.name')
-LOGS=$(argo logs -n "$NS" "$WF" 2>/dev/null || true)
+fetch_logs() { LOGS=$(argo logs -n "$NS" "$WF" 2>/dev/null || true); }
+fetch_logs
 need() { # need <grep-regex> <feature label>
-  if printf '%s\n' "$LOGS" | grep -qE "$1"; then
-    echo "ok: $2"
-  else
-    echo "FAIL: $2 — expected /$1/ in workflow logs"; exit 1
-  fi
+  # `argo logs` right after completion can miss pods: re-fetch on a miss.
+  for _ in 1 2 3 4 5; do
+    if printf '%s\n' "$LOGS" | grep -qE "$1"; then
+      echo "ok: $2"; return
+    fi
+    sleep 5; fetch_logs
+  done
+  echo "FAIL: $2 — expected /$1/ in workflow logs"; exit 1
 }
 need 'echo:nested'                 "nested call (note(echo(..)))"
 # fan_out matrix: the OK lines print only AFTER an in-container
