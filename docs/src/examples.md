@@ -45,12 +45,7 @@ Rust name resolution.
 
 ## `e2e`
 
-The crate the project's GitHub Actions matrix actually submits to a
-real Argo + MinIO on every push to `main`. It's the live conformance
-test for every supported Argo version (4.1.6 / 4.0.15).
-
-If you want to see a workflow that's verified-running on real Argo,
-this is the one.
+A workflow that uses every feature and runs on real Argo.
 
 [Source](https://github.com/mostlymaxi/cargo-athena/blob/main/examples/e2e/src/main.rs)
 
