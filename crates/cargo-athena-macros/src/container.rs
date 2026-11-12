@@ -191,8 +191,8 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     let arg_names: Vec<String> = arg_idents.iter().map(|i| i.to_string()).collect();
     let inputs_slice = str_slice(&arg_names);
-    // Stringified arg types, parallel to INPUTS - `cargo athena emulate`
-    // type-checks supplied params against these before launching.
+    // Stringified arg types, parallel to INPUTS - `cargo athena submit`
+    // type-checks supplied args against these.
     let arg_type_strs: Vec<String> = arg_types.iter().map(|t| quote!(#t).to_string()).collect();
     let input_types_slice = str_slice(&arg_type_strs);
 

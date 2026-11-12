@@ -68,14 +68,12 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # global fallback, honoring `$XDG_CONFIG_HOME`). Forced `Xdg` strategy so the
 # path is identical + hand-editable on mac and linux. Small, MIT-licensed.
 etcetera = "0.11"
-# progress bars / spinners on uploads + downloads. tiny dep, no transitives.
+# progress bars / spinners on uploads. tiny dep, no transitives.
 indicatif = "0.18"
 # ANSI styling (`console::Style`) for `describe` output - TTY-aware,
 # auto no-color when piped or under NO_COLOR. Already in the tree via
 # indicatif; declaring it explicitly so we can use the API directly.
 console = "0.16"
-# stream chunks during S3 multipart upload (bound the bar's `Stream`).
-futures = "0.3"
 # CLI S3 credentials: the standard AWS chain. No default features: its
 # default HTTPS client is aws-lc (C); we inject a ring client instead.
 aws-config = { version = "1", default-features = false, features = ["rt-tokio", "credentials-process", "sso"] }

@@ -120,7 +120,7 @@ pub fn doctor(args: DoctorArgs) {
         .as_ref()
         .map_or("", |c| c.artifact_repository.s3.region.as_str());
     let creds = crate::s3creds::S3Credentials::new(region);
-    match crate::emulate::rt().block_on(creds.resolve()) {
+    match crate::rt().block_on(creds.resolve()) {
         Ok(_) => {
             check_pass("S3 credentials", "found");
             passed += 1;
@@ -270,10 +270,10 @@ fn check_s3_reachable(cfg: &AthenaConfig) -> Result<(), String> {
         &cfg.artifact_repository.s3,
         ".athena-doctor-probe".to_string(),
     );
-    let store = crate::emulate::s3_store(&s3);
+    let store = crate::s3::client(&s3);
     let key = object_store::path::Path::from(s3.key.as_str());
-    let result = crate::emulate::rt()
-        .block_on(async { object_store::ObjectStore::head(&store, &key).await });
+    let result =
+        crate::rt().block_on(async { object_store::ObjectStore::head(&store, &key).await });
     match result {
         Ok(_) => Ok(()),
         Err(object_store::Error::NotFound { .. }) => Ok(()), // bucket reachable, key absent

@@ -248,9 +248,8 @@ fn emit_pipeline_daemon() {
 
 /// `CARGO_ATHENA_DESCRIBE`: the binary reports a `ContainerRunMeta`
 /// for one `#[container]`, derived from the *same* `Template::build()`
-/// that `emit` uses — the zero-drift contract `cargo athena container
-/// emulate` consumes (image, params→env, the binary/host!/artifact
-/// ports, the scratch dir, the result path).
+/// that `emit` uses — the zero-drift contract `cargo athena describe`
+/// consumes.
 #[test]
 fn describe_fetch() {
     assert_golden(
