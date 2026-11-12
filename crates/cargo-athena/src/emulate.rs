@@ -741,9 +741,6 @@ pub(crate) fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
     let mut b = AmazonS3Builder::new()
         .with_bucket_name(&s3.bucket)
         .with_region(&s3.region)
-        // Path-style by default (object_store's default, what MinIO and
-        // most S3-compatible stores want); virtual-hosted when the repo
-        // config opts in via `[artifact_repository.s3] virtual_host`.
         .with_virtual_hosted_style_request(s3.virtual_host)
         .with_allow_http(s3.insecure);
     // AWS_ENDPOINT_URL_S3, else AWS_ENDPOINT_URL (SDK precedence), overrides
@@ -782,7 +779,6 @@ pub(crate) fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
             // object_store uses a custom endpoint verbatim in virtual-hosted mode.
             match bucket_host(&url, &s3.bucket).unwrap_or_else(|e| die(&e)) {
                 Some(vhost) => b = b.with_endpoint(vhost),
-                // An IP or `localhost` endpoint stays path-style.
                 None => {
                     b = b
                         .with_endpoint(url)
@@ -797,8 +793,7 @@ pub(crate) fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
         .unwrap_or_else(|e| die(&format!("S3 client for bucket {:?}: {e}", s3.bucket)))
 }
 
-/// `https://host/` -> `https://<bucket>.host`. `None` for an IP host or
-/// `localhost`.
+/// `https://host` -> `https://<bucket>.host`. `None` for an IP or `localhost`.
 fn bucket_host(url: &str, bucket: &str) -> Result<Option<String>, String> {
     let mut u = reqwest::Url::parse(url).map_err(|e| format!("S3 endpoint {url:?}: {e}"))?;
     if !u.has_host() {
@@ -806,14 +801,13 @@ fn bucket_host(url: &str, bucket: &str) -> Result<Option<String>, String> {
             "S3 endpoint {url:?} has no host (does it start with http:// or https://?)"
         ));
     }
-    // `<bucket>.localhost` does not resolve on every system.
+    // `<bucket>.localhost` does not resolve everywhere.
     let Some(domain) = u.domain().filter(|d| *d != "localhost") else {
         return Ok(None);
     };
     let host = format!("{bucket}.{domain}");
     u.set_host(Some(&host))
         .map_err(|e| format!("S3 endpoint host {host:?}: {e}"))?;
-    // object_store appends `/<key>`.
     Ok(Some(u.as_str().trim_end_matches('/').to_string()))
 }
 

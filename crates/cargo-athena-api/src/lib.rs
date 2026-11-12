@@ -433,8 +433,7 @@ argo! {
         pub key: String,
         pub access_key_secret: Option<SecretKeySelector>,
         pub secret_key_secret: Option<SecretKeySelector>,
-        /// Argo `addressingStyle` (Argo 4.1+): `""` (auto), `"path"`, or
-        /// `"virtual-hosted"`. Argo 4.0 CRDs reject the key.
+        /// `""` (auto), `"path"` or `"virtual-hosted"`. Argo 4.1+.
         pub addressing_style: String,
     }
 
