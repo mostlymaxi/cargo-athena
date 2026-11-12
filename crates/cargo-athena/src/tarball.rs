@@ -1,6 +1,6 @@
-//! Pure-Rust tar + gzip — the CLI packs and unpacks the per-binary
-//! tarball without shelling out to a host `tar` (no `tar` dependency
-//! for `cargo athena build`/`publish`/`emulate`).
+//! Pure-Rust tar + gzip — the CLI packs the per-binary tarball
+//! without shelling out to a host `tar` (no `tar` dependency for
+//! `cargo athena build`/`publish`).
 //!
 //! **Argo's `unpack` quirk (proven from Argo v4.0.5 source,
 //! `workflow/executor/executor.go:1177-1218`):** the executor extracts
@@ -23,10 +23,6 @@
 //! subdirectory. After Argo's unpack, the `bin/` subdir is renamed to
 //! `/athena/bin` (the artifact path), so `/athena/bin/app-<triple>`
 //! resolves correctly for *both* single- and multi-arch tarballs.
-//!
-//! The [`extract_argo_compat`] function mirrors Argo's exact unpack
-//! semantics on the host so `cargo athena emulate` stays
-//! zero-drift with the real in-pod path.
 
 use std::fs::File;
 use std::io;
@@ -63,44 +59,5 @@ pub fn create(out: &Path, entries: &[(&Path, &str)]) -> io::Result<()> {
         tar.append_path_with_name(src, &arch_name)?;
     }
     tar.into_inner()?.finish()?;
-    Ok(())
-}
-
-/// Extract a gzipped tarball into `dst`, matching Argo's
-/// `executor.unpack` semantics 1:1 (proven from source — see module
-/// doc). `dst` is created (or replaced) as either a file or a
-/// directory depending on the tarball's top-level layout, exactly as
-/// Argo's executor init container would do.
-///
-/// Used by `cargo athena emulate` to pre-stage `/athena/bin`
-/// on the host bind-mount — zero-drift with the in-pod path.
-pub fn extract_argo_compat(src: &Path, dst: &Path) -> io::Result<()> {
-    if let Some(parent) = dst.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let tmp = dst.with_extension("tmpdir");
-    let _ = std::fs::remove_dir_all(&tmp);
-    let _ = std::fs::remove_file(&tmp);
-    std::fs::create_dir_all(&tmp)?;
-
-    let f = File::open(src)?;
-    let gz = flate2::read::GzDecoder::new(f);
-    let mut tar = tar::Archive::new(gz);
-    tar.set_preserve_permissions(true);
-    tar.unpack(&tmp)?;
-
-    let mut top: Vec<std::path::PathBuf> = std::fs::read_dir(&tmp)?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .collect();
-    // Argo also clears `dst` before renaming; mirror that so a stale
-    // file/dir at `dst` doesn't cause `rename` to fail.
-    let _ = std::fs::remove_dir_all(dst);
-    let _ = std::fs::remove_file(dst);
-    if top.len() == 1 {
-        std::fs::rename(top.remove(0), dst)?;
-        let _ = std::fs::remove_dir(&tmp);
-    } else {
-        std::fs::rename(&tmp, dst)?;
-    }
     Ok(())
 }

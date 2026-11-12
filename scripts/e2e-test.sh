@@ -228,19 +228,6 @@ else
   echo "FAIL: pod_*_if_root: $ROOTED labeled, $ANN annotated, of $ALL pods"; exit 1
 fi
 
-say "CLI gate: emulate (docker)"
-# Run one #[container] under docker exactly as Argo would, from the
-# already-built tarball (no S3 needed). Proves the emulate runtime path.
-# Source/Cargo mode (no positional BINARY): --package/--bin select the
-# crate, -w names the template.
-EMU=$( cd "$ROOT" && cargo run -q -p cargo-athena --bin cargo-athena -- \
-  athena emulate -w cargo-athena-example-e2e-transform \
-  --package "$PKG" --bin "$BIN" --tarball "$TARBALL" \
-  -a input=ci --skip-artifacts 2>/dev/null | tail -1 )
-echo "emulate returned: $EMU"
-[ "$EMU" = 'return: "ci-transformed"' ] || {
-  echo "FAIL: emulate - expected 'return: \"ci-transformed\"'"; exit 1; }
-
 say "CLI gate: submit (kube path)"
 # `cargo athena submit` against the kube API (kubeconfig current-context
 # = this kind cluster). Templates already applied above. Its binary

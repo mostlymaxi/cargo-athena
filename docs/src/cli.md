@@ -1,8 +1,8 @@
 # The `cargo athena` CLI
 
 After `cargo install cargo-athena` you have the `cargo athena`
-subcommand. The consumer commands (`emit`, `ls`, `describe`, `emulate`,
-`submit`) act on a **workflow binary**: pass one as `[BINARY]` (a path,
+subcommand. The consumer commands (`emit`, `ls`, `describe`, `submit`)
+act on a **workflow binary**: pass one as `[BINARY]` (a path,
 or a name on `$PATH` from `cargo install`) and they need no source.
 Omit it to build from the current crate instead (the developer loop), or
 point at another crate with `--manifest-path`. `build` and `publish`
@@ -14,8 +14,6 @@ cargo athena [-c F] doctor [--check-s3]
 cargo athena [-c F] emit     [BINARY] [--out F] [--with-workflow]
 cargo athena [-c F] ls       [BINARY] [--kind container|workflow] [--include-synthetic]
 cargo athena [-c F] describe [BINARY] [-w TEMPLATE] [--json]
-cargo athena [-c F] emulate  [BINARY] [-w TEMPLATE] [-a k=v].. [--input-file F]
-                             [--build|--tarball F] [--runtime R] [--skip-artifacts]
 cargo athena [-c F] submit   [BINARY] [-w TEMPLATE] [-a k=v].. [-n NS] [--service-account SA]
                              [--node-selector k=v].. [--priority N] [--argo-server URL] [-y] [--update]
 cargo athena [-c F] build   [-p PKG] [--bin B] [--target T].. [--allow-dirty] [--dev-tag T] [-y] [--print]
@@ -40,7 +38,7 @@ full precedence order.
 
 ## S3 credentials
 
-`publish`, `submit`, `emulate`, `prune`, and `doctor` use the bucket in
+`publish`, `submit`, `prune`, and `doctor` use the bucket in
 `athena.toml`. They look for credentials in these places, in this
 order:
 
@@ -300,35 +298,6 @@ fan out into a broad delete. Prints what it will remove and asks for
 confirmation (`-y` to skip). Talks to the same transport as `submit`
 (`--argo-server` / `$ARGO_SERVER`, else the kube API).
 
-## `emulate`
-
-Runs one `#[container]` locally under docker or podman. `-w` picks the
-container (default: the binary's root template).
-
-```sh
-cargo athena emulate ./my-workflow -w transform -a data=hello -a factor=4
-cargo athena emulate ./my-workflow -w fetch --input-file args.json
-cargo athena emulate --build -w fetch        # build from source for the run
-```
-
-The metadata comes from the `[BINARY]` you name; the run payload is the
-deployed tarball pulled from S3 by default, so you smoke-test what's
-actually live. Arguments are type-checked against the real function
-signature; missing or wrong-type values fail fast.
-
-**Not emulated:** anything Kubernetes-specific. `docker run` has no
-ServiceAccount, no RBAC, no `nodeSelector`. For those, use `submit`
-on a real cluster.
-
-Flags:
-- `-w TEMPLATE` / `--workflow` - the container to emulate (default: root).
-- `-a name=value` (repeatable) / `--input-file F` - function arguments.
-- `--build` - build a fresh local host-arch musl binary for the run
-  instead of pulling the deployed tarball (source-only; omit `[BINARY]`).
-- `--tarball F` - use `F` verbatim.
-- `--runtime docker|podman` - autodetect by default (prefer docker).
-- `--skip-artifacts` - bypass S3 `load`/`save_artifact!` sync.
-
 ## `describe`
 
 Shows what one template expects: its signature, image, mounts, and a
@@ -354,8 +323,8 @@ cargo athena ls ./my-workflow --include-synthetic   # + if/else internals
 
 ## Selecting the binary
 
-The consumer commands (`emit`, `ls`, `describe`, `emulate`, `submit`)
-resolve their program in this order:
+The consumer commands (`emit`, `ls`, `describe`, `submit`) resolve
+their program in this order:
 
 1. the `[BINARY]` positional - a path, or a bare name on `$PATH` (e.g.
    one installed with `cargo install`). No source needed.

@@ -39,8 +39,7 @@ cargo install cargo-athena                     # the `cargo athena` CLI
 
 This facade is the only crate you depend on: it re-exports the runtime
 and proc macros behind one `::cargo_athena` path. The `cargo athena`
-subcommands are `emit` / `publish` / `submit` / `emulate` / `ls` /
-`describe`.
+subcommands are `emit` / `publish` / `submit` / `ls` / `describe`.
 
 - **Feature reference:** the full `#[workflow]` and `#[container]`
   documentation is on [docs.rs](https://docs.rs/cargo-athena) (on the

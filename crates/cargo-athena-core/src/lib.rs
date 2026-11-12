@@ -413,7 +413,7 @@ pub trait Template {
     /// Declared input parameter names, in order.
     const INPUTS: &'static [&'static str];
     /// Stringified Rust types of [`Self::INPUTS`], same order — for
-    /// `emulate`'s pre-launch arg checking and the `ls`
+    /// `submit`'s pre-launch arg checking and the `ls`
     /// listings. Emitted by `#[container]` and `#[workflow]`; defaulted
     /// empty for synthetic/hand impls.
     const INPUT_TYPES: &'static [&'static str] = &[];
@@ -903,8 +903,8 @@ pub fn is_container_run() -> bool {
 }
 
 /// Resolved S3 coordinates for one artifact (creds are supplied
-/// locally, e.g. via AWS env vars - `cargo athena emulate` uses
-/// `object_store`; the in-cluster path uses the k8s Secret refs).
+/// locally, e.g. via AWS env vars - the CLI uses `object_store`;
+/// the in-cluster path uses the k8s Secret refs).
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct S3Ref {
     pub endpoint: String,
@@ -951,8 +951,7 @@ pub struct ParamRef {
 /// *same* `Template::build()` `emit` uses (so it never drifts), but
 /// expressed in the runner's vocabulary instead of Argo's. Emitted as
 /// JSON by the binary when `CARGO_ATHENA_DESCRIBE=<name>` is set;
-/// consumed by `cargo athena emulate` to realize the spec under
-/// docker/podman locally, and by `cargo athena describe`.
+/// consumed by `cargo athena describe`.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct ContainerRunMeta {
     /// Argo template name (`<crate>-<fn>`).
@@ -969,12 +968,11 @@ pub struct ContainerRunMeta {
     pub synthetic: bool,
     /// Resolved container image.
     pub image: String,
-    /// The injected bootstrap command + args, verbatim — run as-is so
-    /// the local execution path is byte-identical to the pod's.
+    /// The injected bootstrap command + args, verbatim.
     pub command: Vec<String>,
     pub args: Vec<String>,
     /// Mount path of the pod-scoped scratch dir (the `emptyDir`, e.g.
-    /// `/athena`); bind a host temp dir here to read `result_path` back.
+    /// `/athena`).
     pub work_dir: String,
     /// Input parameters and the env var each is delivered through.
     pub params: Vec<ParamRef>,
@@ -984,10 +982,10 @@ pub struct ContainerRunMeta {
     pub input_artifacts: Vec<ArtifactRef>,
     /// `save_artifact!` output ports.
     pub output_artifacts: Vec<ArtifactRef>,
-    /// `host!` paths (mounted at the same path in-pod; bind 1:1 locally).
+    /// `host!` paths.
     pub host_paths: Vec<String>,
     /// File the body writes its serialized return to
-    /// (`outputs.parameters.return`); read it back from the bind mount.
+    /// (`outputs.parameters.return`).
     pub result_path: Option<String>,
 }
 
@@ -1901,7 +1899,7 @@ pub struct Collector {
     /// that WT's `spec.parallelism`.
     parallelism_if_root: HashMap<String, i64>,
     /// `<argo name> -> stringified input types` (parallel to the
-    /// template's INPUTS), for `emulate` arg type-checking.
+    /// template's INPUTS), for `submit` arg type-checking.
     types: HashMap<String, &'static [&'static str]>,
     /// Argo names of athena-synthesized templates (`Template::SYNTHETIC`)
     /// so `ls` can hide them by default.
@@ -2615,11 +2613,8 @@ pub fn entrypoint_impl<E: Template>(
         return;
     }
 
-    // `cargo athena emulate/describe` sets this to fetch ONE
-    // template's metadata as JSON (it then realizes that exact spec
-    // locally via docker/podman). Reusing `Template::build` here is what
-    // makes the local run identical to Argo by construction — same
-    // image, bootstrap, env, volumes, and artifacts as `emit`.
+    // `cargo athena describe` sets this to fetch ONE template's
+    // metadata as JSON, from the same `Template::build` as `emit`.
     if let Ok(name) = std::env::var("CARGO_ATHENA_DESCRIBE") {
         let ctx = BuildCtx::collect(krate, version, bin, version_tag, commit, dirty);
         // The default emitted name is `<crate>-<fn>`; the CLI already

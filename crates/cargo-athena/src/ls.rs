@@ -1,7 +1,6 @@
 //! `cargo athena ls` - list the templates a workflow binary exposes.
-//! Sibling to `emulate` (runs one container locally) and `describe`
-//! (one template's metadata); runs the binary in `CARGO_ATHENA_LIST`
-//! mode and renders a small table.
+//! Sibling to `describe` (one template's metadata); runs the binary in
+//! `CARGO_ATHENA_LIST` mode and renders a small table.
 //!
 //! Lists every reachable template - `#[container]`s and `#[workflow]`s -
 //! by default. `--kind container|workflow` narrows it. Synthetic
