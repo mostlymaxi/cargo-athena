@@ -126,7 +126,7 @@ mod tests {
         });
         let mut creds = S3Credentials::new("");
         creds.state.get_mut().chain = Some(SharedCredentialsProvider::new(chain));
-        let [first, ..] = crate::emulate::rt().block_on(async {
+        let [first, ..] = crate::rt().block_on(async {
             [
                 creds.resolve().await,
                 creds.resolve().await,

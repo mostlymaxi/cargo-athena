@@ -1,5 +1,5 @@
 //! Binary-first program selection for the consumer commands (`emit`,
-//! `ls`, `describe`, `emulate`, `submit`). The subject is a *binary*: a
+//! `ls`, `describe`, `submit`). The subject is a *binary*: a
 //! prebuilt cargo-athena executable (a path, or a name on `$PATH` from
 //! `cargo install`), so these commands need no source checkout. Passing
 //! no binary falls back to building from the current crate (or
@@ -137,16 +137,6 @@ impl BinarySource {
         match self {
             BinarySource::Exe(p) => p.clone(),
             BinarySource::Cargo { .. } => "the workflow crate".to_string(),
-        }
-    }
-
-    /// The cargo `(package, bin)` selectors, or `None` for a prebuilt
-    /// binary. Used by the few source-only sub-operations (e.g. emulate's
-    /// `--build`) that can't run against a prebuilt binary.
-    pub(crate) fn cargo_pkg_bin(&self) -> Option<(Option<String>, Option<String>)> {
-        match self {
-            BinarySource::Exe(_) => None,
-            BinarySource::Cargo { package, bin, .. } => Some((package.clone(), bin.clone())),
         }
     }
 

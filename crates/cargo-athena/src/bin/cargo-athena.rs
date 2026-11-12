@@ -14,12 +14,14 @@ use std::process::{Command, Stdio, exit};
 // Lives in `src/` (not `src/bin/`, which would make it a second
 // binary); a `#[path]` module so it stays bin-private and can use the
 // helpers below (`tool_ok`, `package_meta`, …).
+#[path = "../args.rs"]
+mod args;
 #[path = "../binsrc.rs"]
 mod binsrc;
+#[path = "../describe.rs"]
+mod describe;
 #[path = "../doctor.rs"]
 mod doctor;
-#[path = "../emulate.rs"]
-mod emulate;
 #[path = "../feedback.rs"]
 mod feedback;
 #[path = "../gitinfo.rs"]
@@ -30,6 +32,8 @@ mod init;
 mod ls;
 #[path = "../pkg.rs"]
 mod pkg;
+#[path = "../s3.rs"]
+mod s3;
 #[path = "../s3creds.rs"]
 mod s3creds;
 #[path = "../style.rs"]
@@ -67,7 +71,7 @@ struct Athena {
 }
 
 // Variant order is the rendered help order (clap lists subcommands as
-// declared): a lifecycle arc, author -> inspect -> run -> ship -> deploy
+// declared): a lifecycle arc, author -> inspect -> ship -> deploy
 // -> diagnose. Each doc is a punchy first line (the one-liner shown in
 // the command list) + a blank line + detail (shown under `<cmd> --help`).
 #[derive(Subcommand)]
@@ -88,7 +92,7 @@ enum Cmd {
     /// Prints one template's metadata: signature, image, mounts, and a
     /// copy-pasteable submit line. Defaults to the binary's root template;
     /// pick another with `-w/--workflow`.
-    Describe(emulate::DescribeArgs),
+    Describe(describe::DescribeArgs),
     /// Print a binary's WorkflowTemplate YAML
     ///
     /// Runs a workflow binary in emit-mode and relays the WorkflowTemplate
@@ -113,13 +117,6 @@ enum Cmd {
         #[arg(long)]
         with_workflow: bool,
     },
-    /// Run one container locally under Docker/Podman
-    ///
-    /// Emulates one `#[container]` exactly as Argo would (same image, the
-    /// injected bootstrap, positional argv, the `/athena` scratch dir,
-    /// `host!` binds, S3 artifact ports). The run payload is the deployed
-    /// S3 tarball by default (`--build` / `--tarball` to override).
-    Emulate(emulate::EmulateArgs),
     /// Cross-compile and package the binary (no upload)
     ///
     /// Packages the tarball locally and prints the upload key. Use
@@ -265,8 +262,7 @@ fn main() {
             emit(&bin.resolve(), out.as_deref(), with_workflow);
         }
         Cmd::Ls(args) => ls::ls(args),
-        Cmd::Describe(args) => emulate::describe(args),
-        Cmd::Emulate(args) => emulate::emulate(args),
+        Cmd::Describe(args) => describe::describe(args),
         Cmd::Submit(args) => submit::submit(args),
         Cmd::Prune(args) => submit::prune(args),
         Cmd::Build {
@@ -362,6 +358,13 @@ fn die(m: &str) -> ! {
     exit(2);
 }
 
+fn rt() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap_or_else(|e| die(&format!("async runtime: {e}")))
+}
+
 /// `cmd args…` exits 0 (tool is present + runnable).
 fn tool_ok(cmd: &str, args: &[&str]) -> bool {
     Command::new(cmd)
@@ -437,7 +440,7 @@ fn artifact_s3(cfg: &AthenaConfig, krate: &str, tag: &str, bin: &str) -> (S3Ref,
 
 fn do_upload(s3: &S3Ref, path: &std::path::Path, dest: &str) {
     let st = feedback::step(format!("Uploading {} -> {dest}", path.display()));
-    emulate::s3_put(s3, path);
+    crate::s3::put(s3, path);
     st.finish();
     // Scriptable: the destination on stdout (all else on stderr).
     println!("s3://{}/{}", s3.bucket, s3.key);
@@ -558,9 +561,8 @@ fn build_tarball(
 /// Default: `build_tarball` (cross-compile + package) then upload.
 /// `--tarball F`: skip the build and upload `F` verbatim (build-once /
 /// upload-many — a CI artifact, or the kind e2e dogfood). Upload goes
-/// through the shared `emulate::s3_put` (`object_store` + the S3 credential
-/// chain; `AWS_ENDPOINT_URL_S3` overrides the endpoint), the same path as
-/// `submit`/`emulate`.
+/// through `s3::put` (`object_store` + the S3 credential chain;
+/// `AWS_ENDPOINT_URL_S3` overrides the endpoint).
 fn publish(
     package: Option<&str>,
     bin: Option<&str>,

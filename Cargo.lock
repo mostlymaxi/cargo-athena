@@ -589,7 +589,6 @@ dependencies = [
  "console",
  "etcetera",
  "flate2",
- "futures",
  "indicatif",
  "k8s-openapi",
  "kube",

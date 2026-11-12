@@ -156,7 +156,7 @@ struct KubeApi {
 
 impl KubeApi {
     fn new() -> Self {
-        let rt = crate::emulate::rt();
+        let rt = crate::rt();
         let client = rt
             .block_on(async {
                 let mut cfg = kube::Config::infer().await.map_err(|e| e.to_string())?;
@@ -275,7 +275,7 @@ impl ArgoServer {
             base,
             token: std::env::var("ARGO_TOKEN").ok().filter(|t| !t.is_empty()),
             http,
-            rt: crate::emulate::rt(),
+            rt: crate::rt(),
         }
     }
 
@@ -436,10 +436,11 @@ pub fn submit(a: SubmitArgs) {
             ))
         });
 
-    // 2. Type-check args against the root's real signature (shared with
-    //    `emulate` — missing/unknown/wrong-kind, one CLI-style report).
-    let vals = crate::emulate::parse_args(a.input_file.as_deref(), &a.args);
-    if let Err(report) = crate::emulate::validate_args(root, &vals) {
+    // 2. Type-check args against the root's real signature
+    //    (missing/unknown/wrong-kind, one CLI-style report).
+    let vals =
+        crate::args::parse_args(a.input_file.as_deref(), &a.args).unwrap_or_else(|e| die(&e));
+    if let Err(report) = crate::args::validate_args(root, &vals) {
         die(&report);
     }
 
@@ -448,7 +449,7 @@ pub fn submit(a: SubmitArgs) {
     //    binary, so one check suffices.
     if !a.skip_binary_check
         && let Some(ba) = metas.iter().find_map(|m| m.binary_artifact.as_ref())
-        && !crate::emulate::s3_exists(&ba.s3)
+        && !crate::s3::exists(&ba.s3)
     {
         die(&format!(
             "binary tarball not found at s3://{}/{} — run `cargo athena build` \
@@ -749,7 +750,7 @@ pub fn prune(a: PruneArgs) {
     }
     if !a.keep_binary {
         let st = crate::feedback::step(format!("Deleting s3://{}/{}", s3.bucket, s3.key));
-        crate::emulate::s3_delete(&s3);
+        crate::s3::delete(&s3);
         st.finish();
     }
     eprintln!(
