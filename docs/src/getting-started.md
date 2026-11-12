@@ -138,9 +138,6 @@ and [the CLI page](cli.md#submit) for the steps in full and the `-y`,
 > registers the templates; `argo submit --from workflowtemplate/<root>`
 > runs them. Names are stable and deterministic.
 
-Want to try one step locally before deploying?
-[`cargo athena emulate`](cli.md#emulate) runs a single `#[container]`
-under docker / podman exactly as Argo would; see [Testing](testing.md)
-for the full inner-loop options.
+To test a step before you deploy, see [Testing](testing.md).
 
 Next: [Core Concepts](concepts.md).
