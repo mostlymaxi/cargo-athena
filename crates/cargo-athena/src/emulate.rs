@@ -782,7 +782,7 @@ pub(crate) fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
             // object_store uses a custom endpoint verbatim in virtual-hosted mode.
             match bucket_host(&url, &s3.bucket).unwrap_or_else(|e| die(&e)) {
                 Some(vhost) => b = b.with_endpoint(vhost),
-                // An IP host cannot take a bucket label.
+                // An IP or `localhost` endpoint stays path-style.
                 None => {
                     b = b
                         .with_endpoint(url)
@@ -797,7 +797,8 @@ pub(crate) fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
         .unwrap_or_else(|e| die(&format!("S3 client for bucket {:?}: {e}", s3.bucket)))
 }
 
-/// `https://host/` -> `https://<bucket>.host`. `None` for an IP host.
+/// `https://host/` -> `https://<bucket>.host`. `None` for an IP host or
+/// `localhost`.
 fn bucket_host(url: &str, bucket: &str) -> Result<Option<String>, String> {
     let mut u = reqwest::Url::parse(url).map_err(|e| format!("S3 endpoint {url:?}: {e}"))?;
     if !u.has_host() {
@@ -805,7 +806,8 @@ fn bucket_host(url: &str, bucket: &str) -> Result<Option<String>, String> {
             "S3 endpoint {url:?} has no host (does it start with http:// or https://?)"
         ));
     }
-    let Some(domain) = u.domain() else {
+    // `<bucket>.localhost` does not resolve on every system.
+    let Some(domain) = u.domain().filter(|d| *d != "localhost") else {
         return Ok(None);
     };
     let host = format!("{bucket}.{domain}");
@@ -1007,8 +1009,8 @@ mod tests {
             "https://b.s3.example.com"
         );
         assert_eq!(
-            vhost("http://localhost:9000").unwrap(),
-            "http://b.localhost:9000"
+            vhost("http://minio.local:9000").unwrap(),
+            "http://b.minio.local:9000"
         );
     }
 
@@ -1033,9 +1035,11 @@ mod tests {
     }
 
     #[test]
-    fn bucket_host_is_none_for_an_ip() {
+    fn bucket_host_is_none_for_an_ip_or_localhost() {
         assert_eq!(vhost("http://127.0.0.1:9000"), None);
         assert_eq!(vhost("http://[::1]:9000"), None);
+        assert_eq!(vhost("http://localhost:9000"), None);
+        assert_eq!(vhost("http://LOCALHOST:9000/"), None);
     }
 
     #[test]

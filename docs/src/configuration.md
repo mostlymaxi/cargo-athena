@@ -65,8 +65,8 @@ The `cargo athena` CLI does not use `access_key_secret` /
 > style: virtual-hosted for AWS, Google Cloud Storage, and Alibaba Cloud
 > OSS endpoints, and path-style for all other endpoints.
 >
-> When the endpoint host is an IP address (for example a port-forward to
-> `127.0.0.1`), the CLI always uses path-style.
+> When the endpoint host is an IP address or `localhost` (for example a
+> port-forward), the CLI always uses path-style.
 >
 > Do not set `virtual_host` on Argo v4.0, because v4.0 does not have the
 > `addressingStyle` field. With the default Argo v4.0 install,
