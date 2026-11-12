@@ -741,6 +741,7 @@ pub(crate) fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
     let mut b = AmazonS3Builder::new()
         .with_bucket_name(&s3.bucket)
         .with_region(&s3.region)
+        .with_virtual_hosted_style_request(s3.virtual_host)
         .with_allow_http(s3.insecure);
     // AWS_ENDPOINT_URL_S3, else AWS_ENDPOINT_URL (SDK precedence), overrides
     // the config endpoint (e.g. a port-forward for publish).
@@ -752,30 +753,62 @@ pub(crate) fn s3_store(s3: &S3Ref) -> object_store::aws::AmazonS3 {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
         });
-    if let Some(url) = ep_env {
+    let endpoint = if let Some(url) = ep_env {
         if url.starts_with("http://") {
             b = b.with_allow_http(true);
         }
-        b = b.with_endpoint(url);
+        Some(url)
     } else {
         // AWS proper: let region drive the URL. Custom (MinIO/etc.): use
         // the endpoint, adding a scheme if the config gave a bare host.
         let ep = s3.endpoint.trim();
-        if !ep.is_empty() && !ep.ends_with("amazonaws.com") {
-            let url = if ep.contains("://") {
+        (!ep.is_empty() && !ep.ends_with("amazonaws.com")).then(|| {
+            if ep.contains("://") {
                 ep.to_string()
             } else if s3.insecure {
                 format!("http://{ep}")
             } else {
                 format!("https://{ep}")
-            };
+            }
+        })
+    };
+    if let Some(url) = endpoint {
+        if !s3.virtual_host {
             b = b.with_endpoint(url);
+        } else {
+            // object_store uses a custom endpoint verbatim in virtual-hosted mode.
+            match bucket_host(&url, &s3.bucket).unwrap_or_else(|e| die(&e)) {
+                Some(vhost) => b = b.with_endpoint(vhost),
+                None => {
+                    b = b
+                        .with_endpoint(url)
+                        .with_virtual_hosted_style_request(false)
+                }
+            }
         }
     }
     let creds = crate::s3creds::S3Credentials::new(&s3.region);
     b.with_credentials(std::sync::Arc::new(creds))
         .build()
         .unwrap_or_else(|e| die(&format!("S3 client for bucket {:?}: {e}", s3.bucket)))
+}
+
+/// `https://host` -> `https://<bucket>.host`. `None` for an IP or `localhost`.
+fn bucket_host(url: &str, bucket: &str) -> Result<Option<String>, String> {
+    let mut u = reqwest::Url::parse(url).map_err(|e| format!("S3 endpoint {url:?}: {e}"))?;
+    if !u.has_host() {
+        return Err(format!(
+            "S3 endpoint {url:?} has no host (does it start with http:// or https://?)"
+        ));
+    }
+    // `<bucket>.localhost` does not resolve everywhere.
+    let Some(domain) = u.domain().filter(|d| *d != "localhost") else {
+        return Ok(None);
+    };
+    let host = format!("{bucket}.{domain}");
+    u.set_host(Some(&host))
+        .map_err(|e| format!("S3 endpoint host {host:?}: {e}"))?;
+    Ok(Some(u.as_str().trim_end_matches('/').to_string()))
 }
 
 pub(crate) fn rt() -> tokio::runtime::Runtime {
@@ -955,4 +988,57 @@ fn build_local(package: Option<&str>, bin: Option<&str>) -> PathBuf {
     crate::tarball::create(&tb, &[(staged_bin.as_path(), name.as_str())])
         .unwrap_or_else(|e| die(&format!("create tarball: {e}")));
     tb
+}
+
+#[cfg(test)]
+mod tests {
+    fn vhost(url: &str) -> Option<String> {
+        super::bucket_host(url, "b").unwrap()
+    }
+
+    #[test]
+    fn bucket_host_prefixes_the_bucket() {
+        assert_eq!(
+            vhost("https://s3.example.com").unwrap(),
+            "https://b.s3.example.com"
+        );
+        assert_eq!(
+            vhost("http://minio.local:9000").unwrap(),
+            "http://b.minio.local:9000"
+        );
+    }
+
+    #[test]
+    fn bucket_host_drops_the_trailing_slash() {
+        assert_eq!(
+            vhost("https://s3.example.com/").unwrap(),
+            "https://b.s3.example.com"
+        );
+        assert_eq!(
+            vhost("https://s3.example.com/prefix/").unwrap(),
+            "https://b.s3.example.com/prefix"
+        );
+    }
+
+    #[test]
+    fn bucket_host_keeps_userinfo_out_of_the_host() {
+        assert_eq!(
+            vhost("https://user:pw@s3.example.com").unwrap(),
+            "https://user:pw@b.s3.example.com"
+        );
+    }
+
+    #[test]
+    fn bucket_host_is_none_for_an_ip_or_localhost() {
+        assert_eq!(vhost("http://127.0.0.1:9000"), None);
+        assert_eq!(vhost("http://[::1]:9000"), None);
+        assert_eq!(vhost("http://localhost:9000"), None);
+        assert_eq!(vhost("http://LOCALHOST:9000/"), None);
+    }
+
+    #[test]
+    fn bucket_host_rejects_an_endpoint_with_no_host() {
+        assert!(super::bucket_host("localhost:9000", "b").is_err());
+        assert!(super::bucket_host("not a url", "b").is_err());
+    }
 }

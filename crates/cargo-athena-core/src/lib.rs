@@ -698,6 +698,9 @@ pub struct S3Repo {
     pub region: String,
     #[serde(default)]
     pub insecure: bool,
+    /// False: path-style in the CLI, auto in Argo.
+    #[serde(default)]
+    pub virtual_host: bool,
     pub access_key_secret: SecretRef,
     pub secret_key_secret: SecretRef,
 }
@@ -912,6 +915,8 @@ pub struct S3Ref {
     pub region: String,
     pub insecure: bool,
     pub key: String,
+    #[serde(default)]
+    pub virtual_host: bool,
 }
 
 impl S3Ref {
@@ -927,6 +932,7 @@ impl S3Ref {
             region: repo.region.clone(),
             insecure: repo.insecure,
             key,
+            virtual_host: repo.virtual_host,
         }
     }
 }
@@ -1110,6 +1116,7 @@ impl ContainerRunMeta {
                     region: s.region.clone(),
                     insecure: s.insecure,
                     key: s.key.clone(),
+                    virtual_host: s.addressing_style == "virtual-hosted",
                 },
                 path: a.path.clone(),
             })
@@ -1749,6 +1756,12 @@ pub fn s3_loc(s3: &S3Repo, key: &str) -> api::S3Artifact {
             key: s3.secret_key_secret.key.clone(),
             ..Default::default()
         }),
+        // Empty is Argo auto-detect and is not serialized.
+        addressing_style: if s3.virtual_host {
+            "virtual-hosted".to_string()
+        } else {
+            String::new()
+        },
     }
 }
 
@@ -2851,5 +2864,42 @@ mod tests {
         assert!(c.enter::<A>());
         assert!(!c.enter::<A>()); // same type re-visit: fine, deduped
         c.enter::<B>(); // different type, same name: panics
+    }
+
+    fn repo(virtual_host: bool) -> super::S3Repo {
+        super::S3Repo {
+            endpoint: "s3.example.com".into(),
+            bucket: "b".into(),
+            region: "us-east-1".into(),
+            insecure: false,
+            virtual_host,
+            access_key_secret: super::SecretRef {
+                name: "cred".into(),
+                key: "accessKey".into(),
+            },
+            secret_key_secret: super::SecretRef {
+                name: "cred".into(),
+                key: "secretKey".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn s3_loc_maps_virtual_host_to_addressing_style() {
+        let on = super::s3_loc(&repo(true), "k");
+        assert_eq!(on.addressing_style, "virtual-hosted");
+        let yaml = serde_norway::to_string(&on).unwrap();
+        assert!(
+            yaml.contains("addressingStyle: virtual-hosted"),
+            "expected addressingStyle in emitted YAML:\n{yaml}"
+        );
+
+        let off = super::s3_loc(&repo(false), "k");
+        assert_eq!(off.addressing_style, "");
+        let yaml = serde_norway::to_string(&off).unwrap();
+        assert!(
+            !yaml.contains("addressingStyle"),
+            "path-style repo must omit addressingStyle entirely:\n{yaml}"
+        );
     }
 }

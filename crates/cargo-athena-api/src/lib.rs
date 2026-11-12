@@ -433,6 +433,8 @@ argo! {
         pub key: String,
         pub access_key_secret: Option<SecretKeySelector>,
         pub secret_key_secret: Option<SecretKeySelector>,
+        /// `""` (auto), `"path"` or `"virtual-hosted"`. Argo 4.1+.
+        pub addressing_style: String,
     }
 
     pub struct ArchiveStrategy {

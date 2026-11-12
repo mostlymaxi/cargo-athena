@@ -7,3 +7,6 @@
 
 Argo 3.7 and 3.6 probably still work, but they are no longer tested or
 supported. Argo 3.5 and older do not work.
+
+The S3 option [`virtual_host`](configuration.md#artifact_repositorys3)
+needs Argo v4.1 or later.
